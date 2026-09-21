@@ -414,3 +414,64 @@ h1,h2,h3{font-family:'Iansui','Microsoft JhengHei','Noto Sans TC',sans-serif}
 .workspace-placeholder{max-width:900px}.workspace-placeholder h1{margin-bottom:8px}.workspace-placeholder p{color:var(--ink-soft)}.placeholder-note{margin-top:18px;padding:14px 16px;border-radius:10px;background:var(--accent-soft);color:var(--accent-dark)}
 @media(max-width:900px){.app-sidebar .menu-pin-btn{display:inline-flex}.pinned-work-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.pinned-work-list{grid-template-columns:1fr}.pinned-work-card{min-height:72px}}
+
+/* V4.6.1 Mobile UI Optimization */
+@media (max-width: 900px){
+  html,body{width:100%;max-width:100%;overflow-x:hidden}
+  body{font-size:16px;-webkit-tap-highlight-color:transparent}
+  .topbar{height:64px;min-height:64px;padding:10px 14px 10px 62px;box-sizing:border-box;position:sticky;top:0;z-index:1200}
+  .topbar .brand{font-size:1rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:58vw}
+  .topbar .sub{font-size:.7rem;line-height:1.2}
+  .staff-top{gap:6px;font-size:.85rem}
+  .staff-top #staffName{max-width:28vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .top-link{min-height:40px;padding:8px 10px}
+  .sidebar-toggle{top:11px;left:12px;width:42px;height:42px;border-radius:11px;background:var(--accent-dark);color:#fff;border:0;font-size:1.2rem;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+  .app-sidebar{position:fixed!important;top:0!important;bottom:0!important;height:100dvh!important;width:min(86vw,320px)!important;min-width:0!important;transform:translate3d(-105%,0,0);transition:transform .22s ease;z-index:1400!important;overflow:hidden!important;box-sizing:border-box}
+  body.sidebar-open .app-sidebar{transform:translate3d(0,0,0)}
+  .sidebar-head{height:76px!important;min-height:76px;padding:0 18px!important;box-sizing:border-box}
+  .sidebar-title{font-size:1.02rem!important}
+  .sidebar-caption{font-size:.72rem!important}
+  .app-sidebar .nav-tabs{height:calc(100dvh - 76px);max-height:none;overflow-y:auto;overflow-x:hidden;padding:10px 8px 28px!important;box-sizing:border-box;-webkit-overflow-scrolling:touch}
+  .app-sidebar .nav-tabs button{width:100%!important;min-width:0!important;min-height:48px!important;height:auto!important;margin:2px 0!important;padding:11px 12px!important;border-radius:10px!important;border-left:3px solid transparent!important;box-sizing:border-box;touch-action:manipulation;cursor:pointer}
+  .app-sidebar .nav-tabs button:active{transform:scale(.99)}
+  .app-sidebar .nav-icon{flex:0 0 26px!important;width:26px!important;font-size:1.08rem!important}
+  .app-sidebar .nav-label{display:inline-block!important;min-width:0;flex:1;text-align:left;white-space:normal;line-height:1.35}
+  .app-sidebar .menu-parent{font-weight:700}
+  .app-sidebar .menu-parent[aria-expanded="false"] .nav-label::after{content:'  ▸';opacity:.6}
+  .app-sidebar .menu-parent[aria-expanded="true"] .nav-label::after{content:'  ▾';opacity:.6}
+  .app-sidebar .menu-children{display:block;padding:2px 0 5px 13px!important}
+  .app-sidebar .menu-children.is-collapsed{display:none!important}
+  .app-sidebar .menu-child{font-size:.94rem!important;min-height:46px!important;padding-left:12px!important;background:#fafcfb}
+  .app-sidebar .menu-pin-btn{flex:0 0 38px!important;width:38px!important;min-width:38px!important;height:38px!important;min-height:38px!important;margin-left:auto!important;font-size:1.12rem!important;touch-action:manipulation}
+  .sidebar-backdrop{z-index:1350!important;touch-action:none}
+  .shell{width:100%;max-width:100%;box-sizing:border-box;padding:20px 12px 72px!important;margin:0!important}
+  .panel{width:100%;box-sizing:border-box;padding:18px 14px!important;border-radius:14px}
+  .page-header{gap:8px}
+  .page-header h1{font-size:1.45rem;line-height:1.3}
+  .home-head{gap:14px}
+  .dashboard-grid{grid-template-columns:1fr!important;gap:12px}
+  .dashboard-card,.module-card{min-width:0;box-sizing:border-box}
+  .dashboard-time{font-size:1.9rem!important;letter-spacing:.02em}
+  .pinned-work-list{grid-template-columns:1fr!important;gap:10px}
+  .pinned-work-card{min-height:70px!important;padding:14px!important}
+  button,input,select,textarea{font-size:16px}
+  input,select,textarea{max-width:100%;box-sizing:border-box}
+  button{min-height:44px;touch-action:manipulation}
+  .modal-backdrop{padding:8px!important}
+  .modal,.modal.modal-wide{width:calc(100vw - 16px)!important;max-width:none!important;max-height:92dvh!important;overflow-y:auto!important;padding:18px 14px!important;border-radius:14px!important}
+  .modal-actions{position:sticky;bottom:-18px;background:inherit;padding-top:10px}
+  .question-card,.page-card,.draft-card,.draft-bar{min-width:0}
+  table{min-width:620px}
+  .table-wrap,.table-responsive{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+@media (max-width:600px){
+  .topbar{padding-left:60px;padding-right:10px}
+  .topbar .brand{max-width:48vw}
+  .staff-top #staffName{display:none}
+  .shell{padding-left:10px!important;padding-right:10px!important}
+  .panel{padding:16px 12px!important}
+  .page-header h1{font-size:1.32rem}
+  .dashboard-time{font-size:1.65rem!important}
+  .field{margin-bottom:13px}
+  .modal-actions button{flex:1 1 45%;min-width:120px}
+}
