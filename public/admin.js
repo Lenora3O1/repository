@@ -154,13 +154,13 @@ function renderFormDesigner(){
       <p class="hint">以下就是目前已經確認 OK 的交接清冊設定。這裡的修改只會作用於交接清冊；工作日誌使用另一套獨立設定。</p>
     </div>
     <div class="panel">
-      <div class="section-title">① 網站基本名稱</div>
-      <div class="field"><label>網站標題</label><input id="siteTitle" value="${escapeAttr(c.title||'社區交接清冊')}"></div>
+      <div class="section-title">① 平台基本識別</div>
+      <div class="field"><label>平台名稱</label><input id="siteTitle" value="${escapeAttr(c.title||'社區管理工作平台')}"></div>
       <div class="field"><label>副標題</label><input id="siteSubtitle" value="${escapeAttr(c.subtitle||'')}"></div>
     </div>
     <div class="panel">
       <div class="section-title">② 公司管理後台／登入頁顯示文字</div>
-      <p class="hint">這些就是公司管理員畫面上看到的標題與說明文字。修改後按最下面的「儲存全部交接清冊設定」即可套用。</p>
+      <p class="hint">這些就是公司管理員畫面上看到的標題與說明文字。修改後按最下面的儲存按鈕即可套用到平台。</p>
       <div class="editor-grid">
         <div><label>公司後台標題</label><input id="companyTitle" value="${escapeAttr(u.companyTitle||'公司管理後台')}"></div>
         <div><label>公司後台副標題</label><input id="companySubtitle" value="${escapeAttr(u.companySubtitle||'物業管理公司')}"></div>

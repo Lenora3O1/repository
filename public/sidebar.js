@@ -61,7 +61,7 @@
         const children=byParent[item.id]||[];
         const btn=document.createElement('button');
         btn.type='button';btn.className=depth?'menu-child':'';btn.dataset.menuAction=item.action||'placeholder';btn.dataset.menuId=item.id;
-        btn.innerHTML=`<span class="nav-icon">${esc(item.icon||'•')}</span><span class="nav-label">${esc(item.label||'未命名功能')}</span>`;
+        btn.innerHTML=`<span class="nav-icon">${esc(item.icon||'•')}</span><span class="nav-label">${esc(item.label||'未命名功能')}</span>${children.length?'<span class="menu-chevron" aria-hidden="true">›</span>':''}`;
         if(children.length){
           btn.classList.add('menu-parent');btn.setAttribute('aria-expanded','false');
           btn.addEventListener('click',()=>{

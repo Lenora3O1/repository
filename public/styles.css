@@ -475,3 +475,103 @@ h1,h2,h3{font-family:'Iansui','Microsoft JhengHei','Noto Sans TC',sans-serif}
   .field{margin-bottom:13px}
   .modal-actions button{flex:1 1 45%;min-width:120px}
 }
+
+/* V4.6.2：手機工作台 UX 修正版
+   1) 修正抽屜被 backdrop 蓋住導致「完全點不到」
+   2) 目錄改成真正的垂直清單，不再橫向擠成一排
+   3) 放大觸控區域、明確箭頭、子目錄縮排
+   4) 登入頁與頂端識別改成專業「社區管理工作平台」語氣
+*/
+.menu-chevron{margin-left:auto;flex:0 0 auto;font-size:1.15rem;line-height:1;color:#81918b;transition:transform .16s ease}
+.menu-parent[aria-expanded="true"] .menu-chevron{transform:rotate(90deg);color:var(--accent-dark)}
+
+@media(max-width:900px){
+  .topbar{
+    min-height:74px!important;
+    height:auto!important;
+    padding:12px 12px 12px 66px!important;
+    align-items:center!important;
+    gap:10px;
+  }
+  .topbar>div:first-of-type{min-width:0;flex:1}
+  .topbar .brand{font-size:1.28rem;line-height:1.18;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar .sub{font-size:.76rem;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .staff-top{flex:0 0 auto;max-width:44%;gap:6px!important;font-size:.72rem!important;align-items:center!important}
+  .staff-top #staffName{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .staff-top .top-link{padding:8px 10px!important;min-height:40px}
+
+  .sidebar-toggle{z-index:1550!important;width:44px!important;height:44px!important;top:14px!important;left:12px!important;position:fixed!important;touch-action:manipulation}
+  .sidebar-backdrop{z-index:1400!important;background:rgba(10,25,20,.42)!important;backdrop-filter:blur(1px)}
+  .app-sidebar{z-index:1500!important;width:min(88vw,340px)!important;min-width:0!important;max-width:340px!important;height:100dvh!important;top:0!important;bottom:0!important;left:0!important;transform:translate3d(-105%,0,0)!important;transition:transform .2s ease!important;background:#fff!important;box-shadow:14px 0 40px rgba(0,0,0,.18)!important;overflow:hidden!important}
+  body.sidebar-open .app-sidebar{transform:translate3d(0,0,0)!important}
+  .app-sidebar .sidebar-head{height:84px!important;padding:0 18px!important;display:flex!important;flex-direction:column!important;justify-content:center!important;background:linear-gradient(180deg,#eef6f2,#fff)!important}
+  .app-sidebar .sidebar-title{font-size:1.08rem!important;display:block!important;color:var(--accent-dark)!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .app-sidebar .sidebar-caption{display:block!important;font-size:.75rem!important;color:var(--ink-soft)!important;margin-top:3px}
+  .app-sidebar .nav-tabs{
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:stretch!important;
+    justify-content:flex-start!important;
+    gap:4px!important;
+    height:calc(100dvh - 84px)!important;
+    max-height:none!important;
+    margin:0!important;
+    padding:12px 10px 28px!important;
+    border:0!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    -webkit-overflow-scrolling:touch;
+  }
+  .app-sidebar .nav-tabs button,
+  .app-sidebar .nav-tabs .menu-child{
+    display:flex!important;
+    flex:0 0 auto!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    width:100%!important;
+    min-width:0!important;
+    min-height:52px!important;
+    height:52px!important;
+    margin:0!important;
+    padding:10px 13px!important;
+    gap:11px!important;
+    border:1px solid transparent!important;
+    border-left:4px solid transparent!important;
+    border-radius:11px!important;
+    background:#fff!important;
+    color:var(--ink)!important;
+    text-align:left!important;
+    white-space:nowrap!important;
+    overflow:hidden!important;
+    box-sizing:border-box!important;
+    touch-action:manipulation!important;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .app-sidebar .nav-tabs button.active{background:var(--accent-soft)!important;color:var(--accent-dark)!important;border-left-color:var(--accent)!important}
+  .app-sidebar .nav-tabs button:active{background:#eef4f1!important;transform:none!important}
+  .app-sidebar .nav-icon{display:inline-flex!important;flex:0 0 30px!important;width:30px!important;height:30px!important;align-items:center!important;justify-content:center!important;font-size:1.25rem!important;line-height:1!important}
+  .app-sidebar .nav-label{display:block!important;flex:1 1 auto!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;font-size:1rem!important;line-height:1.25!important}
+  .app-sidebar .menu-children{display:flex!important;flex-direction:column!important;gap:3px!important;width:100%!important;padding:3px 0 5px 16px!important;box-sizing:border-box!important}
+  .app-sidebar .menu-children.is-collapsed{display:none!important}
+  .app-sidebar .menu-child{min-height:48px!important;height:48px!important;background:#f8faf9!important;border-color:#edf1ef!important;border-left:3px solid #dfe9e4!important;padding-left:10px!important}
+  .app-sidebar .menu-child .nav-icon{font-size:1.05rem!important;flex-basis:26px!important;width:26px!important}
+  .app-sidebar .menu-child .nav-label{font-size:.95rem!important}
+  .app-sidebar .menu-pin-btn{display:inline-flex!important;flex:0 0 40px!important;width:40px!important;min-width:40px!important;height:40px!important;min-height:40px!important;margin-left:auto!important;padding:0!important;font-size:1.15rem!important;touch-action:manipulation!important}
+
+  .shell{padding:18px 12px 70px!important;max-width:100%!important}
+  .login-box{width:min(100%,430px)!important;max-width:none!important;margin:26px auto 38px!important;padding:24px 20px!important;border-radius:16px!important}
+  .login-box h2{font-size:1.65rem!important;line-height:1.3!important;margin-bottom:10px!important}
+  .login-box .hint{font-size:.95rem!important;line-height:1.65!important}
+  .login-box button[type=submit]{width:100%!important;min-height:52px!important;font-size:1rem!important;border-radius:11px!important}
+  .login-box .field{margin-bottom:16px!important}
+  .login-box input{min-height:48px!important}
+  .floating-notice{top:82px!important;right:10px!important;width:calc(100vw - 20px)!important}
+}
+
+@media(max-width:430px){
+  .topbar .brand{font-size:1.12rem}
+  .topbar .sub{font-size:.70rem}
+  .staff-top #staffName{display:none}
+  .staff-top .top-link{font-size:.82rem!important}
+  .login-box{margin-top:20px!important;padding:22px 17px!important}
+}
