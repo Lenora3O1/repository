@@ -3,10 +3,33 @@ const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);if(document.querySelector('.brand'))document.querySelector('.brand').textContent=b.logoText||b.title||'物業管理平台';if(document.querySelector('.sub'))document.querySelector('.sub').textContent=b.subtitle||'';}catch(e){console.warn('Staff branding load skipped',e)}}
 async function boot(){
-  formConfig=await api('/api/form-config'); const platformTitle=(formConfig.title&&formConfig.title!=='社區交接清冊')?formConfig.title:'社區管理工作平台'; const platformSubtitle=(formConfig.subtitle&&formConfig.subtitle!=='物業管理部門')?formConfig.subtitle:'物業管理數位工作平台'; document.title=platformTitle;
-  document.querySelector('.brand').textContent=platformTitle;document.querySelector('.sub').textContent=platformSubtitle;
-  const u=formConfig.uiTexts||{}; if(document.querySelector('#loginView h2')&&u.staffLoginTitle)document.querySelector('#loginView h2').textContent='👤 '+u.staffLoginTitle; if(document.querySelector('#loginView .hint')&&u.staffLoginHint)document.querySelector('#loginView .hint').textContent=u.staffLoginHint; const loginBtn=document.querySelector('#staffLoginForm button[type=submit]'); if(loginBtn)loginBtn.textContent='登入工作平台';
-  const s=await api('/api/staff/session'); if(s.loggedIn){if(s.user.role==='company_admin'){ location.href='company.html'; return; } await applyStaffBranding(); showHome(s.user)} else showLogin();
+  // 平台名稱與「表單範本標題」分離，避免公司自訂的表單名稱跑到網站／瀏覽器標題。
+  // 例如表單可以叫「社區行政事務回報」，但網站仍維持「社區管理工作平台」。
+  const platformTitle='社區管理工作平台';
+  const platformSubtitle='物業管理數位工作平台';
+  document.title=platformTitle;
+  document.querySelector('.brand').textContent=platformTitle;
+  document.querySelector('.sub').textContent=platformSubtitle;
+  try{
+    formConfig=await api('/api/form-config');
+    const u=formConfig.uiTexts||{};
+    if(document.querySelector('#loginView h2')&&u.staffLoginTitle)document.querySelector('#loginView h2').textContent='👤 '+u.staffLoginTitle;
+    if(document.querySelector('#loginView .hint')&&u.staffLoginHint)document.querySelector('#loginView .hint').textContent=u.staffLoginHint;
+    const loginBtn=document.querySelector('#staffLoginForm button[type=submit]');
+    if(loginBtn)loginBtn.textContent='登入工作平台';
+    const s=await api('/api/staff/session');
+    if(s.loggedIn){
+      if(s.user.role==='company_admin'){ location.href='company.html'; return; }
+      await applyStaffBranding();
+      showHome(s.user);
+    }else showLogin();
+  }catch(err){
+    // API 暫時慢／失敗時不要讓手機看到一整頁空白。保留登入畫面並顯示可理解的提示。
+    showLogin();
+    const m=document.getElementById('loginMsg');
+    if(m)m.innerHTML=`<div class="msg error">系統目前載入較慢，請稍候再試。${escapeHtml(err?.message||'')}</div>`;
+    console.warn('Staff boot failed',err);
+  }
 }
 function showLogin(){ $('loginView').style.display='block';$('homeView').style.display='none';$('editorView').style.display='none';$('staffTop').style.display='none';document.body.classList.remove('is-authenticated'); }
 function showCompanyHint(user){ location.href='company.html'; }

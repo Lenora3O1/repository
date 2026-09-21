@@ -112,6 +112,18 @@
   }
   window.refreshWorkspaceMenu=loadDynamicSidebar;
   setupShell();
+  // 桌機／手機切換時同步狀態，避免先前的 hover / drawer class 留在 body 造成卡住。
+  let lastMobile=mobile();
+  window.addEventListener('resize',()=>{
+    const nowMobile=mobile();
+    if(nowMobile!==lastMobile){
+      document.body.classList.remove('sidebar-hover');
+      document.body.classList.remove('sidebar-open');
+      if(nowMobile) document.body.classList.remove('sidebar-collapsed');
+      else document.body.classList.add('sidebar-collapsed');
+      lastMobile=nowMobile;
+    }
+  },{passive:true});
   document.querySelectorAll('[data-close-notice]').forEach(btn=>btn.addEventListener('click',()=>{const n=btn.closest('.floating-notice');if(!n)return;n.classList.add('is-closed');try{localStorage.setItem('notice-closed-'+(n.id||location.pathname),'1')}catch(e){}}));
   document.querySelectorAll('.floating-notice').forEach(n=>{try{if(localStorage.getItem('notice-closed-'+(n.id||location.pathname))==='1')n.classList.add('is-closed')}catch(e){}});
   const login=document.getElementById('loginView'),main=document.getElementById('mainView');
