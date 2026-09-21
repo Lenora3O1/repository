@@ -575,3 +575,67 @@ h1,h2,h3{font-family:'Iansui','Microsoft JhengHei','Noto Sans TC',sans-serif}
   .staff-top .top-link{font-size:.82rem!important}
   .login-box{margin-top:20px!important;padding:22px 17px!important}
 }
+
+
+/* V4.6.3：手機目錄與交接流程 UX 修正
+   - 強制所有目錄文字可見，避免部分項目只剩圖示／星號
+   - 增加底部安全空間，避免 Safari／瀏覽器工具列遮住最後幾個目錄
+   - 母目錄採手風琴模式，由 sidebar.js 控制一次只展開一組
+   - 交接表返回按鈕改為明確「返回交接清冊」
+*/
+@media(max-width:900px){
+  .app-sidebar .nav-tabs{
+    padding:12px 10px calc(120px + env(safe-area-inset-bottom))!important;
+    scroll-padding-bottom:120px;
+  }
+  .app-sidebar .nav-tabs > button,
+  .app-sidebar .nav-tabs .menu-children > button{
+    position:relative!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    flex:0 0 auto!important;
+    width:100%!important;
+    color:#1C2B33!important;
+    opacity:1!important;
+  }
+  .app-sidebar .nav-tabs > button .nav-label,
+  .app-sidebar .nav-tabs .menu-children > button .nav-label{
+    display:block!important;
+    visibility:visible!important;
+    opacity:1!important;
+    color:#1C2B33!important;
+    flex:1 1 auto!important;
+    min-width:0!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    white-space:nowrap!important;
+  }
+  .app-sidebar .nav-tabs > button .nav-icon,
+  .app-sidebar .nav-tabs .menu-children > button .nav-icon{
+    display:inline-flex!important;
+    visibility:visible!important;
+    opacity:1!important;
+  }
+  .app-sidebar .menu-children{
+    width:100%!important;
+    max-height:none!important;
+    overflow:visible!important;
+  }
+  .app-sidebar .menu-children.is-collapsed{display:none!important}
+  .app-sidebar .menu-parent[aria-expanded="true"] .menu-chevron{transform:rotate(90deg);color:var(--accent-dark)!important}
+  .app-sidebar .menu-parent[aria-expanded="false"] .menu-chevron{transform:rotate(0deg)}
+  .app-sidebar .menu-pin-btn{
+    flex:0 0 40px!important;
+    width:40px!important;
+    min-width:40px!important;
+    height:40px!important;
+    min-height:40px!important;
+    margin-left:auto!important;
+  }
+}
+
+@media(max-width:430px){
+  .app-sidebar{width:calc(100vw - 44px)!important;max-width:none!important}
+  .app-sidebar .nav-tabs{padding-left:9px!important;padding-right:9px!important}
+}

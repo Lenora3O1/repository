@@ -66,6 +66,13 @@
           btn.classList.add('menu-parent');btn.setAttribute('aria-expanded','false');
           btn.addEventListener('click',()=>{
             const open=btn.getAttribute('aria-expanded')!=='false';
+            // 手機／桌機都採用手風琴式目錄：開啟新的母目錄時，其他母目錄自動收起。
+            nav.querySelectorAll('.menu-parent[aria-expanded="true"]').forEach(other=>{
+              if(other===btn)return;
+              other.setAttribute('aria-expanded','false');
+              const otherBox=other.nextElementSibling;
+              if(otherBox?.classList.contains('menu-children'))otherBox.classList.add('is-collapsed');
+            });
             btn.setAttribute('aria-expanded',String(!open));
             const box=btn.nextElementSibling;if(box)box.classList.toggle('is-collapsed',open);
           });
