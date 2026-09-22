@@ -146,9 +146,21 @@ async function loadPinnedWork(){
   }catch(e){list.innerHTML=`<div class="empty">暫時無法載入釘選工作。</div>`;console.warn(e)}
 }
 
+async function loadCentralManagerChecklist(){
+  const d=await api('/api/staff/manager-checklist');
+  if(!d.formConfig || !Array.isArray(d.formConfig.pages) || !d.formConfig.pages.length){
+    throw new Error('中央交接清冊沒有可用的頁面，請到總後臺檢查設定。');
+  }
+  formConfig=d.formConfig;
+  communities=Array.isArray(d.communities)?d.communities:[];
+  return d;
+}
 async function startDraftForCommunity(cid){
+  if(!formConfig || !Array.isArray(formConfig.pages) || !formConfig.pages.length || !Array.isArray(formConfig.questions)){
+    await loadCentralManagerChecklist();
+  }
   const community=communities.find(c=>c.id===Number(cid));
-  if(!community){showMessage('找不到可用的社區。','error');return;}
+  if(!community){showMessage('找不到可用的駐點社區。','error');return;}
   const initial={};
   if(formConfig.questions.some(q=>q.id==='community_name')) initial.community_name=community.name||'';
   const r=await api('/api/staff/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:initial,current_page:0,community_id:Number(cid)})});
@@ -156,7 +168,13 @@ async function startDraftForCommunity(cid){
 }
 
 async function openManagerChecklist(label='經理交接清冊'){
-  communities=await api('/api/staff/communities');
+  // 這裡直接讀取總後臺的中央經理版，不再依賴登入頁當下是否已經載入 formConfig。
+  await loadCentralManagerChecklist();
+  if(communities.length===0){
+    const el=$('staffHome');
+    el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label)}</div><h1>尚未開通駐點案場</h1><p>目前這個人員帳號沒有被指定任何啟用中的社區，因此暫時無法開啟經理交接清冊。</p><p class="hint">請由公司後台為此人員設定駐點社區；設定完成後，重新登入即可看到完整的中央經理版交接清冊。</p></div>`;
+    return;
+  }
   const drafts=await api('/api/staff/drafts');
   if(communities.length===1){
     const cid=communities[0].id;
@@ -164,21 +182,16 @@ async function openManagerChecklist(label='經理交接清冊'){
     if(existing){await continueDraft(existing.id);}else{await startDraftForCommunity(cid);}
     return;
   }
-  if(communities.length>1){
-    const options=communities.map(c=>`<button type="button" class="community-choice" data-community-id="${c.id}"><span>🏠</span><strong>${escapeHtml(c.name)}</strong><span>→</span></button>`).join('');
-    const modal=document.createElement('div');modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">${escapeHtml(label)}</div><h2>請選擇這次要交接的社區</h2><p class="modal-note">您同時服務多個社區，因此才需要選擇；如果只有一個社區，之後會直接進入交接畫面。</p><div class="community-choice-list">${options}</div></div>`;
-    document.body.appendChild(modal);document.body.classList.add('modal-open');
-    const close=()=>{modal.remove();document.body.classList.remove('modal-open')};
-    modal.querySelector('.modal-close').addEventListener('click',close);
-    modal.addEventListener('click',e=>{if(e.target===modal)close()});
-    modal.querySelectorAll('.community-choice').forEach(btn=>btn.addEventListener('click',async()=>{const cid=Number(btn.dataset.communityId);close();const existing=drafts.find(d=>Number(d.community_id)===cid);if(existing)await continueDraft(existing.id);else await startDraftForCommunity(cid);}));
-    return;
-  }
-  await loadChecklistModule(label);
+  const options=communities.map(c=>`<button type="button" class="community-choice" data-community-id="${c.id}"><span>🏠</span><strong>${escapeHtml(c.name)}</strong><span>→</span></button>`).join('');
+  const modal=document.createElement('div');modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">${escapeHtml(label)}</div><h2>請選擇這次要交接的社區</h2><p class="modal-note">您同時服務多個社區，因此才需要選擇；如果只有一個社區，會直接進入完整交接清冊。</p><div class="community-choice-list">${options}</div></div>`;
+  document.body.appendChild(modal);document.body.classList.add('modal-open');
+  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};
+  modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
+  modal.querySelectorAll('.community-choice').forEach(btn=>btn.addEventListener('click',async()=>{const cid=Number(btn.dataset.communityId);close();const existing=drafts.find(d=>Number(d.community_id)===cid);if(existing)await continueDraft(existing.id);else await startDraftForCommunity(cid);}));
 }
 
 async function loadChecklistModule(label='交接清冊'){
-  communities=await api('/api/staff/communities');
+  await loadCentralManagerChecklist();
   const drafts=await api('/api/staff/drafts');
   const el=$('staffHome');
   if(!el)return;
