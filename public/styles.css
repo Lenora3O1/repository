@@ -2076,3 +2076,33 @@ body.is-authenticated .app-sidebar .menu-children .menu-pin-btn{
   }
   .app-sidebar .sidebar-home:hover{background:#c5c5c5!important;}
 }
+
+
+/* V5.1：代辦事項試行 + 首頁細節修正（最後覆蓋層） */
+body.is-authenticated .home-head{position:relative;display:block!important;min-height:162px!important;padding:28px 30px!important;box-sizing:border-box!important}
+body.is-authenticated .home-head h1{margin:0!important;font-family:'Iansui','Microsoft JhengHei','Noto Sans TC',sans-serif!important;font-size:2.35rem!important;line-height:1.18!important;font-weight:400!important;color:#111!important}
+body.is-authenticated .home-community{margin-top:16px!important;padding-top:12px!important;border-top:1px solid #ececea!important;color:#555!important;font-size:1.05rem!important}
+body.is-authenticated .todo-list{display:flex;flex-direction:column;gap:8px}
+body.is-authenticated .todo-row{display:flex;align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid #ececea}
+body.is-authenticated .todo-row:last-child{border-bottom:0}
+body.is-authenticated .todo-check{width:32px;height:32px;min-width:32px;border:1.5px solid #9a9a96;border-radius:50%;background:#fff;color:#1b5b3b;font-size:1.35rem;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+body.is-authenticated .todo-check:hover{border-color:#1b5b3b;background:#f0f6f2}
+body.is-authenticated .todo-content{min-width:0;display:flex;flex-direction:column;gap:4px;flex:1}
+body.is-authenticated .todo-content strong{font-weight:400;color:#222;font-size:1rem;line-height:1.4;word-break:break-word}
+body.is-authenticated .todo-content small{color:#777;font-size:.78rem;line-height:1.3}
+body.is-authenticated .todo-add{width:52px;height:40px;padding:0;border:1px solid #d8e2d4;border-radius:10px;background:#edf5e9;color:#666;font-size:1.35rem;cursor:pointer}
+body.is-authenticated .todo-add:hover{background:#e1eedb}
+.archived-todo-list{display:flex;flex-direction:column;border-top:1px solid #ececea;margin-top:18px}
+.archived-todo-row{display:flex;gap:12px;align-items:flex-start;padding:15px 4px;border-bottom:1px solid #ececea}
+.archived-todo-check{width:28px;height:28px;min-width:28px;border-radius:50%;background:#1b5b3b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
+.archived-todo-row .todo-content{display:flex;flex-direction:column;gap:4px}
+.archived-todo-row .todo-content strong{font-weight:400;color:#222}
+.archived-todo-row .todo-content small{color:#777;font-size:.8rem}
+body.is-authenticated .app-sidebar .sidebar-head{background:#f2f2f1!important;color:#111!important}
+body.is-authenticated .app-sidebar .sidebar-title{color:#111!important}
+body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
+@media(max-width:900px){
+  body.is-authenticated .home-head{min-height:132px!important;padding:22px 20px!important}
+  body.is-authenticated .home-head h1{font-size:2rem!important}
+  body.is-authenticated .home-community{margin-top:12px!important;padding-top:9px!important;font-size:.95rem!important}
+}

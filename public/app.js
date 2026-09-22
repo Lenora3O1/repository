@@ -82,11 +82,41 @@ async function loadHome(user){
   if(!el)return;
   const displayName=String(user?.name||'').trim()||'使用者';
   const position=String(user?.position||user?.job_title||user?.title||'職務').trim()||'職務';
-  el.innerHTML=`<div class="dashboard-layout"><div class="dashboard-left"><div class="panel home-head"><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)}（${escapeHtml(position)}）</h1></div><div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div><div class="dashboard-note">本日尚未安排事務</div></div></div><div class="panel dashboard-todo"><div class="section-title"><span>📌</span> 代辦事項 <button type="button" class="todo-add" aria-label="新增代辦事項">＋</button></div><div class="todo-empty">目前尚無代辦事項。</div></div></div><div id="pinnedWorkPanel" class="panel pinned-panel"><div class="section-title">⭐ 釘選工作</div><div id="pinnedWorkList" class="pinned-work-list"><div class="empty">載入中…</div></div></div>`;
+  el.innerHTML=`<div class="dashboard-layout"><div class="dashboard-left"><div class="panel home-head"><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)}（${escapeHtml(position)}）</h1><div id="staffCommunityHint" class="home-community"></div></div><div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div><div class="dashboard-note">本日尚未安排事務</div></div></div><div class="panel dashboard-todo"><div class="section-title"><span>📌</span> 代辦事項 <button type="button" class="todo-add" id="todoAddBtn" aria-label="新增代辦事項">＋</button></div><div id="todoList" class="todo-list"><div class="todo-empty">載入中…</div></div></div></div><div id="pinnedWorkPanel" class="panel pinned-panel"><div class="section-title">⭐ 釘選工作</div><div id="pinnedWorkList" class="pinned-work-list"><div class="empty">載入中…</div></div></div>`;
   clearInterval(staffClockTimer);
   const tick=()=>{const d=new Date();const date=$('staffDate'),clock=$('staffClock');if(date)date.textContent=d.toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'long'});if(clock)clock.textContent=d.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit'});};
   tick();staffClockTimer=setInterval(tick,1000);
-  await loadPinnedWork();
+  $('todoAddBtn')?.addEventListener('click',openTodoCreateModal);
+  await Promise.all([loadPinnedWork(),loadHomeTodos(),loadStaffCommunityHint()]);
+}
+async function loadStaffCommunityHint(){
+  const el=$('staffCommunityHint'); if(!el)return;
+  try{const d=await api('/api/staff/communities'); const list=Array.isArray(d)?d:[]; if(list.length===1)el.textContent=list[0].name||''; else if(list.length>1)el.textContent=list.map(x=>x.name).join('、'); else el.textContent='';}
+  catch(e){el.textContent='';}
+}
+function todoTime(s){if(!s)return '—';const d=new Date(s);return d.toLocaleString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+async function loadHomeTodos(){
+  const list=$('todoList'); if(!list)return;
+  try{
+    const d=await api('/api/staff/todos'); const todos=(d.todos||[]).filter(x=>x.status==='open');
+    if(!todos.length){list.innerHTML='<div class="todo-empty">目前尚無代辦事項。</div>';return;}
+    list.innerHTML=todos.map(t=>`<div class="todo-row" data-todo-id="${t.id}"><button type="button" class="todo-check" aria-label="完成代辦事項" title="標記完成">○</button><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small></div></div>`).join('');
+    list.querySelectorAll('.todo-check').forEach(btn=>btn.addEventListener('click',async()=>{const row=btn.closest('.todo-row');const id=Number(row?.dataset.todoId);if(!id)return;btn.disabled=true;try{await api(`/api/staff/todos/${id}/complete`,{method:'PUT'});await loadHomeTodos();}catch(e){btn.disabled=false;alert(e.message||'完成代辦事項失敗');}}));
+  }catch(e){list.innerHTML=`<div class="todo-empty">目前無法載入代辦事項。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
+}
+function openTodoCreateModal(){
+  const old=document.getElementById('todoCreateModal'); if(old)old.remove();
+  const modal=document.createElement('div'); modal.id='todoCreateModal'; modal.className='modal-backdrop';
+  modal.innerHTML=`<div class="modal todo-create-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">📌 代辦事項</div><h2>新增代辦事項</h2><div class="field"><label for="newTodoContent">事項內容</label><textarea id="newTodoContent" rows="4" maxlength="300" placeholder="請輸入要處理的工作…"></textarea></div><div class="modal-actions"><button type="button" class="secondary" id="todoCancelBtn">取消</button><button type="button" id="todoSaveBtn">新增</button></div></div>`;
+  document.body.appendChild(modal); document.body.classList.add('modal-open');
+  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};
+  modal.querySelector('.modal-close').addEventListener('click',close);modal.querySelector('#todoCancelBtn').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
+  const input=modal.querySelector('#newTodoContent'); input.focus();
+  modal.querySelector('#todoSaveBtn').addEventListener('click',async()=>{const content=input.value.trim();if(!content){input.focus();return;}const btn=modal.querySelector('#todoSaveBtn');btn.disabled=true;btn.textContent='新增中…';try{await api('/api/staff/todos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});close();await loadHomeTodos();}catch(e){btn.disabled=false;btn.textContent='新增';alert(e.message||'新增代辦事項失敗');}});
+}
+async function loadArchivedTodos(){
+  const el=$('staffHome'); if(!el)return; showWorkspaceLoading('已封存');
+  try{const d=await api('/api/staff/todos/archived');const rows=d.todos||[];el.innerHTML=`<div class="panel workspace-placeholder archived-todos-panel"><div class="eyebrow">📌 代辦事項</div><h1>已封存</h1><p class="hint">已完成的代辦事項會保留在這裡，不會被刪除。</p>${rows.length?`<div class="archived-todo-list">${rows.map(t=>`<div class="archived-todo-row"><div class="archived-todo-check">✓</div><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small><small>處理完畢：${escapeHtml(todoTime(t.completed_at))}</small></div></div>`).join('')}</div>`:'<div class="todo-empty">目前尚無已封存的代辦事項。</div>'}</div>`;}catch(e){showWorkspaceError('已封存',e);}
 }
 async function loadPinnedWork(){
   const list=$('pinnedWorkList');if(!list)return;
@@ -159,6 +189,15 @@ function showWorkspaceError(label,err){
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
+  if(action==='todo'){
+    // 代辦事項同時是目錄母項；點擊時除了展開子目錄，也直接回到首頁的代辦區。
+    const s=await api('/api/staff/session'); if(s.loggedIn)showHome(s.user);
+    return;
+  }
+  if(action==='todo-archived'){
+    try{await loadArchivedTodos();}catch(err){showWorkspaceError(label||'已封存',err);}
+    return;
+  }
   if(action==='manager-checklist'){
     showWorkspaceLoading(label||'經理交接清冊');
     try{await openManagerChecklist(label||'經理交接清冊');}catch(err){showWorkspaceError(label||'經理交接清冊',err);}
