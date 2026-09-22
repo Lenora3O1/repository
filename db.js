@@ -253,6 +253,23 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboard_pins (
   FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE
 )`);
 
+// V5.1：現場人員代辦事項。每位人員獨立保存，完成後不刪除，改為封存並保留時間。
+db.exec(`CREATE TABLE IF NOT EXISTS staff_todos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL,
+  tenant_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  created_by_id INTEGER,
+  created_by_name TEXT DEFAULT '',
+  completed_at TEXT DEFAULT '',
+  completed_by_id INTEGER,
+  completed_by_name TEXT DEFAULT '',
+  FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_staff_todos_staff_status ON staff_todos(staff_id, tenant_id, status, created_at)`);
+
 db.prepare("UPDATE submissions SET tenant_id=(SELECT tenant_id FROM staff_users WHERE staff_users.employee_id=submissions.employee_id) WHERE tenant_id IS NULL").run();
 db.prepare("UPDATE submissions SET tenant_id=? WHERE tenant_id IS NULL").run(defaultTenant.id);
 db.prepare("UPDATE drafts SET tenant_id=(SELECT tenant_id FROM staff_users WHERE staff_users.employee_id=drafts.employee_id) WHERE tenant_id IS NULL").run();

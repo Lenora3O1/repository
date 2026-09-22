@@ -66,6 +66,16 @@ function readMenuConfig(){
   if(!fs.existsSync(MENU_CONFIG_PATH)) fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(defaultMenuConfig(),null,2),'utf-8');
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
+  // V5.1：把「已封存」加入代辦事項底下。只做一次版本遷移，不會覆蓋現有公司／平台自訂目錄。
+  if(Number(c._schemaVersion||0)<2){
+    const hasTodo=c.staff.some(x=>String(x.id)==='todo');
+    const hasArchived=c.staff.some(x=>String(x.id)==='todo_archived');
+    if(hasTodo && !hasArchived){
+      c.staff.push({id:'todo_archived',parentId:'todo',icon:'↳',label:'已封存',action:'todo-archived',enabled:true});
+    }
+    c._schemaVersion=2;
+    fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');
+  }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -186,6 +196,37 @@ app.put('/api/staff/dashboard-pins/order',requireStaffFiller,(req,res)=>{
   const clean=[...new Set(ids)].filter(id=>valid.has(id));
   const tx=db.transaction(()=>{const stmt=db.prepare('UPDATE dashboard_pins SET sort_order=?,updated_at=? WHERE staff_id=? AND tenant_id=? AND menu_id=?');const t=now();clean.forEach((id,i)=>stmt.run(i,t,u.id,tenantId(req),id));});
   tx(); res.json({success:true});
+});
+
+
+// ===== V5.1 現場人員代辦事項 =====
+app.get('/api/staff/todos',requireStaffFiller,(req,res)=>{
+  const u=getUser(req);
+  const rows=db.prepare(`SELECT * FROM staff_todos WHERE staff_id=? AND tenant_id=? ORDER BY CASE WHEN status='open' THEN 0 ELSE 1 END, created_at DESC`).all(u.id,tenantId(req));
+  res.json({todos:rows});
+});
+app.post('/api/staff/todos',requireStaffFiller,(req,res)=>{
+  const u=getUser(req);
+  const content=String(req.body?.content||'').trim();
+  if(!content) return res.status(400).json({error:'請輸入代辦事項內容'});
+  if(content.length>300) return res.status(400).json({error:'代辦事項最多 300 字'});
+  const t=now();
+  const info=db.prepare(`INSERT INTO staff_todos (staff_id,tenant_id,content,status,created_at,created_by_id,created_by_name) VALUES (?,?,?,?,?,?,?)`).run(u.id,tenantId(req),content,'open',t,u.id,u.name||'');
+  res.json({success:true,todo:db.prepare('SELECT * FROM staff_todos WHERE id=?').get(info.lastInsertRowid)});
+});
+app.put('/api/staff/todos/:id/complete',requireStaffFiller,(req,res)=>{
+  const u=getUser(req); const id=Number(req.params.id);
+  const row=db.prepare('SELECT * FROM staff_todos WHERE id=? AND staff_id=? AND tenant_id=?').get(id,u.id,tenantId(req));
+  if(!row) return res.status(404).json({error:'找不到這筆代辦事項'});
+  if(row.status==='done') return res.json({success:true,todo:row});
+  const t=now();
+  db.prepare(`UPDATE staff_todos SET status='done',completed_at=?,completed_by_id=?,completed_by_name=? WHERE id=? AND staff_id=? AND tenant_id=?`).run(t,u.id,u.name||'',id,u.id,tenantId(req));
+  res.json({success:true,todo:db.prepare('SELECT * FROM staff_todos WHERE id=?').get(id)});
+});
+app.get('/api/staff/todos/archived',requireStaffFiller,(req,res)=>{
+  const u=getUser(req);
+  const rows=db.prepare(`SELECT * FROM staff_todos WHERE staff_id=? AND tenant_id=? AND status='done' ORDER BY completed_at DESC, id DESC`).all(u.id,tenantId(req));
+  res.json({todos:rows});
 });
 
 
