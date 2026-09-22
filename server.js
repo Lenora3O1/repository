@@ -225,7 +225,14 @@ app.put('/api/staff/todos/:id/complete',requireStaffFiller,(req,res)=>{
 });
 app.get('/api/staff/todos/archived',requireStaffFiller,(req,res)=>{
   const u=getUser(req);
-  const rows=db.prepare(`SELECT * FROM staff_todos WHERE staff_id=? AND tenant_id=? AND status='done' ORDER BY completed_at DESC, id DESC`).all(u.id,tenantId(req));
+  const keyword=String(req.query?.keyword||'').trim();
+  const date=String(req.query?.date||'').trim();
+  let sql=`SELECT * FROM staff_todos WHERE staff_id=? AND tenant_id=? AND status='done'`;
+  const params=[u.id,tenantId(req)];
+  if(keyword){sql+=` AND (content LIKE ? OR created_by_name LIKE ? OR completed_by_name LIKE ?)`;const k=`%${keyword}%`;params.push(k,k,k);}
+  if(/^\d{4}-\d{2}-\d{2}$/.test(date)){sql+=` AND (substr(created_at,1,10)=? OR substr(completed_at,1,10)=?)`;params.push(date,date);}
+  sql+=` ORDER BY completed_at DESC, id DESC`;
+  const rows=db.prepare(sql).all(...params);
   res.json({todos:rows});
 });
 
