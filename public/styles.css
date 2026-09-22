@@ -2106,3 +2106,27 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
   body.is-authenticated .home-head h1{font-size:2rem!important}
   body.is-authenticated .home-community{margin-top:12px!important;padding-top:9px!important;font-size:.95rem!important}
 }
+
+/* V5.2 代辦事項獨立頁面與封存搜尋 */
+.todo-page-panel{max-width:980px;margin:0 auto;padding:26px 28px!important}
+.todo-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;border-bottom:1px solid #e5e5e1;padding-bottom:18px;margin-bottom:18px}
+.todo-page-head h1{margin:4px 0 6px;font-size:2rem;font-weight:500;color:#111}
+.todo-page-add{white-space:nowrap;border:1px solid #d4dfcf!important;background:#eaf3df!important;color:#35563f!important;border-radius:10px!important;padding:10px 16px!important;font-size:1rem!important;cursor:pointer}
+.todo-page-add:hover{background:#e0ecd5!important}
+.todo-page-list{display:flex;flex-direction:column}
+.todo-page-row{display:flex;align-items:flex-start;gap:14px;padding:16px 6px;border-bottom:1px solid #ececea}
+.todo-page-row .todo-check{margin-top:2px}
+.archived-search{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 0 18px;border-bottom:1px solid #ececea}
+.archived-search input{height:42px;border:1px solid #d5d5d1;border-radius:9px;background:#fff;padding:0 12px;box-sizing:border-box}
+.archived-search input[type=search]{min-width:260px;flex:1}
+.archived-search input[type=date]{min-width:170px}
+.archived-search button{height:42px;padding:0 16px;border-radius:9px;border:1px solid #d4dfcf;background:#1b5b3b;color:#fff;cursor:pointer}
+.archived-search button.secondary{background:#fff;color:#333;border-color:#d5d5d1}
+.archived-search button:hover{opacity:.92}
+@media(max-width:900px){
+  .todo-page-panel{padding:18px 14px!important;margin:0!important}
+  .todo-page-head{flex-direction:column;gap:12px}
+  .todo-page-add{width:100%;min-height:46px}
+  .archived-search{align-items:stretch}
+  .archived-search input[type=search],.archived-search input[type=date],.archived-search button{width:100%;min-width:0}
+}

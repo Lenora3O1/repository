@@ -114,9 +114,26 @@ function openTodoCreateModal(){
   const input=modal.querySelector('#newTodoContent'); input.focus();
   modal.querySelector('#todoSaveBtn').addEventListener('click',async()=>{const content=input.value.trim();if(!content){input.focus();return;}const btn=modal.querySelector('#todoSaveBtn');btn.disabled=true;btn.textContent='新增中…';try{await api('/api/staff/todos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});close();await loadHomeTodos();}catch(e){btn.disabled=false;btn.textContent='新增';alert(e.message||'新增代辦事項失敗');}});
 }
-async function loadArchivedTodos(){
+async function loadTodoPage(){
+  const el=$('staffHome'); if(!el)return; showWorkspaceLoading('代辦事項');
+  try{
+    const d=await api('/api/staff/todos');
+    const rows=(d.todos||[]).filter(x=>x.status==='open');
+    el.innerHTML=`<div class="panel todo-page-panel"><div class="todo-page-head"><div><div class="eyebrow">📌 工作項目</div><h1>代辦事項</h1><p class="hint">目前需要處理的工作會顯示在這裡；完成後會自動移到「已封存」。</p></div><button type="button" class="todo-page-add" id="todoPageAddBtn">＋ 新增代辦事項</button></div><div id="todoPageList" class="todo-page-list">${rows.length?rows.map(t=>`<div class="todo-page-row" data-todo-id="${t.id}"><button type="button" class="todo-check" title="完成並封存">○</button><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記人：${escapeHtml(t.created_by_name||'—')}</small><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small></div></div>`).join(''):'<div class="todo-empty">目前尚無代辦事項。</div>'}</div></div>`;
+    $('todoPageAddBtn')?.addEventListener('click',openTodoCreateModal);
+    el.querySelectorAll('.todo-page-row .todo-check').forEach(btn=>btn.addEventListener('click',async()=>{const row=btn.closest('.todo-page-row');const id=Number(row?.dataset.todoId);if(!id)return;btn.disabled=true;try{await api(`/api/staff/todos/${id}/complete`,{method:'PUT'});await loadTodoPage();}catch(e){btn.disabled=false;alert(e.message||'完成代辦事項失敗');}}));
+  }catch(e){showWorkspaceError('代辦事項',e);}
+}
+async function loadArchivedTodos(params={}){
   const el=$('staffHome'); if(!el)return; showWorkspaceLoading('已封存');
-  try{const d=await api('/api/staff/todos/archived');const rows=d.todos||[];el.innerHTML=`<div class="panel workspace-placeholder archived-todos-panel"><div class="eyebrow">📌 代辦事項</div><h1>已封存</h1><p class="hint">已完成的代辦事項會保留在這裡，不會被刪除。</p>${rows.length?`<div class="archived-todo-list">${rows.map(t=>`<div class="archived-todo-row"><div class="archived-todo-check">✓</div><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small><small>處理完畢：${escapeHtml(todoTime(t.completed_at))}</small></div></div>`).join('')}</div>`:'<div class="todo-empty">目前尚無已封存的代辦事項。</div>'}</div>`;}catch(e){showWorkspaceError('已封存',e);}
+  try{
+    const q=new URLSearchParams(); if(params.keyword)q.set('keyword',params.keyword); if(params.date)q.set('date',params.date);
+    const d=await api('/api/staff/todos/archived'+(q.toString()?`?${q.toString()}`:''));
+    const rows=d.todos||[];
+    el.innerHTML=`<div class="panel workspace-placeholder archived-todos-panel"><div class="eyebrow">📌 代辦事項</div><h1>已封存</h1><p class="hint">已完成的代辦事項會保留在這裡，不會被刪除。</p><form id="archivedTodoSearch" class="archived-search"><input id="archivedKeyword" type="search" placeholder="搜尋名稱／關鍵字" value="${escapeHtml(params.keyword||'')}"><input id="archivedDate" type="date" value="${escapeHtml(params.date||'')}"><button type="submit">搜尋</button><button type="button" class="secondary" id="archivedClearBtn">清除</button></form>${rows.length?`<div class="archived-todo-list">${rows.map(t=>`<div class="archived-todo-row"><div class="archived-todo-check">✓</div><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記人：${escapeHtml(t.created_by_name||'—')}</small><small>處理人：${escapeHtml(t.completed_by_name||'—')}</small><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small><small>處理完畢：${escapeHtml(todoTime(t.completed_at))}</small></div></div>`).join('')}</div>`:'<div class="todo-empty">查無符合條件的封存紀錄。</div>'}</div>`;
+    $('archivedTodoSearch')?.addEventListener('submit',e=>{e.preventDefault();loadArchivedTodos({keyword:$('archivedKeyword')?.value.trim()||'',date:$('archivedDate')?.value||''});});
+    $('archivedClearBtn')?.addEventListener('click',()=>loadArchivedTodos());
+  }catch(e){showWorkspaceError('已封存',e);}
 }
 async function loadPinnedWork(){
   const list=$('pinnedWorkList');if(!list)return;
@@ -190,8 +207,7 @@ async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
   if(action==='todo'){
-    // 代辦事項同時是目錄母項；點擊時除了展開子目錄，也直接回到首頁的代辦區。
-    const s=await api('/api/staff/session'); if(s.loggedIn)showHome(s.user);
+    await loadTodoPage();
     return;
   }
   if(action==='todo-archived'){
