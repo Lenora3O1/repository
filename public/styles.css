@@ -1874,3 +1874,143 @@ body.is-authenticated.sidebar-open .pinned-panel{
   body.is-authenticated .topbar{padding-left:114px!important;}
   body.is-authenticated.sidebar-open .topbar{padding-left:34px!important;}
 }
+
+
+/* =========================================================
+   V5.0.3｜依「現場人員版面配置 1/2/3」最終校正
+   原則：不改功能，只校正版面、間距、目錄與展開行為。
+   ========================================================= */
+
+/* 配置2：目錄收起 */
+@media (min-width:901px){
+  body.is-authenticated .topbar{
+    margin-left:0!important;
+    padding-left:114px!important;
+    height:110px!important;
+    min-height:110px!important;
+  }
+  body.is-authenticated .topbar .sidebar-toggle{
+    left:28px!important;
+    top:34px!important;
+  }
+  body.is-authenticated .shell{
+    margin-left:0!important;
+    padding:26px 50px 60px!important;
+  }
+
+  /* 配置3：目錄打開，Header 與內容一起右移 */
+  body.is-authenticated.sidebar-open .topbar{
+    margin-left:220px!important;
+    padding-left:34px!important;
+  }
+  body.is-authenticated.sidebar-open .shell{
+    margin-left:220px!important;
+    padding:26px 50px 60px 20px!important;
+  }
+
+  body.is-authenticated.sidebar-open .dashboard-layout{
+    max-width:990px!important;
+    grid-template-columns:386px minmax(0,1fr)!important;
+    gap:14px!important;
+  }
+  body.is-authenticated.sidebar-open .pinned-panel{
+    max-width:990px!important;
+  }
+}
+
+/* 目錄標題與返回鍵固定為施工圖樣式 */
+body.is-authenticated .app-sidebar{
+  width:220px!important;
+  min-width:220px!important;
+}
+body.is-authenticated .app-sidebar .sidebar-head{
+  width:220px!important;
+  box-sizing:border-box!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  padding:0 14px 0 20px!important;
+  background:#F2F2F1!important;
+}
+body.is-authenticated .sidebar-title{
+  color:#111!important;
+  opacity:1!important;
+  visibility:visible!important;
+}
+body.is-authenticated .sidebar-caption{
+  color:#444!important;
+  opacity:1!important;
+  visibility:visible!important;
+}
+
+/* 施工圖的目錄不顯示釘選星號 */
+body.is-authenticated .app-sidebar .menu-pin-btn{
+  display:none!important;
+}
+
+/* 根目錄列：黑色圓點 + 文字 + 右側箭頭 */
+body.is-authenticated .app-sidebar .nav-tabs > button{
+  color:#111!important;
+  background:transparent!important;
+  min-height:39px!important;
+  height:39px!important;
+  padding:4px 10px!important;
+  border:0!important;
+}
+body.is-authenticated .app-sidebar .nav-tabs > button .nav-icon{
+  color:#111!important;
+}
+body.is-authenticated .app-sidebar .nav-tabs > button .nav-label{
+  color:#111!important;
+}
+
+/* 子目錄仍可展開，但維持簡潔，不加入多餘星號 */
+body.is-authenticated .app-sidebar .menu-children .menu-pin-btn{
+  display:none!important;
+}
+
+/* 登入後 Header：公司名稱與漢堡鍵不要重疊 */
+@media (min-width:901px){
+  body.is-authenticated .topbar .brand{
+    margin-left:0!important;
+  }
+}
+
+/* 手機：目錄為抽屜，不把主畫面切掉 */
+@media (max-width:900px){
+  body.is-authenticated .app-sidebar{
+    width:min(82vw,300px)!important;
+    min-width:0!important;
+    transform:translate3d(-105%,0,0)!important;
+    z-index:1500!important;
+  }
+  body.is-authenticated.sidebar-open .app-sidebar{
+    transform:translate3d(0,0,0)!important;
+  }
+  body.is-authenticated.sidebar-open .topbar{
+    margin-left:0!important;
+    padding-left:62px!important;
+  }
+  body.is-authenticated.sidebar-open .shell{
+    margin-left:0!important;
+    padding:16px 12px 60px!important;
+  }
+  body.is-authenticated .app-sidebar .sidebar-head{
+    width:100%!important;
+    height:72px!important;
+    min-height:72px!important;
+    padding:0 12px 0 18px!important;
+  }
+  body.is-authenticated .sidebar-title{
+    font-size:1.18rem!important;
+  }
+  body.is-authenticated .sidebar-caption{
+    font-size:.82rem!important;
+  }
+  body.is-authenticated .app-sidebar .nav-tabs{
+    height:calc(100dvh - 72px)!important;
+    padding-top:8px!important;
+  }
+}
+
+@media (min-width:901px){body.is-authenticated.sidebar-open .sidebar-toggle{display:none!important;}}

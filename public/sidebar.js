@@ -91,7 +91,6 @@
           });
         }else{
           btn.addEventListener('click',()=>emit(item));
-          btn.appendChild(makePinButton(item,pinnedIds.has(String(item.id))));
         }
         nav.appendChild(btn);
         if(children.length){
@@ -100,7 +99,6 @@
             const cbtn=document.createElement('button');cbtn.type='button';cbtn.className='menu-child';cbtn.dataset.menuAction=child.action||'placeholder';cbtn.dataset.menuId=child.id;
             cbtn.innerHTML=`<span class="nav-icon">•</span><span class="nav-label">${esc(child.label||'未命名功能')}</span>`;
             cbtn.addEventListener('click',()=>emit(child));
-            cbtn.appendChild(makePinButton(child,pinnedIds.has(String(child.id))));
             childBox.appendChild(cbtn);
           }
         }
