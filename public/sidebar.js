@@ -28,7 +28,14 @@
     if(mobile()) document.body.classList.remove('sidebar-collapsed'); else {document.body.classList.add('sidebar-collapsed');try{localStorage.setItem(key,'1')}catch(e){}}
     sidebar.addEventListener('mouseenter',()=>{if(!mobile())document.body.classList.add('sidebar-hover')});
     sidebar.addEventListener('mouseleave',()=>{if(!mobile())document.body.classList.remove('sidebar-hover')});
-    toggle?.addEventListener('click',()=>{if(mobile())document.body.classList.toggle('sidebar-open');else document.body.classList.toggle('sidebar-hover')});
+    toggle?.addEventListener('click',()=>{
+      if(mobile()){
+        document.body.classList.toggle('sidebar-open');
+      }else{
+        document.body.classList.toggle('sidebar-open');
+        document.body.classList.remove('sidebar-hover');
+      }
+    });
     backdrop?.addEventListener('click',()=>document.body.classList.remove('sidebar-open'));
   }
   function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
