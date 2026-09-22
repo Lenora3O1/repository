@@ -144,14 +144,34 @@ function showWorkspacePlaceholder(label){
   const el=$('staffHome');el.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">工作項目</div><h1>🚧 ${escapeHtml(label||'工作功能')}</h1><p>這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。</p><div class="placeholder-note">您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。</div></div>`;
 }
 
+function showWorkspaceLoading(label){
+  const el=$('staffHome');
+  if(!el)return;
+  $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
+  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>正在讀取您的社區與交接資料，請稍候…</p></div>`;
+}
+function showWorkspaceError(label,err){
+  const el=$('staffHome');
+  if(!el)return;
+  $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
+  el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label||'工作功能')}</div><h1>目前無法開啟</h1><p>${escapeHtml(err?.message||'系統暫時無法取得資料。')}</p><button type="button" class="secondary" onclick="location.reload()">重新整理</button></div>`;
+}
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
-  if(action==='manager-checklist'){await openManagerChecklist(label||'經理交接清冊');return;}
-  if(action==='checklist'||action==='secretary-checklist'){await loadChecklistModule(label||'交接清冊');return;}
+  if(action==='manager-checklist'){
+    showWorkspaceLoading(label||'經理交接清冊');
+    try{await openManagerChecklist(label||'經理交接清冊');}catch(err){showWorkspaceError(label||'經理交接清冊',err);}
+    return;
+  }
+  if(action==='checklist'||action==='secretary-checklist'){
+    showWorkspaceLoading(label||'交接清冊');
+    try{await loadChecklistModule(label||'交接清冊');}catch(err){showWorkspaceError(label||'交接清冊',err);}
+    return;
+  }
   showWorkspacePlaceholder(label||'工作功能');
 }
-document.addEventListener('workspace-menu',e=>{handleWorkspaceMenu(e).catch(err=>showMessage(err.message,'error'));});
+document.addEventListener('workspace-menu',e=>{handleWorkspaceMenu(e).catch(err=>showWorkspaceError(e.detail?.label||'工作功能',err));});
 document.addEventListener('dashboard-pins-changed',()=>{if($('homeView')&&getComputedStyle($('homeView')).display!=='none')loadPinnedWork();});
 
 async function newDraft(){const cid=Number($('newCommunity')?.value||0);if(!cid){showMessage('請先選擇社區。','error');return}await startDraftForCommunity(cid);}

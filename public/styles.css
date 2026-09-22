@@ -2014,3 +2014,65 @@ body.is-authenticated .app-sidebar .menu-children .menu-pin-btn{
 }
 
 @media (min-width:901px){body.is-authenticated.sidebar-open .sidebar-toggle{display:none!important;}}
+
+
+/* V5.0.4：現場人員目錄最終修正
+   - 人員工作台標題固定使用深色，不再因 Header/字體樣式變成白色
+   - 左側目錄標題與返回按鈕同一列
+   - 交接子目錄保持可點擊，錯誤訊息由工作台直接呈現
+*/
+@media (min-width:901px){
+  body.sidebar-hover .app-sidebar .sidebar-head{
+    flex-direction:row!important;
+    align-items:center!important;
+    justify-content:space-between!important;
+  }
+  body.sidebar-hover .app-sidebar .sidebar-title{color:#17312a!important;}
+  body.sidebar-hover .app-sidebar .sidebar-caption{color:#64736e!important;}
+  body.sidebar-hover .app-sidebar .sidebar-home{display:flex!important;}
+}
+@media (max-width:900px){
+  .app-sidebar .sidebar-head{
+    display:flex!important;
+    flex-direction:row!important;
+    align-items:center!important;
+    justify-content:space-between!important;
+    height:84px!important;
+    min-height:84px!important;
+    padding:0 14px 0 18px!important;
+    background:#f3f3f3!important;
+  }
+  .app-sidebar .sidebar-title{
+    display:block!important;
+    color:#17312a!important;
+    font-weight:800!important;
+    font-size:1.08rem!important;
+    line-height:1.25!important;
+    white-space:nowrap!important;
+  }
+  .app-sidebar .sidebar-caption{
+    display:block!important;
+    color:#64736e!important;
+    font-size:.75rem!important;
+    margin-top:3px!important;
+  }
+  .app-sidebar .sidebar-head > div:first-child{min-width:0;flex:1;}
+  .app-sidebar .sidebar-home{
+    display:flex!important;
+    flex:0 0 56px!important;
+    width:56px!important;
+    min-width:56px!important;
+    height:56px!important;
+    min-height:56px!important;
+    margin:0!important;
+    align-items:center!important;
+    justify-content:center!important;
+    border:0!important;
+    border-radius:11px!important;
+    background:#cfcfcf!important;
+    color:#17312a!important;
+    font-size:1.45rem!important;
+    line-height:1!important;
+  }
+  .app-sidebar .sidebar-home:hover{background:#c5c5c5!important;}
+}
