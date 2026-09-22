@@ -136,6 +136,25 @@ function getTenant(req){return db.prepare('SELECT * FROM tenants WHERE id=?').ge
 
 // ===== 公開表單設定（所有公司共用中央表單版本；後續可再擴充公司覆寫） =====
 app.get('/api/form-config',(req,res)=>res.json(readFormConfig()));
+// V5.3：現場經理共用中央版交接清冊。
+// 表單頁面／題目以總後臺的 /data/form-config.json 為準；每位已啟用且有駐點社區權限的人員都可讀取。
+app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
+  try{
+    const config=readFormConfig();
+    if(!Array.isArray(config.pages)||!config.pages.length||!Array.isArray(config.questions)||!config.questions.length){
+      return res.status(500).json({error:'中央交接清冊設定不完整，請到總後臺檢查交接清冊頁面與題目設定。'});
+    }
+    const communities=db.prepare(`SELECT c.* FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name`).all(tenantId(req),getUser(req).id);
+    res.json({
+      version:'central-manager',
+      formConfig:{title:config.title||'社區交接清冊',subtitle:config.subtitle||'',pages:config.pages,questions:config.questions},
+      communities
+    });
+  }catch(err){
+    console.error('manager-checklist config error',err);
+    res.status(500).json({error:'無法讀取中央交接清冊設定。',detail:err.message});
+  }
+});
 // ===== 動態工作目錄 =====
 app.get('/api/staff/menu-config',requireStaff,(req,res)=>res.json({scope:'staff',items:resolveMenu('staff',tenantId(req))}));
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req))}));
