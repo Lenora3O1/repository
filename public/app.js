@@ -46,7 +46,34 @@ function showHome(user){
   $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('loginInternal').style.display='none';
   $('staffName').textContent=user.name||'使用者';
   setTopbarCompany(user.tenant_name||'（公司名稱）');
-  document.body.classList.add('is-authenticated');window.refreshWorkspaceMenu?.('staff');loadHome(user);
+  document.body.classList.add('is-authenticated');
+  const profile=$('staffProfile');
+  if(profile){
+    profile.onclick=()=>showStaffProfile(user);
+    profile.title='查看人職資料';
+  }
+  window.refreshWorkspaceMenu?.('staff');loadHome(user);
+}
+function showStaffProfile(user){
+  const old=document.getElementById('staffProfileModal');
+  if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='staffProfileModal';
+  modal.className='modal-backdrop';
+  modal.innerHTML=`<div class="modal staff-profile-modal" role="dialog" aria-modal="true">
+    <button type="button" class="modal-close" aria-label="關閉">×</button>
+    <div class="eyebrow">人職資料</div>
+    <h2>${escapeHtml(user?.name||'使用者')}</h2>
+    <div class="profile-list">
+      <div><span>員編</span><strong>${escapeHtml(user?.employee_id||user?.employeeId||'—')}</strong></div>
+      <div><span>職務</span><strong>${escapeHtml(user?.position||user?.job_title||user?.title||'—')}</strong></div>
+      <div><span>公司</span><strong>${escapeHtml(user?.tenant_name||'—')}</strong></div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);document.body.classList.add('modal-open');
+  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};
+  modal.querySelector('.modal-close').addEventListener('click',close);
+  modal.addEventListener('click',e=>{if(e.target===modal)close()});
 }
 
 let staffClockTimer=null;

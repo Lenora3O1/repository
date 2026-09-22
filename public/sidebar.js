@@ -67,7 +67,7 @@
         const children=byParent[item.id]||[];
         const btn=document.createElement('button');
         btn.type='button';btn.className=depth?'menu-child':'';btn.dataset.menuAction=item.action||'placeholder';btn.dataset.menuId=item.id;
-        btn.innerHTML=`<span class="nav-icon">${esc(item.icon||'•')}</span><span class="nav-label">${esc(item.label||'未命名功能')}</span>${children.length?'<span class="menu-chevron" aria-hidden="true">›</span>':''}`;
+        btn.innerHTML=`<span class="nav-icon">●</span><span class="nav-label">${esc(item.label||'未命名功能')}</span>${children.length?'<span class="menu-chevron" aria-hidden="true">›</span>':''}`;
         if(children.length){
           btn.classList.add('menu-parent');btn.setAttribute('aria-expanded','false');
           btn.addEventListener('click',()=>{
@@ -91,7 +91,7 @@
           const childBox=document.createElement('div');childBox.className='menu-children is-collapsed';nav.appendChild(childBox);
           for(const child of children){
             const cbtn=document.createElement('button');cbtn.type='button';cbtn.className='menu-child';cbtn.dataset.menuAction=child.action||'placeholder';cbtn.dataset.menuId=child.id;
-            cbtn.innerHTML=`<span class="nav-icon">${esc(child.icon||'↳')}</span><span class="nav-label">${esc(child.label||'未命名功能')}</span>`;
+            cbtn.innerHTML=`<span class="nav-icon">•</span><span class="nav-label">${esc(child.label||'未命名功能')}</span>`;
             cbtn.addEventListener('click',()=>emit(child));
             cbtn.appendChild(makePinButton(child,pinnedIds.has(String(child.id))));
             childBox.appendChild(cbtn);
