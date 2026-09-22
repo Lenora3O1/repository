@@ -1,7 +1,7 @@
 let formConfig=null, answers={}, currentPage=0, draftId=null, draftCommunityId=null, autosaveTimer=null, saving=false, dirty=false, communities=[];
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
-async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);if(document.querySelector('.brand'))document.querySelector('.brand').textContent=b.logoText||b.title||'物業管理平台';if(document.querySelector('.sub'))document.querySelector('.sub').textContent=b.subtitle||'';}catch(e){console.warn('Staff branding load skipped',e)}}
+async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);}catch(e){console.warn('Staff branding load skipped',e)}}
 async function boot(){
   // 平台名稱與「表單範本標題」分離，避免公司自訂的表單名稱跑到網站／瀏覽器標題。
   // 例如表單可以叫「社區行政事務回報」，但網站仍維持「社區管理工作平台」。
@@ -12,11 +12,9 @@ async function boot(){
   document.querySelector('.sub').textContent=platformSubtitle;
   try{
     formConfig=await api('/api/form-config');
-    const u=formConfig.uiTexts||{};
-    if(document.querySelector('#loginView h2')&&u.staffLoginTitle)document.querySelector('#loginView h2').textContent='👤 '+u.staffLoginTitle;
-    if(document.querySelector('#loginView .hint')&&u.staffLoginHint)document.querySelector('#loginView .hint').textContent=u.staffLoginHint;
+    // 登入頁版型固定，不讓舊版表單文字設定覆蓋新的 UI。
     const loginBtn=document.querySelector('#staffLoginForm button[type=submit]');
-    if(loginBtn)loginBtn.textContent='登入工作平台';
+    if(loginBtn)loginBtn.textContent='登入';
     const s=await api('/api/staff/session');
     if(s.loggedIn){
       if(s.user.role==='company_admin'){ location.href='company.html'; return; }
@@ -31,16 +29,33 @@ async function boot(){
     console.warn('Staff boot failed',err);
   }
 }
-function showLogin(){ $('loginView').style.display='block';$('homeView').style.display='none';$('editorView').style.display='none';$('staffTop').style.display='none';document.body.classList.remove('is-authenticated'); }
+function setTopbarCompany(name){
+  const brand=$('platformBrand');
+  const sub=$('platformSub');
+  if(brand)brand.textContent=name||'（公司名稱）';
+  if(sub)sub.textContent='';
+}
+function showLogin(){
+  $('loginView').style.display='block';$('homeView').style.display='none';$('editorView').style.display='none';$('staffTop').style.display='none';
+  $('loginInternal').style.display='flex';
+  setTopbarCompany('（公司名稱）');
+  document.body.classList.remove('is-authenticated');
+}
 function showCompanyHint(user){ location.href='company.html'; }
-function showHome(user){ $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('staffName').textContent=`${user.name}（${user.employee_id}）｜${user.tenant_name||''}`;document.body.classList.add('is-authenticated');window.refreshWorkspaceMenu?.('staff');loadHome(user); }
+function showHome(user){
+  $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('loginInternal').style.display='none';
+  $('staffName').textContent=user.name||'使用者';
+  setTopbarCompany(user.tenant_name||'（公司名稱）');
+  document.body.classList.add('is-authenticated');window.refreshWorkspaceMenu?.('staff');loadHome(user);
+}
 
 let staffClockTimer=null;
 async function loadHome(user){
   const el=$('staffHome');
   if(!el)return;
-  const displayName=String(user?.name||'').trim()||'我的';
-  el.innerHTML=`<div class="dashboard-grid"><div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div></div><div class="panel dashboard-todo"><div class="section-title">📌 代辦事項</div><div class="todo-empty">目前尚無代辦事項。<span>之後可在這裡建立、追蹤與完成社區工作。</span></div></div></div><div class="panel home-head"><div><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)}的工作台</h1><p class="hint">這裡可以放置您最常使用的工作內容，從左側目錄點選 ☆ 即可釘選到這裡。</p></div></div><div id="pinnedWorkPanel" class="panel"><div class="section-title">⭐ 我的釘選工作</div><div id="pinnedWorkList" class="pinned-work-list"><div class="empty">載入中…</div></div></div>`;
+  const displayName=String(user?.name||'').trim()||'使用者';
+  const position=String(user?.position||user?.job_title||user?.title||'職務').trim()||'職務';
+  el.innerHTML=`<div class="dashboard-layout"><div class="dashboard-left"><div class="panel home-head"><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)}（${escapeHtml(position)}）</h1></div><div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div><div class="dashboard-note">本日尚未安排事務</div></div></div><div class="panel dashboard-todo"><div class="section-title"><span>📌</span> 代辦事項 <button type="button" class="todo-add" aria-label="新增代辦事項">＋</button></div><div class="todo-empty">目前尚無代辦事項。</div></div></div><div id="pinnedWorkPanel" class="panel pinned-panel"><div class="section-title">⭐ 釘選工作</div><div id="pinnedWorkList" class="pinned-work-list"><div class="empty">載入中…</div></div></div>`;
   clearInterval(staffClockTimer);
   const tick=()=>{const d=new Date();const date=$('staffDate'),clock=$('staffClock');if(date)date.textContent=d.toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'long'});if(clock)clock.textContent=d.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit'});};
   tick();staffClockTimer=setInterval(tick,1000);

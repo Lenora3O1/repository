@@ -21,6 +21,10 @@
   function setupShell(){
     if(!sidebar)return;
     wrapStaticButtons();
+    document.getElementById('sidebarHome')?.addEventListener('click',()=>{
+      document.body.classList.remove('sidebar-open');
+      document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:'home',id:'home',label:'工作台'}}));
+    });
     if(mobile()) document.body.classList.remove('sidebar-collapsed'); else {document.body.classList.add('sidebar-collapsed');try{localStorage.setItem(key,'1')}catch(e){}}
     sidebar.addEventListener('mouseenter',()=>{if(!mobile())document.body.classList.add('sidebar-hover')});
     sidebar.addEventListener('mouseleave',()=>{if(!mobile())document.body.classList.remove('sidebar-hover')});
@@ -50,6 +54,8 @@
   function renderItems(items,pinnedIds=new Set()){
     const nav=sidebar?.querySelector('.nav-tabs'); if(!nav)return;
     nav.innerHTML='';
+    // 工作台是首頁，不屬於工作目錄；從目錄中移除，改由左上角 ↩ 返回。
+    items=(Array.isArray(items)?items:[]).filter(x=>String(x.action||'')!=='home' && String(x.label||'')!=='我的工作台');
     const byParent={}; for(const x of items){const p=x.parentId||'__root';(byParent[p] ||= []).push(x)}
     function emit(item){
       nav.querySelectorAll('button:not(.menu-pin-btn)').forEach(x=>x.classList.remove('active'));
