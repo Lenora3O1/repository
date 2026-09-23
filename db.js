@@ -56,6 +56,12 @@ addColumnIfMissing('staff_users', 'role', "TEXT DEFAULT 'staff'");
 addColumnIfMissing('staff_users', 'tenant_id', "INTEGER");
 addColumnIfMissing('staff_users', 'last_login_at', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'admin_level', "TEXT DEFAULT 'admin'");
+// V5.4：職員資料骨架欄位；先建立欄位，實際內容由後續公司後台人事功能維護。
+addColumnIfMissing('staff_users', 'position', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'trial_end_date', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'formal_salary', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'insurance_level', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'health_dependents', "INTEGER DEFAULT 0");
 addColumnIfMissing('submissions', 'tenant_id', "INTEGER");
 addColumnIfMissing('submissions', 'community_id', "INTEGER");
 addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
@@ -108,6 +114,13 @@ function migrateEmployeeIdUniqueness() {
   }
 }
 migrateEmployeeIdUniqueness();
+
+// V5.4：若舊版因員編唯一性而重建過 staff_users，上述欄位需要再次補上。
+addColumnIfMissing('staff_users', 'position', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'trial_end_date', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'formal_salary', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'insurance_level', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'health_dependents', "INTEGER DEFAULT 0");
 
 // New tenant tables
 

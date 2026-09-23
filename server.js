@@ -270,11 +270,34 @@ app.post('/api/staff/logout',(req,res)=>{req.session.destroy(()=>res.json({succe
 app.get('/api/staff/session',(req,res)=>{
   const u=getUser(req); if(!u || !u.is_active || !u.tenant_id) return res.json({loggedIn:false});
   const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(u.tenant_id); if(!t || t.status!=='active') return res.json({loggedIn:false});
-  res.json({loggedIn:true,user:{employee_id:u.employee_id,name:u.name,role:u.role||'staff',tenant_id:u.tenant_id,tenant_name:t.name}});
+  res.json({loggedIn:true,user:{id:u.id,employee_id:u.employee_id,name:u.name,position:u.position||'',trial_end_date:u.trial_end_date||'',formal_salary:u.formal_salary||'',insurance_level:u.insurance_level||'',health_dependents:Number(u.health_dependents||0),role:u.role||'staff',tenant_id:u.tenant_id,tenant_name:t.name}});
 });
 
 // ===== 公司/社區資訊給前台 =====
 app.get('/api/staff/tenant',requireStaff,(req,res)=>res.json({tenant:getTenant(req)}));
+app.get('/api/staff/profile',requireStaff,(req,res)=>{
+  const u=getUser(req);
+  if(!u)return res.status(401).json({error:'尚未登入'});
+  const t=db.prepare('SELECT id,name FROM tenants WHERE id=?').get(u.tenant_id);
+  const communities=u.role==='company_admin'
+    ? db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tenantId(req))
+    : db.prepare("SELECT c.id,c.name,c.status FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name").all(tenantId(req),u.id);
+  res.json({
+    employee_id:u.employee_id,
+    name:u.name,
+    position:u.position||'',
+    tenant_name:t?.name||'',
+    communities,
+    salary:{
+      trial_end_date:u.trial_end_date||'',
+      formal_salary:u.formal_salary||'',
+      insurance_level:u.insurance_level||'',
+      health_dependents:Number(u.health_dependents||0)
+    },
+    payslip:{available:false,message:'本月薪資單尚未建立'}
+  });
+});
+
 app.get('/api/staff/communities',requireStaff,(req,res)=>{
   const u=getUser(req); let rows;
   if(u.role==='company_admin') rows=db.prepare("SELECT * FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tenantId(req));
