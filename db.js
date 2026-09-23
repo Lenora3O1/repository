@@ -62,6 +62,10 @@ addColumnIfMissing('staff_users', 'trial_end_date', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'formal_salary', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'insurance_level', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'health_dependents', "INTEGER DEFAULT 0");
+addColumnIfMissing('staff_users', 'work_type', "TEXT DEFAULT 'site'");
+addColumnIfMissing('staff_users', 'job_category', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'job_level', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('submissions', 'tenant_id', "INTEGER");
 addColumnIfMissing('submissions', 'community_id', "INTEGER");
 addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
@@ -121,6 +125,10 @@ addColumnIfMissing('staff_users', 'trial_end_date', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'formal_salary', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'insurance_level', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'health_dependents', "INTEGER DEFAULT 0");
+addColumnIfMissing('staff_users', 'work_type', "TEXT DEFAULT 'site'");
+addColumnIfMissing('staff_users', 'job_category', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'job_level', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
 
 // New tenant tables
 

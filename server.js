@@ -92,12 +92,34 @@ function cleanMenuItems(items){
   for(const x of clean){if(x.parentId===x.id || (x.parentId && !idSet.has(x.parentId))) x.parentId=null;}
   return clean;
 }
-function resolveMenu(scope,tenantIdValue){
+const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources'];
+const STAFF_PERMISSION_LABELS={
+  'todo':'代辦事項','work-journal':'工作日誌','finance':'財務／會計','committee':'管理委員會','residents':'住戶名冊','vendors':'廠商聯繫','handover':'交接清冊','company-resources':'公司資源',
+  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本'
+};
+function parsePermissions(u){
+  try{const p=JSON.parse(u?.permission_json||'[]');return Array.isArray(p)?p.map(String):[];}catch{return []}
+}
+function menuPermissionKey(item){
+  const raw=`${item?.id||''} ${item?.action||''} ${item?.label||''}`.toLowerCase();
+  const rules=[
+    ['manage-staff',['staff','人員管理','公司人員']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],
+    ['todo',['todo','代辦事項']],['work-journal',['work-journal','工作日誌']],['finance',['finance','財務','會計']],['committee',['committee','管理委員會']],['residents',['residents','住戶名冊']],['vendors',['vendors','廠商聯繫']],['handover',['handover','交接清冊']],['company-resources',['company-resources','公司資源']]
+  ];
+  for(const [key,terms] of rules) if(terms.some(t=>raw.includes(String(t).toLowerCase()))) return key;
+  return null;
+}
+function resolveMenu(scope,tenantIdValue,staffUser=null){
   const c=readMenuConfig();
   let items=c[scope]||[];
   // Reserved hook for future company-specific overrides. If a tenant override exists in the JSON, use it.
   if(c.tenants && tenantIdValue && Array.isArray(c.tenants[String(tenantIdValue)]?.[scope])) items=c.tenants[String(tenantIdValue)][scope];
-  return items.filter(x=>x.enabled!==false);
+  items=items.filter(x=>x.enabled!==false);
+  if(scope==='staff' && staffUser && staffUser.role!=='company_admin'){
+    const selected=parsePermissions(staffUser);
+    if(selected.length) items=items.filter(item=>{const key=menuPermissionKey(item);return !key || selected.includes(key) || (item.parentId && selected.includes(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)))||''));});
+  }
+  return items;
 }
 
 function readQuestions(){return readFormConfig().questions;}
@@ -156,7 +178,7 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
   }
 });
 // ===== 動態工作目錄 =====
-app.get('/api/staff/menu-config',requireStaff,(req,res)=>res.json({scope:'staff',items:resolveMenu('staff',tenantId(req))}));
+app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),u)});});
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req))}));
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>res.json(readMenuConfig()));
 app.put('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
@@ -264,13 +286,13 @@ app.post('/api/staff/login',(req,res)=>{
   const user=auth.user;
   req.session.userId=user.id; req.session.employeeId=user.employee_id; req.session.employeeName=user.name; req.session.tenantId=user.tenant_id; req.session.role=user.role||'staff';
   db.prepare('UPDATE staff_users SET last_login_at=? WHERE id=?').run(now(),user.id);
-  res.json({success:true,user:{id:user.id,employee_id:user.employee_id,name:user.name,role:user.role||'staff',admin_level:user.admin_level||'admin',tenant_id:user.tenant_id,tenant_name:user.tenant_name,tenant_code:user.tenant_code}});
+  res.json({success:true,user:{id:user.id,employee_id:user.employee_id,name:user.name,role:user.role||'staff',admin_level:user.admin_level||'admin',tenant_id:user.tenant_id,tenant_name:user.tenant_name,tenant_code:user.tenant_code,position:user.position||'',work_type:user.work_type||'site',job_category:user.job_category||'',job_level:user.job_level||'',permissions:parsePermissions(user)}});
 });
 app.post('/api/staff/logout',(req,res)=>{req.session.destroy(()=>res.json({success:true}));});
 app.get('/api/staff/session',(req,res)=>{
   const u=getUser(req); if(!u || !u.is_active || !u.tenant_id) return res.json({loggedIn:false});
   const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(u.tenant_id); if(!t || t.status!=='active') return res.json({loggedIn:false});
-  res.json({loggedIn:true,user:{id:u.id,employee_id:u.employee_id,name:u.name,position:u.position||'',trial_end_date:u.trial_end_date||'',formal_salary:u.formal_salary||'',insurance_level:u.insurance_level||'',health_dependents:Number(u.health_dependents||0),role:u.role||'staff',tenant_id:u.tenant_id,tenant_name:t.name}});
+  res.json({loggedIn:true,user:{id:u.id,employee_id:u.employee_id,name:u.name,position:u.position||'',job_category:u.job_category||'',job_level:u.job_level||'',work_type:u.work_type||'site',permissions:parsePermissions(u),trial_end_date:u.trial_end_date||'',formal_salary:u.formal_salary||'',insurance_level:u.insurance_level||'',health_dependents:Number(u.health_dependents||0),role:u.role||'staff',tenant_id:u.tenant_id,tenant_name:t.name}});
 });
 
 // ===== 公司/社區資訊給前台 =====
@@ -286,6 +308,10 @@ app.get('/api/staff/profile',requireStaff,(req,res)=>{
     employee_id:u.employee_id,
     name:u.name,
     position:u.position||'',
+    job_category:u.job_category||'',
+    job_level:u.job_level||'',
+    work_type:u.work_type||'site',
+    permissions:parsePermissions(u),
     tenant_name:t?.name||'',
     communities,
     salary:{
@@ -401,9 +427,9 @@ app.get('/api/company/session',requireCompanyAdmin,(req,res)=>{const u=getUser(r
 app.get('/api/company/admins',requireCompanyAdmin,(req,res)=>{const rows=db.prepare("SELECT id,employee_id,name,is_active,admin_level,last_login_at,created_at,updated_at FROM staff_users WHERE tenant_id=? AND role='company_admin' ORDER BY admin_level='owner' DESC,id").all(tenantId(req));res.json({admins:rows,current_user_id:getUser(req).id,current_admin_level:getUser(req).admin_level||'admin'});});
 app.post('/api/company/admins',requireCompanyAdmin,(req,res)=>{const me=getUser(req);if((me.admin_level||'admin')!=='owner')return res.status(403).json({error:'只有公司負責人可以新增公司管理員。一般公司管理員仍可開通總務、會計等一般人員帳號。'});const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'company_admin',tenantId(req),'admin');res.json({success:true,id:info.lastInsertRowid});});
 app.put('/api/company/admins/:id',requireCompanyAdmin,(req,res)=>{const me=getUser(req);if((me.admin_level||'admin')!=='owner')return res.status(403).json({error:'只有公司負責人可以管理其他公司管理員'});const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND tenant_id=? AND role='company_admin'").get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到公司管理員'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');if(!name)return res.status(400).json({error:'姓名不可空白'});if(u.admin_level==='owner'&&!active)return res.status(400).json({error:'不能停用公司負責人'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,p.hash,p.salt,t,id,tenantId(req));}else db.prepare('UPDATE staff_users SET name=?,is_active=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,t,id,tenantId(req));res.json({success:true});});
-app.get('/api/company/staff',requireCompanyAdmin,(req,res)=>{const rows=db.prepare(`SELECT id,employee_id,name,is_active,role,admin_level,created_at,updated_at FROM staff_users WHERE tenant_id=? ORDER BY role DESC,admin_level='owner' DESC,is_active DESC,employee_id`).all(tenantId(req));res.json(rows);});
-app.post('/api/company/staff',requireCompanyAdmin,(req,res)=>{const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id) VALUES (?,?,?,?,1,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'staff',tenantId(req));res.json({success:true,id:info.lastInsertRowid});});
-app.put('/api/company/staff/:id',requireCompanyAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin'&&u.id!==getUser(req).id)return res.status(400).json({error:'公司管理員帳號請由總後臺調整'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');if(!name)return res.status(400).json({error:'姓名不可空白'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,p.hash,p.salt,t,id,tenantId(req));}else db.prepare('UPDATE staff_users SET name=?,is_active=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,t,id,tenantId(req));res.json({success:true});});
+app.get('/api/company/staff',requireCompanyAdmin,(req,res)=>{const rows=db.prepare(`SELECT id,employee_id,name,is_active,role,admin_level,position,job_category,job_level,work_type,permission_json,created_at,updated_at FROM staff_users WHERE tenant_id=? ORDER BY role DESC,admin_level='owner' DESC,is_active DESC,employee_id`).all(tenantId(req));res.json(rows.map(r=>({...r,permissions:parsePermissions(r)})));});
+app.post('/api/company/staff',requireCompanyAdmin,(req,res)=>{const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');const workType=req.body?.work_type==='internal'?'internal':'site';const jobCategory=String(req.body?.job_category||'').trim();const jobLevel=String(req.body?.job_level||'').trim();const permissions=Array.isArray(req.body?.permissions)?req.body.permissions.map(String).filter(Boolean):STAFF_PERMISSION_DEFAULTS.slice();if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(!jobCategory)return res.status(400).json({error:'請選擇職務類別'});if(!jobLevel)return res.status(400).json({error:'請選擇職務位階'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const position=jobLevel?`${jobLevel}${jobCategory?'｜'+jobCategory:''}`:jobCategory;const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,position,work_type,job_category,job_level,permission_json) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'staff',tenantId(req),position,workType,jobCategory,jobLevel,JSON.stringify(permissions));res.json({success:true,id:info.lastInsertRowid});});
+app.put('/api/company/staff/:id',requireCompanyAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin'&&u.id!==getUser(req).id)return res.status(400).json({error:'公司管理員帳號請由總後臺調整'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');const workType=req.body?.work_type===undefined?(u.work_type||'site'):(req.body.work_type==='internal'?'internal':'site');const jobCategory=req.body?.job_category===undefined?(u.job_category||''):String(req.body.job_category||'').trim();const jobLevel=req.body?.job_level===undefined?(u.job_level||''):String(req.body.job_level||'').trim();const permissions=Array.isArray(req.body?.permissions)?req.body.permissions.map(String).filter(Boolean):parsePermissions(u);if(!name)return res.status(400).json({error:'姓名不可空白'});if(!jobCategory)return res.status(400).json({error:'請選擇職務類別'});if(!jobLevel)return res.status(400).json({error:'請選擇職務位階'});const position=`${jobLevel}${jobCategory?'｜'+jobCategory:''}`;const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,position=?,work_type=?,job_category=?,job_level=?,permission_json=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,p.hash,p.salt,position,workType,jobCategory,jobLevel,JSON.stringify(permissions),t,id,tenantId(req));}else db.prepare('UPDATE staff_users SET name=?,is_active=?,position=?,work_type=?,job_category=?,job_level=?,permission_json=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,position,workType,jobCategory,jobLevel,JSON.stringify(permissions),t,id,tenantId(req));res.json({success:true});});
 app.delete('/api/company/staff/:id',requireCompanyAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.id===getUser(req).id)return res.status(400).json({error:'不能刪除目前登入中的公司管理員'});if(u.role==='company_admin')return res.status(400).json({error:'請由總後臺處理公司管理員'});db.prepare('DELETE FROM staff_users WHERE id=? AND tenant_id=?').run(id,tenantId(req));res.json({success:true});});
 
 app.get('/api/company/communities',requireCompanyAdmin,(req,res)=>res.json(db.prepare('SELECT * FROM communities WHERE tenant_id=? ORDER BY status DESC,name').all(tenantId(req))));
