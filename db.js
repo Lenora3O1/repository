@@ -66,6 +66,9 @@ addColumnIfMissing('staff_users', 'work_type', "TEXT DEFAULT 'site'");
 addColumnIfMissing('staff_users', 'job_category', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'job_level', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
+addColumnIfMissing('staff_users', 'job_categories_json', "TEXT DEFAULT '[]'");
+addColumnIfMissing('staff_users', 'person_uid', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'person_status', "TEXT DEFAULT 'active'");
 addColumnIfMissing('submissions', 'tenant_id', "INTEGER");
 addColumnIfMissing('submissions', 'community_id', "INTEGER");
 addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
@@ -129,6 +132,9 @@ addColumnIfMissing('staff_users', 'work_type', "TEXT DEFAULT 'site'");
 addColumnIfMissing('staff_users', 'job_category', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'job_level', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
+addColumnIfMissing('staff_users', 'job_categories_json', "TEXT DEFAULT '[]'");
+addColumnIfMissing('staff_users', 'person_uid', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'person_status', "TEXT DEFAULT 'active'");
 
 // New tenant tables
 
@@ -158,6 +164,45 @@ db.exec(`
     FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
   );
 `);
+
+
+// V5.6 人員／工作環境架構：公司內勤與現場駐點可分開管理；一人可多案場、多職務。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS staff_work_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    scope_type TEXT NOT NULL DEFAULT 'site',
+    community_id INTEGER,
+    job_categories_json TEXT NOT NULL DEFAULT '[]',
+    job_level TEXT NOT NULL DEFAULT '',
+    permissions_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_staff_work_assignments_staff ON staff_work_assignments(staff_id);
+  CREATE INDEX IF NOT EXISTS idx_staff_work_assignments_scope ON staff_work_assignments(tenant_id,scope_type,community_id);
+  CREATE TABLE IF NOT EXISTS staff_person_archive (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_uid TEXT NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    employee_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    person_status TEXT NOT NULL,
+    archived_at TEXT NOT NULL,
+    archived_by_staff_id INTEGER,
+    snapshot_json TEXT NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS idx_staff_person_archive_tenant ON staff_person_archive(tenant_id,person_status);
+`);
+function ensurePersonUids(){
+  const rows=db.prepare("SELECT id FROM staff_users WHERE COALESCE(person_uid,'')='' ORDER BY id").all();
+  const up=db.prepare("UPDATE staff_users SET person_uid=? WHERE id=?");
+  for(const r of rows) up.run('P'+String(r.id).padStart(8,'0'),r.id);
+}
+ensurePersonUids();
 
 // V4.1.6 company white-label / branding settings
 addColumnIfMissing('tenants', 'brand_title', "TEXT DEFAULT ''");
