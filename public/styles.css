@@ -2154,3 +2154,15 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .profile-loading,.profile-error{padding:20px 0;color:#78837f;line-height:1.7;}.profile-error{color:#8b4a4a;}
 .payslip-modal{width:min(420px,calc(100vw - 36px));padding:26px;}.payslip-modal h2{margin:4px 0 18px;}.payslip-empty{border:1px dashed #d6dfdb;border-radius:12px;background:#fafcfb;padding:24px;text-align:center;color:#66736d;}.payslip-empty strong{color:#17312a;display:block;margin-bottom:8px;}.payslip-empty p{margin:0;font-size:.9rem;line-height:1.6;}
 @media(max-width:600px){.staff-profile-modal{width:calc(100vw - 24px);padding:22px 18px 20px;}.staff-profile-basic>div,.salary-details-body>div{align-items:flex-start;}.staff-profile-basic strong,.salary-details-body strong{max-width:62%;}.profile-logout-wrap{justify-content:stretch}.profile-logout{width:100%;}.payslip-modal{width:calc(100vw - 24px);}}
+
+
+/* V5.5 公司內部人員開通／職務／權限設定 */
+.panel-lite{margin:14px 0;padding:14px 16px;border:1px solid var(--line,#dfe5e1);border-radius:12px;background:#fbfcfa}
+.panel-lite>strong{display:block;margin-bottom:8px;color:var(--accent-dark,#204f42)}
+.panel-lite .hint{margin:4px 0 10px}
+.panel-lite .check-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px;max-height:260px;overflow:auto;padding:4px 0}
+.panel-lite .check-row{display:flex;align-items:center;gap:8px;padding:7px 4px;min-height:38px}
+.modal.modal-wide{width:min(860px,calc(100vw - 32px));max-height:88vh;overflow:auto}
+.modal.modal-wide .editor-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:900px){.panel-lite .check-list{grid-template-columns:1fr}.modal.modal-wide .editor-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.modal.modal-wide .editor-grid{grid-template-columns:1fr}}
