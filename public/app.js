@@ -54,7 +54,7 @@ function showHome(user){
   }
   window.refreshWorkspaceMenu?.('staff');loadHome(user);
 }
-function showStaffProfile(user){
+async function showStaffProfile(user){
   const old=document.getElementById('staffProfileModal');
   if(old)old.remove();
   const modal=document.createElement('div');
@@ -62,19 +62,55 @@ function showStaffProfile(user){
   modal.className='modal-backdrop';
   modal.innerHTML=`<div class="modal staff-profile-modal" role="dialog" aria-modal="true">
     <button type="button" class="modal-close" aria-label="關閉">×</button>
-    <div class="eyebrow">人職資料</div>
-    <h2>${escapeHtml(user?.name||'使用者')}</h2>
-    <div class="profile-list">
-      <div><span>員編</span><strong>${escapeHtml(user?.employee_id||user?.employeeId||'—')}</strong></div>
-      <div><span>職務</span><strong>${escapeHtml(user?.position||user?.job_title||user?.title||'—')}</strong></div>
-      <div><span>公司</span><strong>${escapeHtml(user?.tenant_name||'—')}</strong></div>
-    </div>
+    <div class="eyebrow">職員資料</div>
+    <h2 id="profileName">${escapeHtml(user?.name||'使用者')}</h2>
+    <div id="staffProfileBody" class="staff-profile-body"><div class="profile-loading">資料載入中…</div></div>
+    <div class="profile-logout-wrap"><button type="button" class="profile-logout" id="staffProfileLogout">登出</button></div>
   </div>`;
   document.body.appendChild(modal);document.body.classList.add('modal-open');
   const close=()=>{modal.remove();document.body.classList.remove('modal-open')};
   modal.querySelector('.modal-close').addEventListener('click',close);
   modal.addEventListener('click',e=>{if(e.target===modal)close()});
+  modal.querySelector('#staffProfileLogout').addEventListener('click',async()=>{
+    const btn=modal.querySelector('#staffProfileLogout');btn.disabled=true;btn.textContent='登出中…';
+    try{await api('/api/staff/logout',{method:'POST'});location.href='/';}catch(e){btn.disabled=false;btn.textContent='登出';alert(e.message||'登出失敗');}
+  });
+  try{
+    const d=await api('/api/staff/profile');
+    const communityNames=(d.communities||[]).map(c=>c.name).filter(Boolean);
+    const salary=d.salary||{};
+    const body=modal.querySelector('#staffProfileBody');
+    body.innerHTML=`
+      <div class="staff-profile-basic">
+        <div><span>員編</span><strong>${escapeHtml(d.employee_id||'—')}</strong></div>
+        <div><span>職務</span><strong>${escapeHtml(d.position||'尚未設定')}</strong></div>
+        <div><span>公司</span><strong>${escapeHtml(d.tenant_name||'—')}</strong></div>
+        <div><span>服務案場</span><strong>${communityNames.length?escapeHtml(communityNames.join('、')):'目前無駐點案場'}</strong></div>
+      </div>
+      <details class="salary-details">
+        <summary>薪資相關</summary>
+        <div class="salary-details-body">
+          <div><span>試用期</span><strong>${salary.trial_end_date?`至 ${escapeHtml(salary.trial_end_date)}`:'尚未設定'}</strong></div>
+          <div><span>正式薪資</span><strong>${salary.formal_salary?escapeHtml(salary.formal_salary):'尚未設定'}</strong></div>
+          <div><span>投保級距</span><strong>${salary.insurance_level?escapeHtml(salary.insurance_level):'尚未設定'}</strong></div>
+          <div><span>健保眷屬</span><strong>${Number.isFinite(Number(salary.health_dependents))?Number(salary.health_dependents):0} 人</strong></div>
+        </div>
+      </details>
+      <button type="button" class="monthly-payslip-card" id="monthlyPayslipBtn">
+        <span><strong>本月薪資單</strong><small>點選查看當月薪資單</small></span><b>›</b>
+      </button>`;
+    modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d));
+  }catch(e){modal.querySelector('#staffProfileBody').innerHTML=`<div class="profile-error">目前無法載入職員資料。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
+function openPayslipCard(profile){
+  const old=document.getElementById('staffPayslipModal');if(old)old.remove();
+  const modal=document.createElement('div');modal.id='staffPayslipModal';modal.className='modal-backdrop payslip-backdrop';
+  const now=new Date();const ym=`${now.getFullYear()} 年 ${now.getMonth()+1} 月`;
+  modal.innerHTML=`<div class="modal payslip-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">本月薪資單</div><h2>${escapeHtml(ym)}</h2><div class="payslip-empty"><strong>本月薪資單尚未建立</strong><p>待公司後台建立薪資資料後，這裡會顯示當月薪資單。</p></div></div>`;
+  document.body.appendChild(modal);document.body.classList.add('modal-open');
+  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
+}
+
 
 let staffClockTimer=null;
 async function loadHome(user){

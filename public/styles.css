@@ -2130,3 +2130,27 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
   .archived-search{align-items:stretch}
   .archived-search input[type=search],.archived-search input[type=date],.archived-search button{width:100%;min-width:0}
 }
+
+
+/* V5.4 職員資料：依規劃建立基本資料、薪資摺疊與本月薪資單入口 */
+.staff-profile-modal{width:min(620px,calc(100vw - 36px));padding:28px 30px 24px;}
+.staff-profile-modal h2{font-size:1.7rem;margin:4px 0 18px;}
+.staff-profile-body{border-top:1px solid #e1e6e3;}
+.staff-profile-basic>div,.salary-details-body>div{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:13px 0;border-bottom:1px solid #e7ebe9;}
+.staff-profile-basic span,.salary-details-body span{color:#7a8580;font-size:.88rem;}
+.staff-profile-basic strong,.salary-details-body strong{font-weight:600;text-align:right;color:#17312a;}
+.salary-details{margin-top:4px;border-bottom:1px solid #e7ebe9;}
+.salary-details summary{cursor:pointer;list-style:none;padding:15px 0;font-weight:700;color:#17312a;display:flex;align-items:center;justify-content:space-between;}
+.salary-details summary::-webkit-details-marker{display:none;}
+.salary-details summary::after{content:'⌄';font-size:1.05rem;color:#65716c;}
+.salary-details[open] summary::after{content:'⌃';}
+.salary-details-body{padding:0 0 5px;}
+.monthly-payslip-card{width:100%;margin-top:16px;padding:15px 0;background:#fff;border:0;border-top:1px solid #e1e6e3;border-radius:0;display:flex;justify-content:space-between;align-items:center;text-align:left;color:#17312a;cursor:pointer;}
+.monthly-payslip-card span{display:flex;flex-direction:column;gap:3px;}
+.monthly-payslip-card strong{font-size:1rem;}.monthly-payslip-card small{color:#7a8580;font-size:.82rem;}.monthly-payslip-card b{font-size:1.6rem;font-weight:400;color:#68746f;}
+.profile-logout-wrap{margin-top:22px;padding-top:17px;border-top:1px solid #e1e6e3;display:flex;justify-content:flex-end;}
+.profile-logout{min-width:92px;background:#fff;color:#7b2929;border:1px solid #d9bcbc;border-radius:9px;padding:10px 18px;cursor:pointer;}
+.profile-logout:hover{background:#fff6f6;}
+.profile-loading,.profile-error{padding:20px 0;color:#78837f;line-height:1.7;}.profile-error{color:#8b4a4a;}
+.payslip-modal{width:min(420px,calc(100vw - 36px));padding:26px;}.payslip-modal h2{margin:4px 0 18px;}.payslip-empty{border:1px dashed #d6dfdb;border-radius:12px;background:#fafcfb;padding:24px;text-align:center;color:#66736d;}.payslip-empty strong{color:#17312a;display:block;margin-bottom:8px;}.payslip-empty p{margin:0;font-size:.9rem;line-height:1.6;}
+@media(max-width:600px){.staff-profile-modal{width:calc(100vw - 24px);padding:22px 18px 20px;}.staff-profile-basic>div,.salary-details-body>div{align-items:flex-start;}.staff-profile-basic strong,.salary-details-body strong{max-width:62%;}.profile-logout-wrap{justify-content:stretch}.profile-logout{width:100%;}.payslip-modal{width:calc(100vw - 24px);}}
