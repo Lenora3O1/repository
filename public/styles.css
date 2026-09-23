@@ -2166,3 +2166,6 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .modal.modal-wide .editor-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(max-width:900px){.panel-lite .check-list{grid-template-columns:1fr}.modal.modal-wide .editor-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.modal.modal-wide .editor-grid{grid-template-columns:1fr}}
+
+/* V5.6 人員管理：封存／永不錄用 */
+.archive-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.archive-list{display:grid;gap:10px;margin-top:12px}.archive-card{display:grid;gap:4px;padding:14px 16px;border:1px solid #dfe8e3;border-radius:12px;background:#fbfdfc}.archive-card span{font-size:.85rem;font-weight:700;color:#6d7f76}.archive-card small{color:#718079}.check-row{display:flex;align-items:center;gap:8px}.check-row input{width:18px;height:18px}.panel-lite{border:1px solid #e2e9e5;border-radius:12px;padding:14px;margin-top:12px;background:#fcfdfc}.check-list{display:grid;gap:8px;margin-top:10px}

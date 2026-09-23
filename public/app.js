@@ -17,7 +17,7 @@ async function boot(){
     if(loginBtn)loginBtn.textContent='登入';
     const s=await api('/api/staff/session');
     if(s.loggedIn){
-      if(s.user.role==='company_admin'){ location.href='company.html'; return; }
+      if(s.entry==='company' || s.user.role==='company_admin'){ location.href='company.html'; return; }
       await applyStaffBranding();
       showHome(s.user);
     }else showLogin();
@@ -52,8 +52,10 @@ function showHome(user){
     profile.onclick=()=>showStaffProfile(user);
     profile.title='查看人職資料';
   }
-  window.refreshWorkspaceMenu?.('staff');loadHome(user);
+  window.refreshWorkspaceMenu?.('staff');loadHome(user); if(Array.isArray(user.site_assignments)&&user.site_assignments.length>1) openSiteContextPicker(user.site_assignments); else if(Array.isArray(user.site_assignments)&&user.site_assignments.length===1) selectSiteContext(user.site_assignments[0].community_id);
 }
+async function selectSiteContext(communityId){try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(communityId)})});}catch(e){console.warn('site context select failed',e)}}
+function openSiteContextPicker(assignments){const old=document.getElementById('siteContextPicker');if(old)old.remove();const modal=document.createElement('div');modal.id='siteContextPicker';modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal" role="dialog" aria-modal="true"><div class="eyebrow">現場工作台</div><h2>請選擇要進入的案場</h2><p class="modal-note">您同時服務多個案場。進入後只會看到該案場的資料，不會與其他社區混在一起。</p><div class="community-choice-list">${assignments.map(a=>`<button type="button" class="community-choice" data-cid="${a.community_id}"><span>🏠</span><strong>${escapeHtml(a.community_name||'未命名案場')}</strong><span>→</span></button>`).join('')}</div></div>`;document.body.appendChild(modal);document.body.classList.add('modal-open');modal.querySelectorAll('[data-cid]').forEach(btn=>btn.addEventListener('click',async()=>{await selectSiteContext(btn.dataset.cid);modal.remove();document.body.classList.remove('modal-open');setTopbarCompany((assignments.find(a=>String(a.community_id)===String(btn.dataset.cid))||{}).community_name||'（公司名稱）');loadHome();}));}
 async function showStaffProfile(user){
   const old=document.getElementById('staffProfileModal');
   if(old)old.remove();
@@ -305,7 +307,7 @@ function validateCurrentPage(){savePageAnswers();const missing=getPageQuestions(
 async function onSubmit(e){e.preventDefault();if(!validateCurrentPage())return;await saveNow(true);const btn=$('submitBtn');btn.disabled=true;btn.textContent='送出中…';try{const r=await api(`/api/staff/drafts/${draftId}/submit`,{method:'POST'});showMessage(`🎉 交接清冊已正式送出！單號：${r.id}`,'success');draftId=null;draftCommunityId=null;answers={};currentPage=0;setTimeout(()=>showHomeAfterSubmit(),900)}catch(err){showMessage(err.message,'error');btn.disabled=false;btn.textContent='確認並正式送出 ✓'}}
 function showHomeAfterSubmit(){api('/api/staff/session').then(s=>showHome(s.user)).catch(showLogin)}
 async function backHome(){await saveNow(true);await loadChecklistModule('交接清冊');}
-$('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||''})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
+$('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('staffLogout').addEventListener('click',async()=>{if(dirty&&draftId)await saveNow(true);await api('/api/staff/logout',{method:'POST'});showLogin();$('employeePassword').value='';});
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
