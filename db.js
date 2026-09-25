@@ -380,6 +380,67 @@ const unassignedStaff = db.prepare('SELECT u.id FROM staff_users u LEFT JOIN sta
 const assignDefault = db.prepare('INSERT OR IGNORE INTO staff_communities (staff_id,community_id) VALUES (?,?)');
 for (const u of unassignedStaff) assignDefault.run(u.id, defaultCommunity.id);
 
+// V5.6.1：修復「同名公司被建立成兩個 tenant」造成的資料看得到但公司後台看不到問題。
+// 只在非常明確的情況下自動合併：
+// 1) 兩個 tenant 名稱完全相同；
+// 2) 其中一個 tenant 有公司管理員、另一個沒有；
+// 3) 有公司管理員的 tenant 目前沒有一般人員，但另一個 tenant 有一般人員／社區。
+// 這是針對舊版升級造成的資料分流修復，不會任意合併不同公司的資料。
+function repairDuplicateNamedTenants() {
+  const tenants = db.prepare('SELECT id,name,status FROM tenants ORDER BY id').all();
+  const norm = v => String(v || '').trim().replace(/\s+/g, '');
+  const stats = db.prepare(`SELECT tenant_id,
+      SUM(CASE WHEN role='company_admin' THEN 1 ELSE 0 END) AS admin_count,
+      SUM(CASE WHEN role='staff' THEN 1 ELSE 0 END) AS staff_count
+    FROM staff_users WHERE tenant_id IS NOT NULL GROUP BY tenant_id`).all();
+  const statMap = new Map(stats.map(x => [Number(x.tenant_id), x]));
+  const communityCounts = new Map(db.prepare('SELECT tenant_id,COUNT(*) AS c FROM communities GROUP BY tenant_id').all().map(x => [Number(x.tenant_id), Number(x.c)]));
+
+  for (const target of tenants) {
+    const targetStat = statMap.get(Number(target.id)) || {admin_count:0,staff_count:0};
+    if (Number(targetStat.admin_count) <= 0 || Number(targetStat.staff_count) > 0) continue;
+
+    const candidates = tenants.filter(source => {
+      if (source.id === target.id || norm(source.name) !== norm(target.name)) return false;
+      const sourceStat = statMap.get(Number(source.id)) || {admin_count:0,staff_count:0};
+      return Number(sourceStat.admin_count) === 0 && Number(sourceStat.staff_count) > 0 && Number(communityCounts.get(Number(source.id)) || 0) > 0;
+    });
+
+    if (candidates.length !== 1) continue;
+    const source = candidates[0];
+    const sourceId = Number(source.id);
+    const targetId = Number(target.id);
+    const conflict = db.prepare('SELECT s.id,s.employee_id FROM staff_users s JOIN staff_users t ON t.tenant_id=? AND t.employee_id=s.employee_id WHERE s.tenant_id=?').all(targetId, sourceId);
+    if (conflict.length) {
+      console.warn(`[V5.6.1] 找到同名 tenant，但因員編衝突未自動合併：${source.name} source=${sourceId} target=${targetId}`);
+      continue;
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE staff_users SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE communities SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE staff_work_assignments SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE staff_person_archive SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE submissions SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE drafts SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE templates SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE audit_logs SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE dashboard_pins SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE staff_todos SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+      // menu_configs 有 UNIQUE(scope, tenant_id)，若目標公司已有相同 scope，保留目標設定並移除來源重複列。
+      const sourceMenus = db.prepare('SELECT id,scope FROM menu_configs WHERE tenant_id=?').all(sourceId);
+      for (const m of sourceMenus) {
+        const exists = db.prepare('SELECT id FROM menu_configs WHERE tenant_id=? AND scope=?').get(targetId, m.scope);
+        if (exists) db.prepare('DELETE FROM menu_configs WHERE id=?').run(m.id);
+        else db.prepare('UPDATE menu_configs SET tenant_id=? WHERE id=?').run(targetId, m.id);
+      }
+    });
+    tx();
+    console.warn(`[V5.6.1] 已將同名公司資料合併至有公司管理員的 tenant：${source.name} source=${sourceId} -> target=${targetId}`);
+  }
+}
+repairDuplicateNamedTenants();
+
 module.exports = db;
 module.exports.makePassword = makePassword;
 module.exports.verifyPassword = verifyPassword;

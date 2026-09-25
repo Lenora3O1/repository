@@ -427,6 +427,7 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   const adminEmployeeId=String(req.body?.admin_employee_id||'').trim(); const adminName=String(req.body?.admin_name||'').trim(); const adminPassword=String(req.body?.admin_password||'');
   if(!name||!adminEmployeeId||!adminName||adminPassword.length<4)return res.status(400).json({error:'請完整填寫公司名稱、公司管理員員編、姓名與至少 4 碼密碼'});
   if(code && db.prepare('SELECT id FROM tenants WHERE code=?').get(code))return res.status(400).json({error:'公司代碼已存在'});
+  if(db.prepare('SELECT id FROM tenants WHERE name=?').get(name))return res.status(400).json({error:'已有同名公司。請直接使用既有公司，不要重新建立相同公司。'});
   const finalCode=code||`company-${Date.now()}`; const t=now(); const tx=db.transaction(()=>{
     const info=db.prepare('INSERT INTO tenants (name,code,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(name,finalCode,'active',t,t);
     const tid=info.lastInsertRowid; const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
