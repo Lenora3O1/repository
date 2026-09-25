@@ -184,6 +184,22 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_staff_work_assignments_staff ON staff_work_assignments(staff_id);
   CREATE INDEX IF NOT EXISTS idx_staff_work_assignments_scope ON staff_work_assignments(tenant_id,scope_type,community_id);
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL,
+    recipient_id INTEGER NOT NULL,
+    sender_employee_id TEXT NOT NULL DEFAULT '',
+    sender_name TEXT NOT NULL DEFAULT '',
+    recipient_employee_id TEXT NOT NULL DEFAULT '',
+    recipient_name TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_messages_recipient_unread ON messages(tenant_id,recipient_id,read_at,created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(tenant_id,sender_id,created_at);
   CREATE TABLE IF NOT EXISTS staff_person_archive (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_uid TEXT NOT NULL,

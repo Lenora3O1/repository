@@ -36,6 +36,12 @@ function hasCompanyAccess(u){ return !!u && (u.role==='company_admin' || ['inter
 function requireCompanyAdmin(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && hasCompanyAccess(u)) return next(); return res.status(403).json({error:'這個帳號沒有公司內部後台權限'}); }
 function requireCompanyPermission(key){ return (req,res,next)=>{ const u=getUser(req); if(u?.role==='company_admin') return next(); const a=getCompanyAssignment(u); if(effectivePermissions(u).includes(key)) return next(); return res.status(403).json({error:'您目前沒有這項公司內部功能的權限'}); }; }
 function tenantId(req){ return Number(req.session.tenantId); }
+function requireMessageUser(req,res,next){
+  const u=getUser(req);
+  const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null;
+  if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='super_admin') return next();
+  return res.status(403).json({error:'目前帳號沒有內部訊息功能權限'});
+}
 
 function sanitizeBranding(row){return {tenant_id:row.id,title:row.brand_title||row.name||'物業管理公司',subtitle:row.brand_subtitle||'物業管理公司',loginTitle:row.brand_login_title||'公司管理員登入',loginHint:row.brand_login_hint||'這裡是公司專屬管理後台。登入後可管理人員、社區與公司資料。',intro:row.brand_intro||'這裡只管理您所屬公司的資料。',logoText:row.brand_logo_text||'',accent:row.brand_accent||'#2F6F5E',accentDark:row.brand_accent_dark||'#204F42',bg:row.brand_bg||'#F7F7F4',panel:row.brand_panel||'#FFFFFF'};}
 function validHex(v,fallback){const s=String(v||'').trim();return /^#[0-9a-fA-F]{6}$/.test(s)?s:fallback;}
@@ -380,6 +386,78 @@ app.get('/api/staff/session',(req,res)=>{
 app.post('/api/staff/select-community',requireStaffFiller,(req,res)=>{const cid=Number(req.body?.community_id);const u=getUser(req);if(!cid||!getAccessibleCommunity(req,cid))return res.status(403).json({error:'您沒有這個案場的工作權限'});req.session.activeCommunityId=cid;const c=db.prepare('SELECT id,name FROM communities WHERE id=?').get(cid);res.json({success:true,community:c});});
 // ===== 公司/社區資訊給前台 =====
 app.get('/api/staff/tenant',requireStaff,(req,res)=>res.json({tenant:getTenant(req)}));
+// ===== 內部訊息中心：公司內勤 ↔ 社區駐點人員；總後臺不提供此功能 =====
+app.get('/api/messages/unread-count',requireMessageUser,(req,res)=>{
+  const u=getUser(req);
+  const row=db.prepare('SELECT COUNT(*) AS count FROM messages WHERE tenant_id=? AND recipient_id=? AND read_at IS NULL').get(tenantId(req),u.id);
+  res.json({count:Number(row?.count||0)});
+});
+
+app.get('/api/messages/recipients',requireMessageUser,(req,res)=>{
+  const u=getUser(req);
+  const rows=db.prepare(`SELECT id,employee_id,name,role,work_type,position,job_category,job_level
+    FROM staff_users
+    WHERE tenant_id=? AND id<>? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'
+    ORDER BY CASE WHEN role='company_admin' THEN 0 ELSE 1 END, employee_id`).all(tenantId(req),u.id);
+  res.json(rows.map(r=>({
+    id:r.id,employee_id:r.employee_id,name:r.name,role:r.role,work_type:r.work_type||'site',
+    position:r.position||'',job_category:r.job_category||'',job_level:r.job_level||'',
+    scope_label:r.role==='company_admin'?'公司管理員':(r.work_type==='hybrid'?'內勤＋駐點':r.work_type==='internal'?'公司內勤':'社區駐點')
+  })));
+});
+
+app.get('/api/messages',requireMessageUser,(req,res)=>{
+  const u=getUser(req);
+  const limit=Math.min(100,Math.max(10,Number(req.query?.limit)||50));
+  const rows=db.prepare(`SELECT m.id,m.subject,m.body,m.created_at,m.read_at,m.sender_id,m.recipient_id,
+      COALESCE(m.sender_employee_id,s.employee_id,'') AS sender_employee_id,COALESCE(m.sender_name,s.name,'已離職／帳號已封存') AS sender_name,s.role AS sender_role,s.work_type AS sender_work_type,
+      COALESCE(m.recipient_employee_id,r.employee_id,'') AS recipient_employee_id,COALESCE(m.recipient_name,r.name,'已離職／帳號已封存') AS recipient_name,r.role AS recipient_role,r.work_type AS recipient_work_type
+    FROM messages m
+    LEFT JOIN staff_users s ON s.id=m.sender_id
+    LEFT JOIN staff_users r ON r.id=m.recipient_id
+    WHERE m.tenant_id=? AND (m.sender_id=? OR m.recipient_id=?)
+    ORDER BY m.created_at DESC LIMIT ?`).all(tenantId(req),u.id,u.id,limit);
+  res.json(rows.map(r=>({
+    ...r,
+    direction:r.recipient_id===u.id?'in':'out',
+    unread:r.recipient_id===u.id&&!r.read_at,
+    sender:{id:r.sender_id,employee_id:r.sender_employee_id,name:r.sender_name,role:r.sender_role,work_type:r.sender_work_type||'site'},
+    recipient:{id:r.recipient_id,employee_id:r.recipient_employee_id,name:r.recipient_name,role:r.recipient_role,work_type:r.recipient_work_type||'site'}
+  })));
+});
+
+app.post('/api/messages',requireMessageUser,(req,res)=>{
+  const u=getUser(req);
+  const recipientId=Number(req.body?.recipient_id);
+  const subject=String(req.body?.subject||'').trim().slice(0,120);
+  const body=String(req.body?.body||'').trim();
+  if(!recipientId)return res.status(400).json({error:'請選擇收件人'});
+  if(recipientId===u.id)return res.status(400).json({error:'不能傳送訊息給自己'});
+  if(!body)return res.status(400).json({error:'訊息內容不可空白'});
+  if(body.length>5000)return res.status(400).json({error:'訊息內容最多 5000 字'});
+  const recipient=db.prepare(`SELECT id,employee_id,name FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'`).get(recipientId,tenantId(req));
+  if(!recipient)return res.status(404).json({error:'找不到可用的公司內部收件人'});
+  const t=now();
+  const info=db.prepare('INSERT INTO messages (tenant_id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,subject,body,created_at,read_at) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)').run(tenantId(req),u.id,recipientId,u.employee_id,u.name,recipient.employee_id,recipient.name,subject||'內部訊息',body,t);
+  res.json({success:true,id:info.lastInsertRowid,created_at:t});
+});
+
+app.put('/api/messages/:id/read',requireMessageUser,(req,res)=>{
+  const u=getUser(req);
+  const id=Number(req.params.id);
+  if(!id)return res.status(400).json({error:'訊息編號不正確'});
+  const t=now();
+  const result=db.prepare('UPDATE messages SET read_at=? WHERE id=? AND tenant_id=? AND recipient_id=? AND read_at IS NULL').run(t,id,tenantId(req),u.id);
+  res.json({success:true,updated:result.changes>0,read_at:t});
+});
+
+app.put('/api/messages/read-all',requireMessageUser,(req,res)=>{
+  const u=getUser(req);
+  const t=now();
+  const result=db.prepare('UPDATE messages SET read_at=? WHERE tenant_id=? AND recipient_id=? AND read_at IS NULL').run(t,tenantId(req),u.id);
+  res.json({success:true,updated_count:result.changes});
+});
+
 app.get('/api/staff/profile',requireStaff,(req,res)=>{
   const u=getUser(req);
   if(!u)return res.status(401).json({error:'尚未登入'});
