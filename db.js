@@ -380,63 +380,100 @@ const unassignedStaff = db.prepare('SELECT u.id FROM staff_users u LEFT JOIN sta
 const assignDefault = db.prepare('INSERT OR IGNORE INTO staff_communities (staff_id,community_id) VALUES (?,?)');
 for (const u of unassignedStaff) assignDefault.run(u.id, defaultCommunity.id);
 
-// V5.6.1：修復「同名公司被建立成兩個 tenant」造成的資料看得到但公司後台看不到問題。
-// 只在非常明確的情況下自動合併：
-// 1) 兩個 tenant 名稱完全相同；
-// 2) 其中一個 tenant 有公司管理員、另一個沒有；
-// 3) 有公司管理員的 tenant 目前沒有一般人員，但另一個 tenant 有一般人員／社區。
-// 這是針對舊版升級造成的資料分流修復，不會任意合併不同公司的資料。
+// V5.6.2：更完整地修復同名公司被拆成多個 tenant 的問題。
+// 背景：若舊版部署／初始化曾建立第二個「同名公司」，公司管理員可能在 tenant A，
+// 一般人員／社區卻仍在 tenant B，造成總後台看得到、公司後台看不到。
+// 本修復只處理「完全同名」的 tenant，並以「有公司管理員的 tenant」作為公司主 tenant。
+// 為避免誤合併：若同名 tenant 之間存在相同員編，整組不自動合併，只記錄警告。
 function repairDuplicateNamedTenants() {
-  const tenants = db.prepare('SELECT id,name,status FROM tenants ORDER BY id').all();
-  const norm = v => String(v || '').trim().replace(/\s+/g, '');
-  const stats = db.prepare(`SELECT tenant_id,
-      SUM(CASE WHEN role='company_admin' THEN 1 ELSE 0 END) AS admin_count,
-      SUM(CASE WHEN role='staff' THEN 1 ELSE 0 END) AS staff_count
-    FROM staff_users WHERE tenant_id IS NOT NULL GROUP BY tenant_id`).all();
-  const statMap = new Map(stats.map(x => [Number(x.tenant_id), x]));
-  const communityCounts = new Map(db.prepare('SELECT tenant_id,COUNT(*) AS c FROM communities GROUP BY tenant_id').all().map(x => [Number(x.tenant_id), Number(x.c)]));
+  const tenants = db.prepare('SELECT * FROM tenants ORDER BY id').all();
+  const norm = v => String(v || '').trim().replace(/\\s+/g, '');
+  const byName = new Map();
+  for (const t of tenants) {
+    const key = norm(t.name);
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(t);
+  }
 
-  for (const target of tenants) {
-    const targetStat = statMap.get(Number(target.id)) || {admin_count:0,staff_count:0};
-    if (Number(targetStat.admin_count) <= 0 || Number(targetStat.staff_count) > 0) continue;
+  for (const [nameKey, group] of byName) {
+    if (group.length < 2) continue;
 
-    const candidates = tenants.filter(source => {
-      if (source.id === target.id || norm(source.name) !== norm(target.name)) return false;
-      const sourceStat = statMap.get(Number(source.id)) || {admin_count:0,staff_count:0};
-      return Number(sourceStat.admin_count) === 0 && Number(sourceStat.staff_count) > 0 && Number(communityCounts.get(Number(source.id)) || 0) > 0;
+    const stats = group.map(t => {
+      const staff = db.prepare("SELECT id,employee_id,role FROM staff_users WHERE tenant_id=?").all(t.id);
+      const communities = db.prepare('SELECT id,name,status FROM communities WHERE tenant_id=?').all(t.id);
+      return {
+        tenant: t,
+        admins: staff.filter(x => x.role === 'company_admin'),
+        staff: staff.filter(x => x.role === 'staff'),
+        allStaff: staff,
+        communities
+      };
     });
 
-    if (candidates.length !== 1) continue;
-    const source = candidates[0];
-    const sourceId = Number(source.id);
-    const targetId = Number(target.id);
-    const conflict = db.prepare('SELECT s.id,s.employee_id FROM staff_users s JOIN staff_users t ON t.tenant_id=? AND t.employee_id=s.employee_id WHERE s.tenant_id=?').all(targetId, sourceId);
-    if (conflict.length) {
-      console.warn(`[V5.6.1] 找到同名 tenant，但因員編衝突未自動合併：${source.name} source=${sourceId} target=${targetId}`);
+    const adminTenants = stats.filter(x => x.admins.length > 0);
+    const dataTenants = stats.filter(x => x.staff.length > 0 || x.communities.length > 0);
+    if (adminTenants.length !== 1 || dataTenants.length === 0) {
+      console.warn(`[V5.6.2] 同名公司暫不自動合併：${group[0].name}；管理員公司=${adminTenants.length}，有一般資料公司=${dataTenants.length}`);
       continue;
     }
 
-    const tx = db.transaction(() => {
-      db.prepare('UPDATE staff_users SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE communities SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE staff_work_assignments SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE staff_person_archive SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE submissions SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE drafts SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE templates SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE audit_logs SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE dashboard_pins SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      db.prepare('UPDATE staff_todos SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
-      // menu_configs 有 UNIQUE(scope, tenant_id)，若目標公司已有相同 scope，保留目標設定並移除來源重複列。
-      const sourceMenus = db.prepare('SELECT id,scope FROM menu_configs WHERE tenant_id=?').all(sourceId);
-      for (const m of sourceMenus) {
-        const exists = db.prepare('SELECT id FROM menu_configs WHERE tenant_id=? AND scope=?').get(targetId, m.scope);
-        if (exists) db.prepare('DELETE FROM menu_configs WHERE id=?').run(m.id);
-        else db.prepare('UPDATE menu_configs SET tenant_id=? WHERE id=?').run(targetId, m.id);
-      }
-    });
-    tx();
-    console.warn(`[V5.6.1] 已將同名公司資料合併至有公司管理員的 tenant：${source.name} source=${sourceId} -> target=${targetId}`);
+    const target = adminTenants[0];
+    const sources = stats.filter(x => x.tenant.id !== target.tenant.id && (x.staff.length > 0 || x.communities.length > 0));
+    if (!sources.length) continue;
+
+    const targetEmployeeIds = new Set(target.allStaff.map(x => String(x.employee_id)));
+    const sourceEmployeeIds = sources.flatMap(x => x.allStaff.map(y => String(y.employee_id)));
+    const allSourceCounts = new Map();
+    for (const e of sourceEmployeeIds) allSourceCounts.set(e, (allSourceCounts.get(e) || 0) + 1);
+    const duplicateEmployeeIds = sourceEmployeeIds.filter(e => targetEmployeeIds.has(e) || (allSourceCounts.get(e) || 0) > 1);
+    if (duplicateEmployeeIds.length) {
+      console.warn(`[V5.6.2] 同名公司存在員編衝突，為安全起見不自動合併：${group[0].name}；衝突：${[...new Set(duplicateEmployeeIds)].join(', ')}`);
+      continue;
+    }
+
+    const dbFile = path.join(DATA_DIR, 'data.sqlite');
+    const backupDir = path.join(DATA_DIR, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    const backupFile = path.join(backupDir, `data.sqlite.before-v5.6.2-${Date.now()}.bak`);
+    try { fs.copyFileSync(dbFile, backupFile); } catch (e) {
+      console.error('[V5.6.2] 無法建立資料庫備份，取消 tenant 合併：', e.message);
+      continue;
+    }
+
+    try {
+      const tx = db.transaction(() => {
+        for (const source of sources) {
+          const sourceId = Number(source.tenant.id);
+          const targetId = Number(target.tenant.id);
+
+          db.prepare('UPDATE staff_users SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE communities SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE staff_work_assignments SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE staff_person_archive SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE submissions SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE drafts SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE templates SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE audit_logs SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE dashboard_pins SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE staff_todos SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+
+          const sourceMenus = db.prepare('SELECT id,scope FROM menu_configs WHERE tenant_id=?').all(sourceId);
+          for (const m of sourceMenus) {
+            const exists = db.prepare('SELECT id FROM menu_configs WHERE tenant_id=? AND scope=?').get(targetId, m.scope);
+            if (exists) db.prepare('DELETE FROM menu_configs WHERE id=?').run(m.id);
+            else db.prepare('UPDATE menu_configs SET tenant_id=? WHERE id=?').run(targetId, m.id);
+          }
+
+          // 同名來源 tenant 已完成資料搬遷；保留 tenant 本身作為停用紀錄，避免歷史 ID 被重用。
+          db.prepare("UPDATE tenants SET status='inactive', updated_at=? WHERE id=?").run(new Date().toISOString(), sourceId);
+        }
+      });
+      tx();
+      console.warn(`[V5.6.2] 已修復同名公司：${target.tenant.name}；主 tenant=${target.tenant.id}，來源 tenant=${sources.map(x => x.tenant.id).join(',')}`);
+    } catch (e) {
+      console.error(`[V5.6.2] tenant 合併失敗，交易已回滾：${e.message}；備份：${backupFile}`);
+    }
   }
 }
 repairDuplicateNamedTenants();
