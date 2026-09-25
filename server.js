@@ -42,6 +42,21 @@ function requireMessageUser(req,res,next){
   if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='super_admin') return next();
   return res.status(403).json({error:'目前帳號沒有內部訊息功能權限'});
 }
+function getMessageAuditSettings(tenantIdValue){
+  const row=db.prepare('SELECT * FROM message_audit_settings WHERE tenant_id=?').get(tenantIdValue);
+  if(!row) return {enabled:false,auditor_ids:[]};
+  let ids=[]; try{const x=JSON.parse(row.auditor_ids_json||'[]'); ids=Array.isArray(x)?x.map(Number).filter(Boolean):[]}catch{}
+  return {enabled:!!row.enabled,auditor_ids:ids,updated_at:row.updated_at||''};
+}
+function canAuditMessages(req){
+  const u=getUser(req); if(!u||!u.tenant_id||u.role==='super_admin') return false;
+  const cfg=getMessageAuditSettings(u.tenant_id);
+  return cfg.enabled && (u.role==='company_admin' || cfg.auditor_ids.includes(Number(u.id)));
+}
+function requireMessageAuditor(req,res,next){
+  if(canAuditMessages(req)) return next();
+  return res.status(403).json({error:'目前帳號沒有訊息稽核權限，或公司尚未啟用此功能'});
+}
 
 function sanitizeBranding(row){return {tenant_id:row.id,title:row.brand_title||row.name||'物業管理公司',subtitle:row.brand_subtitle||'物業管理公司',loginTitle:row.brand_login_title||'公司管理員登入',loginHint:row.brand_login_hint||'這裡是公司專屬管理後台。登入後可管理人員、社區與公司資料。',intro:row.brand_intro||'這裡只管理您所屬公司的資料。',logoText:row.brand_logo_text||'',accent:row.brand_accent||'#2F6F5E',accentDark:row.brand_accent_dark||'#204F42',bg:row.brand_bg||'#F7F7F4',panel:row.brand_panel||'#FFFFFF'};}
 function validHex(v,fallback){const s=String(v||'').trim();return /^#[0-9a-fA-F]{6}$/.test(s)?s:fallback;}
@@ -395,15 +410,21 @@ app.get('/api/messages/unread-count',requireMessageUser,(req,res)=>{
 
 app.get('/api/messages/recipients',requireMessageUser,(req,res)=>{
   const u=getUser(req);
-  const rows=db.prepare(`SELECT id,employee_id,name,role,work_type,position,job_category,job_level
-    FROM staff_users
-    WHERE tenant_id=? AND id<>? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'
-    ORDER BY CASE WHEN role='company_admin' THEN 0 ELSE 1 END, employee_id`).all(tenantId(req),u.id);
-  res.json(rows.map(r=>({
-    id:r.id,employee_id:r.employee_id,name:r.name,role:r.role,work_type:r.work_type||'site',
-    position:r.position||'',job_category:r.job_category||'',job_level:r.job_level||'',
-    scope_label:r.role==='company_admin'?'公司管理員':(r.work_type==='hybrid'?'內勤＋駐點':r.work_type==='internal'?'公司內勤':'社區駐點')
-  })));
+  const q=String(req.query?.q||'').trim();
+  const rows=db.prepare(`SELECT u.id,u.employee_id,u.name,u.role,u.work_type,u.position,u.job_category,u.job_level,
+      COALESCE((SELECT GROUP_CONCAT(c.name,'、') FROM staff_communities sc JOIN communities c ON c.id=sc.community_id WHERE sc.staff_id=u.id AND c.tenant_id=u.tenant_id AND c.status='active'),'') AS legacy_communities,
+      COALESCE((SELECT GROUP_CONCAT(c.name,'、') FROM staff_work_assignments a JOIN communities c ON c.id=a.community_id WHERE a.staff_id=u.id AND a.tenant_id=u.tenant_id AND a.scope_type='site' AND c.status='active'),'') AS assigned_communities
+    FROM staff_users u
+    WHERE u.tenant_id=? AND u.id<>? AND u.is_active=1 AND COALESCE(u.person_status,'active')='active' AND u.role<>'super_admin'
+    ORDER BY CASE WHEN u.role='company_admin' THEN 0 ELSE 1 END, u.employee_id`).all(tenantId(req),u.id);
+  const norm=v=>String(v||'').toLowerCase();
+  const list=rows.map(r=>{
+    const communities=[...new Set(String(`${r.legacy_communities||''}、${r.assigned_communities||''}`).split('、').map(x=>x.trim()).filter(Boolean))];
+    return {id:r.id,employee_id:r.employee_id,name:r.name,role:r.role,work_type:r.work_type||'site',position:r.position||'',job_category:r.job_category||'',job_level:r.job_level||'',communities,scope_label:r.role==='company_admin'?'公司管理員':(r.work_type==='hybrid'?'內勤＋駐點':r.work_type==='internal'?'公司內勤':'社區駐點')};
+  }).filter(r=>{
+    if(!q)return true; const hay=[r.name,r.employee_id,r.position,r.job_category,r.job_level,r.scope_label,...r.communities].map(norm).join(' '); return hay.includes(norm(q));
+  });
+  res.json(list);
 });
 
 app.get('/api/messages',requireMessageUser,(req,res)=>{
@@ -470,6 +491,46 @@ app.get('/api/messages/conversation/:partnerId',requireMessageUser,(req,res)=>{
 app.put('/api/messages/conversation/:partnerId/read',requireMessageUser,(req,res)=>{const u=getUser(req),partnerId=Number(req.params.partnerId);if(!partnerId)return res.status(400).json({error:'對話對象不正確'});const t=now();const result=db.prepare('UPDATE messages SET read_at=? WHERE tenant_id=? AND sender_id=? AND recipient_id=? AND read_at IS NULL').run(t,tenantId(req),partnerId,u.id);res.json({success:true,updated_count:result.changes,read_at:t});});
 app.get('/api/messages/typing',requireMessageUser,(req,res)=>{const u=getUser(req),partnerId=Number(req.query?.partner_id);if(!partnerId)return res.status(400).json({error:'對話對象不正確'});const current=now();db.prepare('DELETE FROM message_typing WHERE tenant_id=? AND expires_at<=?').run(tenantId(req),current);const row=db.prepare('SELECT 1 AS typing FROM message_typing WHERE tenant_id=? AND sender_id=? AND recipient_id=? AND expires_at>?').get(tenantId(req),partnerId,u.id,current);res.json({typing:!!row});});
 app.post('/api/messages/typing',requireMessageUser,(req,res)=>{const u=getUser(req),partnerId=Number(req.body?.partner_id),typing=!!req.body?.typing;if(!partnerId||partnerId===u.id)return res.status(400).json({error:'對話對象不正確'});const recipient=db.prepare("SELECT id FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'").get(partnerId,tenantId(req));if(!recipient)return res.status(404).json({error:'找不到可用的對話對象'});if(typing){const t=now(),exp=new Date(Date.now()+4000).toISOString();db.prepare(`INSERT INTO message_typing(tenant_id,sender_id,recipient_id,updated_at,expires_at) VALUES(?,?,?,?,?) ON CONFLICT(tenant_id,sender_id,recipient_id) DO UPDATE SET updated_at=excluded.updated_at,expires_at=excluded.expires_at`).run(tenantId(req),u.id,partnerId,t,exp);}else db.prepare('DELETE FROM message_typing WHERE tenant_id=? AND sender_id=? AND recipient_id=?').run(tenantId(req),u.id,partnerId);res.json({success:true});});
+// ===== 企業訊息稽核：預設關閉；由總後臺啟用並指定稽核人員。總後臺本身不直接查看內容。 =====
+app.get('/api/admin/message-audit-settings',requireSuperAdmin,(req,res)=>{
+  const tid=Number(req.query?.tenant_id); if(!tid)return res.status(400).json({error:'請指定公司'});
+  const tenant=db.prepare('SELECT id,name FROM tenants WHERE id=?').get(tid); if(!tenant)return res.status(404).json({error:'找不到公司'});
+  const cfg=getMessageAuditSettings(tid);
+  const staff=db.prepare(`SELECT id,employee_id,name,role,position,job_category,admin_level FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY CASE WHEN role='company_admin' THEN 0 ELSE 1 END, employee_id`).all(tid);
+  res.json({tenant,cfg,staff});
+});
+app.put('/api/admin/message-audit-settings',requireSuperAdmin,(req,res)=>{
+  const tid=Number(req.body?.tenant_id); if(!tid)return res.status(400).json({error:'請指定公司'});
+  if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(tid))return res.status(404).json({error:'找不到公司'});
+  const enabled=!!req.body?.enabled; const ids=Array.isArray(req.body?.auditor_ids)?[...new Set(req.body.auditor_ids.map(Number).filter(Boolean))]:[];
+  const valid=new Set(db.prepare("SELECT id FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active'").all(tid).map(x=>Number(x.id)));
+  const clean=ids.filter(id=>valid.has(id)); const t=now();
+  db.prepare(`INSERT INTO message_audit_settings (tenant_id,enabled,auditor_ids_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled,auditor_ids_json=excluded.auditor_ids_json,updated_at=excluded.updated_at`).run(tid,enabled?1:0,JSON.stringify(clean),t);
+  res.json({success:true,cfg:getMessageAuditSettings(tid)});
+});
+app.get('/api/company/message-audit/access',requireCompanyAdmin,(req,res)=>{
+  const u=getUser(req),cfg=getMessageAuditSettings(tenantId(req));
+  res.json({enabled:cfg.enabled,authorized:canAuditMessages(req),user_id:u?.id||null});
+});
+app.get('/api/company/message-audit/search',requireCompanyAdmin,requireMessageAuditor,(req,res)=>{
+  const q=String(req.query?.q||'').trim(); const from=String(req.query?.from||'').trim(); const to=String(req.query?.to||'').trim();
+  let sql=`SELECT m.id,m.sender_id,m.recipient_id,m.sender_employee_id,m.sender_name,m.recipient_employee_id,m.recipient_name,m.body,m.created_at,m.read_at FROM messages m WHERE m.tenant_id=?`; const params=[tenantId(req)];
+  if(q){sql+=` AND (m.body LIKE ? OR m.sender_name LIKE ? OR m.recipient_name LIKE ? OR m.sender_employee_id LIKE ? OR m.recipient_employee_id LIKE ?)`;const k=`%${q}%`;params.push(k,k,k,k,k);}
+  if(/^\d{4}-\d{2}-\d{2}$/.test(from)){sql+=` AND substr(m.created_at,1,10)>=?`;params.push(from);}
+  if(/^\d{4}-\d{2}-\d{2}$/.test(to)){sql+=` AND substr(m.created_at,1,10)<=?`;params.push(to);}
+  sql+=' ORDER BY m.created_at DESC LIMIT 500';
+  const rows=db.prepare(sql).all(...params);
+  db.prepare(`INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(tenantId(req),getUser(req).employee_id,getUser(req).name,'view-message-audit','message_audit','search','',JSON.stringify({q,from,to,count:rows.length}),now());
+  res.json({rows});
+});
+app.get('/api/company/message-audit/conversation/:partnerId',requireCompanyAdmin,requireMessageAuditor,(req,res)=>{
+  const u=getUser(req),partnerId=Number(req.params.partnerId); if(!partnerId)return res.status(400).json({error:'對話對象不正確'});
+  const partner=db.prepare("SELECT id,employee_id,name,role,work_type,position,job_category,job_level FROM staff_users WHERE id=? AND tenant_id=?").get(partnerId,tenantId(req)); if(!partner)return res.status(404).json({error:'找不到人員'});
+  const rows=db.prepare(`SELECT id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,body,created_at,read_at FROM messages WHERE tenant_id=? AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) ORDER BY created_at ASC LIMIT 500`).all(tenantId(req),u.id,partnerId,partnerId,u.id);
+  db.prepare(`INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(tenantId(req),u.employee_id,u.name,'view-message-conversation','message_audit','conversation',String(partnerId),JSON.stringify({partner_employee_id:partner.employee_id,partner_name:partner.name,count:rows.length}),now());
+  res.json({partner,messages:rows});
+});
+
 app.get('/api/staff/profile',requireStaff,(req,res)=>{
   const u=getUser(req);
   if(!u)return res.status(401).json({error:'尚未登入'});

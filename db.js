@@ -206,6 +206,12 @@ db.exec(`
     PRIMARY KEY (tenant_id,sender_id,recipient_id)
   );
   CREATE INDEX IF NOT EXISTS idx_message_typing_recipient ON message_typing(tenant_id,recipient_id,expires_at);
+  CREATE TABLE IF NOT EXISTS message_audit_settings (
+    tenant_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    auditor_ids_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS staff_person_archive (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_uid TEXT NOT NULL,
