@@ -1,11 +1,11 @@
-let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{tenantId:null,scope:'company',global:[],items:[],overrides:{}}};
+let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]}};
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
 function showMain(){$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
-for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}});
+for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','messageAudit'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
   for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料…</div></div>';}
@@ -203,6 +203,23 @@ function removeCustomMenu(i){state.customization.items.splice(i,1);renderCustomi
 function moveCustomMenu(i,d){const j=i+d;if(j<0||j>=state.customization.items.length)return;[state.customization.items[i],state.customization.items[j]]=[state.customization.items[j],state.customization.items[i]];renderCustomization()}
 async function saveCustomMenu(){try{await api('/api/admin/menu-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId,items:state.customization.items})});$('customSaveMsg').innerHTML='<span class="msg success inline-msg">✓ 已儲存這家公司的客製目錄</span>';await loadCustomization();renderCustomization();}catch(err){$('customSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}}
 async function resetCustomMenu(){if(!confirm('確定讓這家公司恢復使用平台預設目錄嗎？不會刪除任何人員或業務資料。'))return;try{await api('/api/admin/menu-config/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId})});await loadCustomization();renderCustomization();}catch(err){alert(err.message)}}
+async function loadMessageAudit(){
+  if(!state.tenants.length) state.tenants=await api('/api/admin/tenants');
+  const active=state.messageAudit.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
+  state.messageAudit.tenantId=active?Number(active):null;
+  if(!active){state.messageAudit={...state.messageAudit,staff:[],enabled:false,auditor_ids:[]};return;}
+  const d=await api(`/api/admin/message-audit-settings?tenant_id=${encodeURIComponent(active)}`);
+  state.messageAudit={tenantId:active,enabled:!!d.cfg?.enabled,auditor_ids:d.cfg?.auditor_ids||[],staff:d.staff||[]};
+}
+function renderMessageAudit(){
+  const el=$('tab-messageAudit');if(!el)return;const c=state.messageAudit;
+  const tenantOptions=state.tenants.map(x=>`<option value="${x.id}" ${Number(x.id)===Number(c.tenantId)?'selected':''}>${escapeHtml(x.name)}（${escapeHtml(x.code)}）</option>`).join('');
+  const rows=c.staff.map(p=>`<label class="audit-person-row"><input type="checkbox" class="audit-person" value="${p.id}" ${c.auditor_ids.includes(Number(p.id))?'checked':''}><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.employee_id)} · ${escapeHtml(p.position||p.job_category|| (p.role==='company_admin'?'公司管理員':''))}</small></span></label>`).join('');
+  el.innerHTML=`<div class="panel designer-intro"><div class="section-title">🔐 企業訊息稽核</div><p>這項功能預設關閉。啟用後，由公司自行指定具有稽核權限的人員；總後臺只負責「開關＋授權」，不直接查看員工聊天內容。</p><div class="editor-grid"><div><label>企業</label><select id="auditTenantSelect">${tenantOptions}</select></div><div><label>稽核功能</label><select id="auditEnabled"><option value="0" ${!c.enabled?'selected':''}>關閉</option><option value="1" ${c.enabled?'selected':''}>啟用</option></select></div></div></div><div class="panel"><div class="section-title">👤 指定可查看對話的人員</div><p class="hint">建議只授權公司負責人、總經理或公司指定的稽核／管理職務。所有查看行為都會留下稽核紀錄。</p><div class="audit-people-grid">${rows||'<div class="empty">目前沒有可授權的人員。</div>'}</div><div class="form-nav"><button onclick="saveMessageAudit()">💾 儲存稽核設定</button><span id="auditSaveMsg"></span></div></div>`;
+  $('auditTenantSelect').addEventListener('change',async e=>{c.tenantId=Number(e.target.value);await loadMessageAudit();renderMessageAudit();});
+}
+async function saveMessageAudit(){try{const ids=[...document.querySelectorAll('.audit-person:checked')].map(x=>Number(x.value));const enabled=$('auditEnabled').value==='1';await api('/api/admin/message-audit-settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant_id:state.messageAudit.tenantId,enabled,auditor_ids:ids})});$('auditSaveMsg').innerHTML='<span class="msg success inline-msg">✓ 已儲存企業訊息稽核設定</span>';await loadMessageAudit();renderMessageAudit();}catch(err){$('auditSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}}
+
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function escapeAttr(s){return escapeHtml(s)}
 checkSession();
