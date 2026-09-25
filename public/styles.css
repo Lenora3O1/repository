@@ -2169,3 +2169,52 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 
 /* V5.6 人員管理：封存／永不錄用 */
 .archive-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.archive-list{display:grid;gap:10px;margin-top:12px}.archive-card{display:grid;gap:4px;padding:14px 16px;border:1px solid #dfe8e3;border-radius:12px;background:#fbfdfc}.archive-card span{font-size:.85rem;font-weight:700;color:#6d7f76}.archive-card small{color:#718079}.check-row{display:flex;align-items:center;gap:8px}.check-row input{width:18px;height:18px}.panel-lite{border:1px solid #e2e9e5;border-radius:12px;padding:14px;margin-top:12px;background:#fcfdfc}.check-list{display:grid;gap:8px;margin-top:10px}
+
+/* =========================================================
+   V5.7.1｜公司內勤 ↔ 社區駐點「內部訊息中心」
+   總後臺不顯示；只存在已登入的工作台。
+   ========================================================= */
+.message-center-wrap{display:flex;align-items:center;margin-left:auto;margin-right:10px;flex:0 0 auto;position:relative;z-index:1250}
+.message-center-button{position:relative;width:46px;height:46px;border-radius:50%;padding:0;border:1px solid rgba(255,255,255,.34);background:rgba(255,255,255,.14);color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.10);backdrop-filter:blur(5px);transition:transform .16s ease,background .16s ease}
+.message-center-button:hover{transform:translateY(-1px);background:rgba(255,255,255,.23)}
+.message-center-button:active{transform:translateY(0) scale(.97)}
+.message-center-icon{font-size:1.32rem;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.12))}
+.message-badge{position:absolute;right:-3px;top:-4px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:#e53935;color:#fff;border:2px solid var(--staff-green,#195B39);font-size:.66rem;font-weight:800;line-height:15px;text-align:center;box-sizing:border-box;box-shadow:0 2px 7px rgba(150,0,0,.25)}
+.message-badge[hidden]{display:none}
+.message-center-modal{width:min(820px,calc(100vw - 44px))}
+.message-tabs{display:flex;gap:8px;margin:12px 0 18px;border-bottom:1px solid var(--line,#d9e3df);padding-bottom:8px}
+.message-tabs button{border:0;background:transparent;color:var(--ink-soft,#64736e);padding:9px 13px;border-radius:9px;font-weight:800;cursor:pointer}
+.message-tabs button:hover{background:var(--accent-soft,#e7f1ed);color:var(--accent-dark,#204f42)}
+.message-tabs button.active{background:var(--accent-soft,#e7f1ed);color:var(--accent-dark,#204f42)}
+.message-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;color:var(--ink-soft,#64736e);font-size:.9rem}
+.message-toolbar strong{color:#b3261e}
+.message-list{display:grid;gap:8px;max-height:52vh;overflow:auto;padding-right:2px}
+.message-row{width:100%;display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:11px;align-items:center;text-align:left;background:#fff;border:1px solid var(--line,#d9e3df);border-radius:12px;padding:12px 13px;color:var(--ink,#17312a);cursor:pointer;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
+.message-row:hover{border-color:var(--accent,#2F6F5E);background:#fbfdfc;box-shadow:0 5px 16px rgba(20,50,42,.07)}
+.message-row.is-unread{border-left:4px solid #e53935;background:#fffafa}
+.message-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--accent-soft,#e7f1ed);color:var(--accent-dark,#204f42);font-weight:900}
+.message-row-main{min-width:0;display:grid;gap:3px}
+.message-row-head{display:flex;justify-content:space-between;gap:10px;min-width:0}
+.message-row-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.message-row-head small{flex:0 0 auto;color:var(--ink-soft,#64736e);font-size:.76rem}
+.message-row-meta,.message-row-subject,.message-row-preview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.message-row-meta{font-size:.75rem;color:var(--ink-soft,#64736e)}
+.message-row-subject{font-weight:800;color:var(--accent-dark,#204f42)}
+.message-row-preview{font-size:.83rem;color:#52635e}
+.message-unread-dot{align-self:start;border-radius:999px;background:#e53935;color:#fff;padding:3px 7px;font-size:.68rem;font-weight:800;white-space:nowrap}
+.message-empty{text-align:center;padding:48px 18px;color:var(--ink-soft,#64736e);border:1px dashed var(--line,#d9e3df);border-radius:12px}
+.message-empty>div{font-size:2rem;margin-bottom:8px}.message-empty strong{display:block;color:var(--ink,#17312a);margin-bottom:5px}.message-empty p{margin:0}
+.message-compose-form{display:grid;gap:2px}.message-compose-form textarea{resize:vertical;min-height:180px;line-height:1.6}
+.message-detail{padding-top:2px}.message-back{border:0;background:transparent;color:var(--accent-dark,#204f42);font-weight:800;cursor:pointer;padding:6px 0;margin-bottom:8px}.message-detail-head{display:flex;justify-content:space-between;gap:18px;padding:12px 0 15px;border-bottom:1px solid var(--line,#d9e3df)}
+.message-detail-direction{font-size:.76rem;font-weight:800;color:var(--ink-soft,#64736e);margin-bottom:5px}.message-detail-head h3{margin:0 0 6px}.message-detail-head p{margin:0;color:var(--ink-soft,#64736e);font-size:.85rem}.message-detail-head time{flex:0 0 auto;color:var(--ink-soft,#64736e);font-size:.78rem}
+.message-detail-body{padding:22px 4px;min-height:180px;line-height:1.8;white-space:normal;word-break:break-word}
+@media(max-width:700px){
+  .message-center-wrap{margin-right:4px}
+  .message-center-button{width:42px;height:42px}
+  .message-center-modal{width:calc(100vw - 24px);max-height:88vh;padding:18px}
+  .message-list{max-height:58vh}
+  .message-row{grid-template-columns:34px minmax(0,1fr) auto;padding:10px}
+  .message-avatar{width:30px;height:30px}
+  .message-row-head{display:block}.message-row-head small{display:block;margin-top:2px}
+  .message-detail-head{display:block}.message-detail-head time{display:block;margin-top:7px}
+}

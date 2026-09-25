@@ -36,6 +36,7 @@ function setTopbarCompany(name){
   if(sub)sub.textContent='';
 }
 function showLogin(){
+  window.__workspaceAuthenticated=false;window.setMessageCenterVisible?.(false);
   $('loginView').style.display='block';$('homeView').style.display='none';$('editorView').style.display='none';$('staffTop').style.display='none';
   $('loginInternal').style.display='flex';
   setTopbarCompany('（公司名稱）');
@@ -43,6 +44,7 @@ function showLogin(){
 }
 function showCompanyHint(user){ location.href='company.html'; }
 function showHome(user){
+  window.__workspaceAuthenticated=true;window.setMessageCenterVisible?.(true);
   $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('loginInternal').style.display='none';
   $('staffName').textContent=user.name||'使用者';
   setTopbarCompany(user.tenant_name||'（公司名稱）');
