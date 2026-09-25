@@ -44,6 +44,7 @@ function showLogin(){
 }
 function showCompanyHint(user){ location.href='company.html'; }
 function showHome(user){
+  window.__messageCurrentUserId=user?.id||null;
   window.__workspaceAuthenticated=true;window.setMessageCenterVisible?.(true);
   $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('loginInternal').style.display='none';
   $('staffName').textContent=user.name||'使用者';

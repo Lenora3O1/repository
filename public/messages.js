@@ -1,189 +1,28 @@
 (function(){
-  const $ = id => document.getElementById(id);
-  let visible = false;
-  let modal = null;
-  let activeTab = 'inbox';
-  let messages = [];
-  let recipients = [];
-  let pollTimer = null;
-
-  function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-  function fmt(v){
-    if(!v)return '';
-    const d=new Date(v); if(Number.isNaN(d.getTime()))return String(v);
-    return d.toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-  }
-  function workLabel(r){
-    if(r?.role==='company_admin')return '公司管理員';
-    if(r?.work_type==='hybrid')return '內勤＋駐點';
-    if(r?.work_type==='internal')return '公司內勤';
-    return '社區駐點';
-  }
-  async function api(url,options={}){
-    const r=await fetch(url,{credentials:'same-origin',...options});
-    let d={}; try{d=await r.json()}catch{}
-    if(!r.ok)throw new Error(d.error||'操作失敗');
-    return d;
-  }
-  function setBadge(count){
-    const wrap=$('messageCenterWrap'), badge=$('messageBadge');
-    if(!wrap||!badge)return;
-    const n=Number(count||0);
-    badge.textContent=n>99?'99+':String(n);
-    badge.hidden=n<=0;
-    if(visible)wrap.style.display='flex';
-  }
-  async function refresh(){
-    try{
-      const d=await api('/api/messages/unread-count');
-      setBadge(d.count);
-      if(!visible){
-        const w=$('messageCenterWrap'); if(w)w.style.display='flex';
-      }
-      return Number(d.count||0);
-    }catch(e){
-      if(e?.message?.includes('登入')||e?.message?.includes('權限')||e?.message?.includes('帳號')){
-        const w=$('messageCenterWrap'); if(w)w.style.display='none';
-      }
-      return 0;
-    }
-  }
-  async function loadData(){
-    const [list,people]=await Promise.all([api('/api/messages?limit=100'),api('/api/messages/recipients')]);
-    messages=list; recipients=people; render();
-    await refresh();
-  }
-  function ensureModal(){
-    if(modal)return modal;
-    modal=document.createElement('div');
-    modal.id='messageCenterModal';
-    modal.className='modal-backdrop';
-    modal.innerHTML=`<div class="modal modal-wide message-center-modal" role="dialog" aria-modal="true" aria-labelledby="messageCenterTitle">
-      <button type="button" class="modal-close" id="messageCenterClose" aria-label="關閉訊息中心">×</button>
-      <div class="eyebrow">內部溝通</div>
-      <h2 id="messageCenterTitle">💬 訊息中心</h2>
-      <p class="modal-note">這裡是公司內勤與社區駐點人員的內部聯絡管道，不需要另外加入私人 LINE。</p>
-      <div class="message-tabs">
-        <button type="button" data-message-tab="inbox" class="active">收件匣</button>
-        <button type="button" data-message-tab="compose">✚ 撰寫訊息</button>
-      </div>
-      <div id="messageInboxPane"></div>
-      <div id="messageComposePane" style="display:none"></div>
-    </div>`;
-    document.body.appendChild(modal);
-    document.body.classList.add('modal-open');
-    modal.querySelector('#messageCenterClose').addEventListener('click',close);
-    modal.addEventListener('click',e=>{if(e.target===modal)close()});
-    modal.querySelectorAll('[data-message-tab]').forEach(btn=>btn.addEventListener('click',()=>switchTab(btn.dataset.messageTab)));
-    return modal;
-  }
-  function close(){
-    if(modal){modal.remove();modal=null;document.body.classList.remove('modal-open');}
-  }
-  function switchTab(tab){
-    activeTab=tab==='compose'?'compose':'inbox';
-    if(!modal)return;
-    modal.querySelectorAll('[data-message-tab]').forEach(b=>b.classList.toggle('active',b.dataset.messageTab===activeTab));
-    $('messageInboxPane').style.display=activeTab==='inbox'?'block':'none';
-    $('messageComposePane').style.display=activeTab==='compose'?'block':'none';
-    render();
-  }
-  function render(){
-    if(!modal)return;
-    if(activeTab==='inbox')renderInbox(); else renderCompose();
-  }
-  function renderInbox(){
-    const el=$('messageInboxPane'); if(!el)return;
-    if(!messages.length){
-      el.innerHTML='<div class="message-empty"><div>💬</div><strong>目前沒有訊息</strong><p>公司內勤與案場人員之間的聯絡，都可以從這裡進行。</p></div>';
-      return;
-    }
-    const unread=messages.filter(m=>m.unread).length;
-    el.innerHTML=`<div class="message-toolbar"><span>共 ${messages.length} 則訊息${unread?`，<strong>${unread} 則未讀</strong>`:''}</span><button type="button" class="secondary" id="messageReadAll" ${unread?'':'disabled'}>全部標記已讀</button></div>
-      <div class="message-list">${messages.map(m=>{
-        const incoming=m.direction==='in';
-        const person=incoming?m.sender:m.recipient;
-        return `<button type="button" class="message-row ${m.unread?'is-unread':''}" data-message-id="${m.id}">
-          <span class="message-avatar">${incoming?'↙':'↗'}</span>
-          <span class="message-row-main"><span class="message-row-head"><strong>${incoming?'來自':'傳給'} ${esc(person.name||'已離職／帳號已封存')}</strong><small>${fmt(m.created_at)}</small></span>
-          <span class="message-row-meta">${esc(person.employee_id||'')}　·　${esc(workLabel(person))}</span>
-          <span class="message-row-subject">${esc(m.subject||'內部訊息')}</span>
-          <span class="message-row-preview">${esc(m.body||'').replace(/\n/g,' ')}</span></span>
-          ${m.unread?'<span class="message-unread-dot">未讀</span>':''}
-        </button>`;
-      }).join('')}</div>`;
-    $('messageReadAll')?.addEventListener('click',async()=>{try{await api('/api/messages/read-all',{method:'PUT'});await loadData()}catch(e){alert(e.message)}});
-    el.querySelectorAll('[data-message-id]').forEach(row=>row.addEventListener('click',()=>openMessage(Number(row.dataset.messageId))));
-  }
-  function renderCompose(prefill={}){
-    const el=$('messageComposePane'); if(!el)return;
-    const opts=recipients.map(r=>`<option value="${r.id}" ${Number(prefill.recipient_id)===Number(r.id)?'selected':''}>${esc(r.name)}（${esc(r.employee_id)}）｜${esc(r.scope_label||workLabel(r))}</option>`).join('');
-    el.innerHTML=`<form id="messageComposeForm" class="message-compose-form">
-      <div class="field"><label>收件人</label><select id="messageRecipient" required><option value="">請選擇公司內部人員</option>${opts}</select></div>
-      <div class="field"><label>主旨</label><input id="messageSubject" maxlength="120" value="${esc(prefill.subject||'')}" placeholder="例如：明天上午請協助確認住戶資料"></div>
-      <div class="field"><label>訊息內容</label><textarea id="messageBody" maxlength="5000" rows="8" required placeholder="請輸入訊息內容…">${esc(prefill.body||'')}</textarea></div>
-      <div class="modal-note">📌 訊息只會在同一家公司內傳遞，總後台不會看到這個訊息中心。</div>
-      <div class="modal-actions"><button type="button" class="secondary" id="messageCancelCompose">取消</button><button type="submit" id="messageSendBtn">送出訊息</button></div>
-    </form>`;
-    $('messageComposeForm').addEventListener('submit',sendMessage);
-    $('messageCancelCompose').addEventListener('click',()=>switchTab('inbox'));
-  }
-  async function sendMessage(e){
-    e.preventDefault();
-    const btn=$('messageSendBtn'); btn.disabled=true; btn.textContent='傳送中…';
-    try{
-      await api('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recipient_id:Number($('messageRecipient').value),subject:$('messageSubject').value,body:$('messageBody').value})});
-      alert('訊息已送出。');
-      activeTab='inbox';
-      await loadData();
-      switchTab('inbox');
-    }catch(err){alert(err.message);btn.disabled=false;btn.textContent='送出訊息';}
-  }
-  async function openMessage(id){
-    const m=messages.find(x=>Number(x.id)===Number(id)); if(!m||!modal)return;
-    if(m.unread&&m.direction==='in'){
-      try{await api(`/api/messages/${m.id}/read`,{method:'PUT'});m.read_at=new Date().toISOString();m.unread=false;await refresh();}catch(e){}
-    }
-    const incoming=m.direction==='in'; const person=incoming?m.sender:m.recipient;
-    const pane=$('messageInboxPane');
-    pane.innerHTML=`<div class="message-detail">
-      <button type="button" class="message-back" id="messageBack">← 返回收件匣</button>
-      <div class="message-detail-head"><div><div class="message-detail-direction">${incoming?'收到訊息':'已傳送訊息'}</div><h3>${esc(m.subject||'內部訊息')}</h3><p>${incoming?'來自':'收件人'}：<strong>${esc(person.name||'已離職／帳號已封存')}</strong>（${esc(person.employee_id||'')}） · ${esc(workLabel(person))}</p></div><time>${fmt(m.created_at)}</time></div>
-      <div class="message-detail-body">${esc(m.body).replace(/\n/g,'<br>')}</div>
-      <div class="modal-actions"><button type="button" id="messageReplyBtn">↩ 回覆</button></div>
-    </div>`;
-    $('messageBack').addEventListener('click',()=>{renderInbox()});
-    $('messageReplyBtn').addEventListener('click',()=>{
-      activeTab='compose';
-      switchTab('compose');
-      renderCompose({recipient_id:person.id,subject:`回覆：${m.subject||'內部訊息'}`,body:''});
-    });
-  }
-  function setVisible(v){
-    visible=!!v;
-    const w=$('messageCenterWrap');
-    if(w)w.style.display=visible?'flex':'none';
-    if(!visible)close();
-    if(visible){refresh();if(!pollTimer)pollTimer=setInterval(refresh,30000);}
-    else if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
-  }
-  async function open(){
-    if(!visible)return;
-    ensureModal();
-    activeTab='inbox';
-    switchTab('inbox');
-    try{await loadData();}catch(e){
-      $('messageInboxPane').innerHTML=`<div class="message-empty"><strong>訊息中心暫時無法載入</strong><p>${esc(e.message)}</p></div>`;
-    }
-  }
-  function init(){
-    const btn=$('messageCenterButton');
-    if(btn)btn.addEventListener('click',open);
-    window.setMessageCenterVisible=setVisible;
-    window.refreshMessageCenter=refresh;
-    const w=$('messageCenterWrap'); if(w)w.style.display='none';
-    if(window.__workspaceAuthenticated===true)setVisible(true);
-    window.addEventListener('workspace-authenticated',e=>setVisible(!!e.detail));
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+const $=id=>document.getElementById(id);let visible=false,modal=null,messages=[],recipients=[],conversations=[],activePartnerId=null,activePartner=null,chatMessages=[],refreshTimer=null,chatTimer=null,typingTimer=null,typingHeartbeat=null;
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fmt(v){if(!v)return '';const d=new Date(v);if(Number.isNaN(d.getTime()))return String(v);const now=new Date();return d.toDateString()===now.toDateString()?d.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}):d.toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}
+function workLabel(r){if(r?.role==='company_admin')return '公司管理員';if(r?.work_type==='hybrid')return '內勤＋駐點';if(r?.work_type==='internal')return '公司內勤';return '社區駐點';}
+async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
+function setBadge(n){const b=$('messageBadge'),w=$('messageCenterWrap');if(!b||!w)return;n=Number(n||0);b.textContent=n>99?'99+':String(n);b.hidden=n<=0;w.style.display='flex';}
+async function refreshBadge(){try{const d=await api('/api/messages/unread-count');setBadge(d.count);}catch(e){if(/登入|權限|帳號/.test(e.message||'')){const w=$('messageCenterWrap');if(w)w.style.display='none';}}}
+async function loadLists(){const [list,people]=await Promise.all([api('/api/messages?limit=300'),api('/api/messages/recipients')]);messages=list;recipients=people;const map=new Map();messages.forEach(m=>{const p=m.direction==='in'?m.sender:m.recipient;if(!p?.id)return;const k=Number(p.id);if(!map.has(k))map.set(k,{partner:p,last:m,unread:m.unread?1:0});else if(m.unread)map.get(k).unread++;});conversations=[...map.values()].sort((a,b)=>new Date(b.last.created_at)-new Date(a.last.created_at));await refreshBadge();}
+function ensureModal(){if(modal)return modal;modal=document.createElement('div');modal.id='messageCenterModal';modal.className='modal-backdrop';modal.innerHTML=`<div class="chat-modal" role="dialog" aria-modal="true" aria-label="內部訊息"><button type="button" class="chat-close" id="chatClose">×</button><div class="chat-layout"><aside class="chat-list-pane"><div class="chat-list-head"><div><div class="eyebrow">內部溝通</div><h2>💬 訊息</h2></div><button type="button" class="chat-new-btn" id="chatNewBtn">＋</button></div><div class="chat-search"><input id="chatSearch" placeholder="搜尋人員…"></div><div id="conversationList" class="conversation-list"></div></aside><section class="chat-pane" id="chatPane"><div class="chat-empty"><div class="chat-empty-icon">💬</div><strong>選擇一位同事開始聊天</strong><p>公司內勤與案場人員可以直接在這裡聯絡，不需要另外加私人 LINE。</p></div></section></div></div>`;document.body.appendChild(modal);document.body.classList.add('modal-open');$('chatClose').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});$('chatSearch').addEventListener('input',renderConversationList);$('chatNewBtn').addEventListener('click',showRecipientPicker);renderConversationList();return modal;}
+function close(){stopChatPolling();stopTyping();if(modal){modal.remove();modal=null}document.body.classList.remove('modal-open');activePartnerId=null;activePartner=null;chatMessages=[];}
+function renderConversationList(){const el=$('conversationList');if(!el)return;const q=String($('chatSearch')?.value||'').trim().toLowerCase();const rows=conversations.filter(c=>{const p=c.partner;return !q||`${p.name||''} ${p.employee_id||''} ${workLabel(p)}`.toLowerCase().includes(q)});if(!rows.length){el.innerHTML='<div class="chat-list-empty">目前還沒有聊天<br><small>按右上角 ＋ 找同事聊天</small></div>';return;}el.innerHTML=rows.map(c=>{const p=c.partner;return `<button type="button" class="conversation-item ${Number(activePartnerId)===Number(p.id)?'active':''}" data-partner="${p.id}"><span class="conversation-avatar">${esc((p.name||'?').slice(0,1))}</span><span class="conversation-main"><span class="conversation-top"><strong>${esc(p.name||'已離職／帳號已封存')}</strong><small>${fmt(c.last.created_at)}</small></span><span class="conversation-sub">${esc(workLabel(p))}</span><span class="conversation-preview">${c.last.direction==='out'?'你：':''}${esc(c.last.body||'').replace(/\n/g,' ')}</span></span>${c.unread?`<span class="conversation-unread">${c.unread>99?'99+':c.unread}</span>`:''}</button>`}).join('');el.querySelectorAll('[data-partner]').forEach(b=>b.addEventListener('click',()=>openChat(Number(b.dataset.partner))));}
+function showRecipientPicker(){const el=$('chatPane');if(!el)return;const rows=recipients.filter(r=>Number(r.id)!==Number(window.__messageCurrentUserId));el.innerHTML=`<div class="chat-recipient-picker"><button class="message-back" id="pickerBack">← 返回</button><h3>找同事聊天</h3><p>選擇公司內部或案場同仁。</p><div class="recipient-grid">${rows.map(p=>`<button type="button" class="recipient-card" data-recipient="${p.id}"><span class="conversation-avatar">${esc((p.name||'?').slice(0,1))}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.employee_id)} · ${esc(workLabel(p))}</small></span></button>`).join('')||'<div class="chat-list-empty">目前沒有可聯絡的人員。</div>'}</div></div>`;$('pickerBack').addEventListener('click',()=>{activePartnerId?openChat(activePartnerId):showEmpty()});el.querySelectorAll('[data-recipient]').forEach(b=>b.addEventListener('click',()=>openChat(Number(b.dataset.recipient))));}
+function showEmpty(){const p=$('chatPane');if(p)p.innerHTML='<div class="chat-empty"><div class="chat-empty-icon">💬</div><strong>選擇一位同事開始聊天</strong><p>公司內勤與案場人員可以直接在這裡聯絡。</p></div>';modal?.querySelector('.chat-layout')?.classList.remove('chat-show-pane');}
+async function openChat(id){activePartnerId=id;modal?.querySelector('.chat-layout')?.classList.add('chat-show-pane');stopTyping();try{const d=await api(`/api/messages/conversation/${id}?limit=300`);activePartner=d.partner;chatMessages=d.messages;await api(`/api/messages/conversation/${id}/read`,{method:'PUT'});chatMessages.forEach(m=>{if(m.direction==='in')m.unread=false});await loadLists();renderConversationList();renderChat();startChatPolling();}catch(e){const p=$('chatPane');if(p)p.innerHTML=`<div class="chat-empty"><strong>無法開啟聊天室</strong><p>${esc(e.message)}</p></div>`;}}
+function renderChat(){const p=$('chatPane');if(!p||!activePartner)return;p.innerHTML=`<div class="chat-header"><div class="chat-person"><span class="conversation-avatar large">${esc((activePartner.name||'?').slice(0,1))}</span><div><strong>${esc(activePartner.name||'已離職／帳號已封存')}</strong><small>${esc(activePartner.employee_id||'')} · ${esc(workLabel(activePartner))}</small></div></div><button type="button" class="chat-header-more" id="chatHeaderBack">‹</button></div><div id="chatMessages" class="chat-messages"></div><div id="typingIndicator" class="typing-indicator" aria-live="polite"></div><form id="chatForm" class="chat-inputbar"><textarea id="chatInput" rows="1" maxlength="5000" placeholder="輸入訊息…"></textarea><button type="submit" id="chatSend" aria-label="送出">➤</button></form>`;renderChatMessages(true);$('chatForm').addEventListener('submit',sendChatMessage);$('chatInput').addEventListener('input',handleTyping);$('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatForm').requestSubmit()}});$('chatHeaderBack').addEventListener('click',()=>{stopChatPolling();stopTyping();activePartnerId=null;activePartner=null;showEmpty();});}
+function renderChatMessages(forceBottom=false){const el=$('chatMessages');if(!el)return;const near=el.scrollHeight-el.scrollTop-el.clientHeight<80;el.innerHTML=chatMessages.map(m=>{const out=m.direction==='out';return `<div class="chat-bubble-row ${out?'out':'in'}"><div class="chat-bubble ${out?'out':'in'}">${esc(m.body).replace(/\n/g,'<br>')}<span class="chat-meta">${fmt(m.created_at)} ${out?`<span class="read-dot ${m.read_at?'read':'sent'}" title="${m.read_at?'對方已讀':'已送出，尚未讀取'}"></span>`:''}</span></div></div>`}).join('')||'<div class="chat-empty-inline">開始說第一句話吧 ☺️</div>';if(forceBottom||near)el.scrollTop=el.scrollHeight;}
+async function sendChatMessage(e){e.preventDefault();const input=$('chatInput'),body=String(input?.value||'').trim();if(!body||!activePartnerId)return;const btn=$('chatSend');btn.disabled=true;stopTyping();try{await api('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recipient_id:activePartnerId,subject:'',body})});input.value='';await openChat(activePartnerId);}catch(err){alert(err.message)}finally{btn.disabled=false;input?.focus();}}
+function handleTyping(){const input=$('chatInput');if(!input||!activePartnerId)return;if(input.value.trim()){sendTyping(true);clearTimeout(typingTimer);typingTimer=setTimeout(stopTyping,2500);if(!typingHeartbeat)typingHeartbeat=setInterval(()=>sendTyping(true),1500);}else stopTyping();}
+async function sendTyping(v){if(!activePartnerId)return;try{await api('/api/messages/typing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({partner_id:activePartnerId,typing:v})});}catch(e){}}
+function stopTyping(){clearTimeout(typingTimer);typingTimer=null;if(typingHeartbeat){clearInterval(typingHeartbeat);typingHeartbeat=null}if(activePartnerId)sendTyping(false);}
+async function pollChat(){if(!activePartnerId)return;try{const d=await api(`/api/messages/conversation/${activePartnerId}?limit=300`);const old=chatMessages[chatMessages.length-1]?.id;chatMessages=d.messages;const incoming=chatMessages.filter(m=>m.direction==='in'&&m.unread);if(incoming.length)await api(`/api/messages/conversation/${activePartnerId}/read`,{method:'PUT'});chatMessages.forEach(m=>{if(m.direction==='in')m.unread=false});if(chatMessages[chatMessages.length-1]?.id!==old||incoming.length)renderChatMessages(true);const t=await api(`/api/messages/typing?partner_id=${activePartnerId}`);const ind=$('typingIndicator');if(ind)ind.innerHTML=t.typing?'<span>對方正在輸入</span><i></i><i></i><i></i>':'';await loadLists();renderConversationList();}catch(e){}}
+function startChatPolling(){stopChatPolling();chatTimer=setInterval(pollChat,1500)}function stopChatPolling(){if(chatTimer){clearInterval(chatTimer);chatTimer=null}}
+async function open(){if(!visible)return;ensureModal();try{await loadLists();renderConversationList()}catch(e){const el=$('conversationList');if(el)el.innerHTML=`<div class="chat-list-empty">訊息中心暫時無法載入<br>${esc(e.message)}</div>`;}}
+function setVisible(v){visible=!!v;const w=$('messageCenterWrap');if(w)w.style.display=visible?'flex':'none';if(!visible){close();if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}}else{refreshBadge();if(!refreshTimer)refreshTimer=setInterval(refreshBadge,5000);}}
+function init(){const btn=$('messageCenterButton');if(btn)btn.addEventListener('click',open);window.setMessageCenterVisible=setVisible;window.refreshMessageCenter=refreshBadge;const w=$('messageCenterWrap');if(w)w.style.display='none';if(window.__workspaceAuthenticated===true)setVisible(true);window.addEventListener('workspace-authenticated',e=>setVisible(!!e.detail));}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
