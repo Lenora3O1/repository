@@ -216,20 +216,36 @@ function normalizeCustomMenuTree(items){
   return out;
 }
 function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot=true){
+  // V5.8.6：不要再讓 hidden/class/CSS 決定子目錄是否出現。
+  // 直接依 openIds 產生「可見／不可見」的子樹，避免出現「− 但內容空白」。
   const nodes=customMenuChildren(items,parentId);
   return nodes.map((item)=>{
     const children=customMenuChildren(items,item.id);
     const hasChildren=children.length>0;
     const open=openIds.has(String(item.id));
     const allSiblings=nodes;
-    const pos=allSiblings.findIndex(x=>x.id===item.id);
-    const childRows=hasChildren?customMenuTreeRows(items,item.id,depth+1,openIds,false):'';
+    const pos=allSiblings.findIndex(x=>String(x.id)===String(item.id));
+
+    const childRows=hasChildren
+      ? customMenuTreeRows(items,item.id,depth+1,openIds,false)
+      : '';
+
     const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
-    const toggle=hasChildren?`<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`:'<span class="menu-tree-toggle-placeholder"></span>';
+    const toggle=hasChildren
+      ? `<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`
+      : '<span class="menu-tree-toggle-placeholder"></span>';
     const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
-    const card=`<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}" style="--menu-depth:${depth}">
+
+    const childContainer=hasChildren
+      ? `<div class="custom-menu-children-v586" data-parent-id="${escapeAttr(String(item.id))}" style="display:${open?'block':'none'};padding:10px 10px 12px 20px;background:#f7f9f8;border-top:1px dashed #dbe4df;box-sizing:border-box;width:100%;">${childRows}</div>`
+      : '';
+
+    return `<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}" style="--menu-depth:${depth}">
       <div class="custom-menu-node-head" style="padding-left:${10+depth*18}px">
-        ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
+        ${toggle}
+        <span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span>
+        <strong>${escapeHtml(item.label||'未命名')}</strong>
+        ${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
         <div class="custom-menu-node-actions">
           ${editButton}
           <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',-1)" ${pos===0?'disabled':''} title="同層上移">↑</button>
@@ -237,9 +253,8 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
           ${childButton}
         </div>
       </div>
-      ${hasChildren?`<div class="custom-menu-children${open?' is-open':''}" ${open?'':'hidden'}>${childRows}</div>`:''}
+      ${childContainer}
     </div>`;
-    return card;
   }).join('');
 }
 function renderCustomization(){
