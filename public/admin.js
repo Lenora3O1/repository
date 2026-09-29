@@ -229,8 +229,8 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),ancest
       ? `<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`
       : '<span class="menu-tree-toggle-placeholder"></span>';
     const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
-    const nodeStyle=`display:${visible?'block':'none'};`;
-    return `<div class="custom-menu-node custom-menu-node-v588" data-menu-id="${escapeAttr(String(item.id))}" data-parent-id="${escapeAttr(String(item.parentId||''))}" data-depth="${depth}" style="${nodeStyle}">
+    const nodeClass=`custom-menu-node custom-menu-node-v588${visible?' is-v588-visible':''}`;
+    return `<div class="${nodeClass}" data-menu-id="${escapeAttr(String(item.id))}" data-parent-id="${escapeAttr(String(item.parentId||''))}" data-depth="${depth}" style="${nodeStyle}">
       <div class="custom-menu-node-head" style="padding-left:${10+depth*18}px">
         ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
         <div class="custom-menu-node-actions">
@@ -285,7 +285,10 @@ function toggleCustomMenuNode(id){
     const value=!!p && isOpen(parent) && calcVisible(p);
     visibleCache.set(id,value);return value;
   };
-  nodes.forEach(node=>{node.style.display=calcVisible(node)?'block':'none';});
+  nodes.forEach(node=>{
+    const visible=calcVisible(node);
+    node.classList.toggle('is-v588-visible',visible);
+  });
   const button=byId.get(key)?.querySelector('.menu-tree-toggle');
   if(button){button.textContent=isOpen(key)?'−':'＋';button.setAttribute('aria-expanded',isOpen(key)?'true':'false');button.title=isOpen(key)?'收合子目錄':'展開子目錄';}
 }

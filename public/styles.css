@@ -2314,5 +2314,6 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 
 
 /* V5.8.8：平台預設目錄樹改為扁平 DOM + parentId 控制顯示，避免舊 nested CSS 影響子目錄。 */
-.custom-menu-node-v588{display:block; width:100%; box-sizing:border-box; overflow:visible;}
+.custom-menu-node-v588{display:none!important; width:100%; box-sizing:border-box; overflow:visible;}
+.custom-menu-node-v588.is-v588-visible{display:block!important;}
 .custom-menu-node-v588 .custom-menu-node-head{width:100%; box-sizing:border-box;}
