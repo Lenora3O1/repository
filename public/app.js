@@ -92,18 +92,13 @@ async function showStaffProfile(user){
         <div><span>公司</span><strong>${escapeHtml(d.tenant_name||'—')}</strong></div>
         <div><span>服務案場</span><strong>${communityNames.length?escapeHtml(communityNames.join('、')):'目前無駐點案場'}</strong></div>
       </div>
-      <details class="salary-details">
-        <summary>薪資相關</summary>
-        <div class="salary-details-body">
-          <div><span>試用期</span><strong>${salary.trial_end_date?`至 ${escapeHtml(salary.trial_end_date)}`:'尚未設定'}</strong></div>
-          <div><span>正式薪資</span><strong>${salary.formal_salary?escapeHtml(salary.formal_salary):'尚未設定'}</strong></div>
-          <div><span>投保級距</span><strong>${salary.insurance_level?escapeHtml(salary.insurance_level):'尚未設定'}</strong></div>
-          <div><span>健保眷屬</span><strong>${Number.isFinite(Number(salary.health_dependents))?Number(salary.health_dependents):0} 人</strong></div>
-        </div>
-      </details>
+      <button type="button" class="monthly-payslip-card" id="salaryDetailsBtn">
+        <span><strong>薪資相關</strong><small>試用期、正式薪資、投保等資料</small></span><b>›</b>
+      </button>
       <button type="button" class="monthly-payslip-card" id="monthlyPayslipBtn">
         <span><strong>本月薪資單</strong><small>點選查看當月薪資單</small></span><b>›</b>
       </button>`;
+    modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard(salary));
     modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d));
   }catch(e){modal.querySelector('#staffProfileBody').innerHTML=`<div class="profile-error">目前無法載入職員資料。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
@@ -112,6 +107,19 @@ function openPayslipCard(profile){
   const modal=document.createElement('div');modal.id='staffPayslipModal';modal.className='modal-backdrop payslip-backdrop';
   const now=new Date();const ym=`${now.getFullYear()} 年 ${now.getMonth()+1} 月`;
   modal.innerHTML=`<div class="modal payslip-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">本月薪資單</div><h2>${escapeHtml(ym)}</h2><div class="payslip-empty"><strong>本月薪資單尚未建立</strong><p>待公司後台建立薪資資料後，這裡會顯示當月薪資單。</p></div></div>`;
+  document.body.appendChild(modal);document.body.classList.add('modal-open');
+  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
+}
+function openSalaryDetailsCard(salary){
+  salary=salary||{};
+  const old=document.getElementById('staffSalaryModal');if(old)old.remove();
+  const modal=document.createElement('div');modal.id='staffSalaryModal';modal.className='modal-backdrop payslip-backdrop';
+  modal.innerHTML=`<div class="modal payslip-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">薪資相關</div><h2>試用與投保資料</h2><div class="staff-profile-basic salary-details-body">
+    <div><span>試用期</span><strong>${salary.trial_end_date?`至 ${escapeHtml(salary.trial_end_date)}`:'尚未設定'}</strong></div>
+    <div><span>正式薪資</span><strong>${salary.formal_salary?escapeHtml(salary.formal_salary):'尚未設定'}</strong></div>
+    <div><span>投保級距</span><strong>${salary.insurance_level?escapeHtml(salary.insurance_level):'尚未設定'}</strong></div>
+    <div><span>健保眷屬</span><strong>${Number.isFinite(Number(salary.health_dependents))?Number(salary.health_dependents):0} 人</strong></div>
+  </div></div>`;
   document.body.appendChild(modal);document.body.classList.add('modal-open');
   const close=()=>{modal.remove();document.body.classList.remove('modal-open')};modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
 }
