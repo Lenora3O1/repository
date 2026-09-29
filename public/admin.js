@@ -216,8 +216,7 @@ function normalizeCustomMenuTree(items){
   return out;
 }
 function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot=true){
-  // V5.8.6：不要再讓 hidden/class/CSS 決定子目錄是否出現。
-  // 直接依 openIds 產生「可見／不可見」的子樹，避免出現「− 但內容空白」。
+  // V5.8.7：子目錄改成「明確渲染 + 明確顯示」，不再依賴 hidden/class 的舊 CSS。
   const nodes=customMenuChildren(items,parentId);
   return nodes.map((item)=>{
     const children=customMenuChildren(items,item.id);
@@ -225,26 +224,19 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
     const open=openIds.has(String(item.id));
     const allSiblings=nodes;
     const pos=allSiblings.findIndex(x=>String(x.id)===String(item.id));
-
-    const childRows=hasChildren
-      ? customMenuTreeRows(items,item.id,depth+1,openIds,false)
-      : '';
-
-    const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
+    const childRows=hasChildren ? customMenuTreeRows(items,item.id,depth+1,openIds,false) : '';
     const toggle=hasChildren
       ? `<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`
       : '<span class="menu-tree-toggle-placeholder"></span>';
+    const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
     const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
-
-    const childContainer=hasChildren
-      ? `<div class="custom-menu-children-v586" data-parent-id="${escapeAttr(String(item.id))}" style="display:${open?'block':'none'};padding:10px 10px 12px 20px;background:#f7f9f8;border-top:1px dashed #dbe4df;box-sizing:border-box;width:100%;">${childRows}</div>`
-      : '';
-
+    const childContainer=hasChildren ? `
+      <div class="custom-menu-children-v587" data-parent-id="${escapeAttr(String(item.id))}" data-child-count="${children.length}" style="display:${open?'block':'none'} !important;">
+        ${childRows}
+      </div>` : '';
     return `<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}" style="--menu-depth:${depth}">
       <div class="custom-menu-node-head" style="padding-left:${10+depth*18}px">
-        ${toggle}
-        <span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span>
-        <strong>${escapeHtml(item.label||'未命名')}</strong>
+        ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>
         ${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
         <div class="custom-menu-node-actions">
           ${editButton}
@@ -257,6 +249,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
     </div>`;
   }).join('');
 }
+
 function renderCustomization(){
   const el=$('tab-customization'); if(!el)return;
   const c=state.customization;
@@ -278,12 +271,20 @@ function renderCustomization(){
 }
 function toggleCustomMenuNode(id){
   const c=state.customization;
-  const open=new Set((c.openIds||[]).map(String));
   const key=String(id);
-  if(open.has(key)) open.delete(key); else open.add(key);
+  const open=new Set((c.openIds||[]).map(String));
+  const willOpen=!open.has(key);
+  if(willOpen) open.add(key); else open.delete(key);
   c.openIds=[...open];
-  renderCustomization();
+
+  // 先直接操作目前這一顆節點，避免整棵樹重繪造成狀態不同步。
+  const node=document.querySelector(`.custom-menu-node[data-menu-id="${CSS.escape(key)}"]`);
+  const child=node?.querySelector(`.custom-menu-children-v587[data-parent-id="${CSS.escape(key)}"]`);
+  const button=node?.querySelector('.menu-tree-toggle');
+  if(child){ child.style.setProperty('display',willOpen?'block':'none','important'); }
+  if(button){ button.textContent=willOpen?'−':'＋'; button.setAttribute('aria-expanded',willOpen?'true':'false'); button.title=willOpen?'收合子目錄':'展開子目錄'; }
 }
+
 function ensureCustomMenuModal(){
   let modal=document.getElementById('customMenuEditorModal');
   if(modal)return modal;

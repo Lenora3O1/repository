@@ -2311,3 +2311,8 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .custom-menu-node-actions button{display:inline-flex!important;align-items:center!important;justify-content:center!important;font-size:.85rem!important;line-height:1.4!important;opacity:1!important;visibility:visible!important;color:inherit!important;}
 .custom-menu-children{display:none;flex-direction:column!important;gap:10px!important;width:100%!important;box-sizing:border-box!important;padding:10px 10px 12px 20px!important;background:#f7f9f8!important;}
 .custom-menu-children.is-open{display:flex!important;}
+
+
+/* V5.8.7：子目錄容器使用獨立 class，避免舊版 custom-menu-children 規則互相覆蓋。 */
+.custom-menu-children-v587{display:none !important;flex-direction:column !important;gap:10px !important;width:100% !important;box-sizing:border-box !important;padding:10px 10px 12px 20px !important;background:#f7f9f8 !important;border-top:1px dashed #dbe4df !important;}
+.custom-menu-children-v587 > .custom-menu-node{display:block !important;width:100% !important;box-sizing:border-box !important;margin:0 !important;}
