@@ -1,10 +1,31 @@
 let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]}};
+
+// V5.7.5: ensure the Super Admin message-audit entry exists even if an older cached admin.html is served.
+function ensureMessageAuditEntry(){
+  const nav=document.querySelector('.nav-tabs');
+  if(nav && !nav.querySelector('[data-tab="messageAudit"]')){
+    const btn=document.createElement('button');
+    btn.type='button'; btn.dataset.tab='messageAudit'; btn.textContent='🔐 訊息稽核';
+    nav.appendChild(btn);
+    btn.addEventListener('click',async()=>{
+      document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));
+      btn.classList.add('active');
+      for(const id of ['tenants','submissions','staff','templates','form','branding','customization','messageAudit']){const el=$(`tab-${id}`);if(el)el.style.display=id==='messageAudit'?'block':'none';}
+      await loadMessageAudit(); renderMessageAudit();
+    });
+  }
+  if($('mainView') && !$('tab-messageAudit')){
+    const el=document.createElement('div'); el.id='tab-messageAudit'; el.style.display='none'; $('mainView').appendChild(el);
+  }
+}
+
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
+ensureMessageAuditEntry();
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
-function showMain(){$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
+function showMain(){ensureMessageAuditEntry();$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
 for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','messageAudit'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
