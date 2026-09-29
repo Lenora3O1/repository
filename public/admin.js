@@ -221,7 +221,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
     const open=openIds.has(String(item.id));
     const allSiblings=nodes;
     const pos=allSiblings.findIndex(x=>x.id===item.id);
-    const childRows=hasChildren&&open?customMenuTreeRows(items,item.id,depth+1,openIds,false):'';
+    const childRows=hasChildren?customMenuTreeRows(items,item.id,depth+1,openIds,false):'';
     const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
     const toggle=hasChildren?`<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`:'<span class="menu-tree-toggle-placeholder"></span>';
     const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
@@ -235,7 +235,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
           ${childButton}
         </div>
       </div>
-      ${hasChildren&&open?`<div class="custom-menu-children is-open">${childRows}</div>`:''}
+      ${hasChildren?`<div class="custom-menu-children${open?' is-open':''}">${childRows}</div>`:''}
     </div>`;
     return card;
   }).join('');
