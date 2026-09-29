@@ -196,32 +196,121 @@ async function loadCustomization(){
   c.overrides=d.overrides||{};
   c.items=(d.overrides?.[c.scope]||d.global?.[c.scope]||[]).map(x=>({...x}));
 }
+function customMenuChildren(items,parentId){
+  return items.filter(x=>String(x.parentId||'')===String(parentId||''));
+}
+function customMenuDescendantIds(items,id){
+  const out=[];
+  const walk=(pid)=>{for(const child of customMenuChildren(items,pid)){out.push(child.id);walk(child.id)}};
+  walk(id);return out;
+}
+function normalizeCustomMenuTree(items){
+  const byParent=new Map();
+  for(const item of items){const key=String(item.parentId||'');if(!byParent.has(key))byParent.set(key,[]);byParent.get(key).push(item)}
+  const out=[];
+  const walk=(parentId)=>{for(const item of byParent.get(String(parentId||''))||[]){out.push(item);walk(item.id)}};
+  walk('');
+  for(const item of items) if(!out.includes(item)) out.push(item);
+  return out;
+}
+function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot=true){
+  const nodes=customMenuChildren(items,parentId);
+  return nodes.map((item)=>{
+    const children=customMenuChildren(items,item.id);
+    const hasChildren=children.length>0;
+    const open=openIds.has(String(item.id));
+    const allSiblings=nodes;
+    const pos=allSiblings.findIndex(x=>x.id===item.id);
+    const childRows=hasChildren?customMenuTreeRows(items,item.id,depth+1,openIds,false):'';
+    const parentOptions=items.filter(x=>x.id!==item.id&&!customMenuDescendantIds(items,item.id).includes(x.id)).map(x=>`<option value="${escapeAttr(x.id)}" ${String(item.parentId||'')===String(x.id)?'selected':''}>${escapeHtml(x.label||'未命名')}</option>`).join('');
+    const hasParent=item.parentId!=null&&item.parentId!=='';
+    const toggle=hasChildren?`<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}">${open?'−':'＋'}</button>`:'<span class="menu-tree-toggle-placeholder"></span>';
+    const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
+    const card=`<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}">
+      <div class="custom-menu-node-head" style="padding-left:${depth*24}px">
+        ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
+        <div class="custom-menu-node-actions">
+          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',-1)" ${pos===0?'disabled':''}>↑</button>
+          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',1)" ${pos===allSiblings.length-1?'disabled':''}>↓</button>
+          ${childButton}
+        </div>
+      </div>
+      <div class="custom-menu-editor" style="padding-left:${depth*24}px">
+        <div class="editor-grid">
+          <div><label>圖示</label><input value="${escapeAttr(item.icon||'•')}" oninput="setCustomMenuField('${escapeAttr(String(item.id))}','icon',this.value)"></div>
+          <div><label>名稱</label><input value="${escapeAttr(item.label||'未命名')}" oninput="setCustomMenuField('${escapeAttr(String(item.id))}','label',this.value)"></div>
+          <div><label>動作代碼</label><input value="${escapeAttr(item.action||'placeholder')}" oninput="setCustomMenuField('${escapeAttr(String(item.id))}','action',this.value)"></div>
+          <div><label>上層目錄</label><select onchange="setCustomMenuField('${escapeAttr(String(item.id))}','parentId',this.value||null)"><option value="">最上層（母目錄）</option>${parentOptions}</select></div>
+          <div><label>啟用</label><select onchange="setCustomMenuField('${escapeAttr(String(item.id))}','enabled',this.value==='1')"><option value="1" ${item.enabled!==false?'selected':''}>顯示</option><option value="0" ${item.enabled===false?'selected':''}>隱藏</option></select></div>
+        </div>
+        <button type="button" class="danger" onclick="removeCustomMenuById('${escapeAttr(String(item.id))}')">刪除</button>
+      </div>
+      ${hasChildren?`<div class="custom-menu-children ${open?'is-open':'is-collapsed'}">${childRows}</div>`:''}
+    </div>`;
+    return card;
+  }).join('');
+}
 function renderCustomization(){
   const el=$('tab-customization'); if(!el)return;
   const c=state.customization;
+  c.items=normalizeCustomMenuTree(c.items||[]);
   const isPlatform=c.mode==='platform';
   const t=state.tenants.find(x=>Number(x.id)===Number(c.tenantId));
   const targetOptions=`<option value="platform" ${isPlatform?'selected':''}>🌐 平台預設（所有企業的標準目錄）</option>${state.tenants.map(x=>`<option value="tenant:${x.id}" ${!isPlatform&&Number(x.id)===Number(c.tenantId)?'selected':''}>🏢 ${escapeHtml(x.name)}（${escapeHtml(x.code)}）</option>`).join('')}`;
   const scopeOptions=`<option value="company" ${c.scope==='company'?'selected':''}>🏢 公司內勤工作目錄</option><option value="staff" ${c.scope==='staff'?'selected':''}>🏠 社區駐點工作目錄</option>`;
-  const parentOptions=(item)=>`<option value="">最上層</option>${c.items.filter(x=>x.id!==item.id).map(x=>`<option value="${escapeAttr(x.id)}" ${String(item.parentId||'')===String(x.id)?'selected':''}>${escapeHtml(x.label)}</option>`).join('')}`;
-  const rows=c.items.map((item,i)=>`<div class="question-card"><div class="move-buttons"><button class="icon-btn" onclick="moveCustomMenu(${i},-1)" ${i===0?'disabled':''}>↑</button><button class="icon-btn" onclick="moveCustomMenu(${i},1)" ${i===c.items.length-1?'disabled':''}>↓</button></div><div class="grow"><div class="editor-grid"><div><label>圖示</label><input value="${escapeAttr(item.icon||'•')}" oninput="state.customization.items[${i}].icon=this.value"></div><div><label>名稱</label><input value="${escapeAttr(item.label||'未命名')}" oninput="state.customization.items[${i}].label=this.value"></div><div><label>動作代碼</label><input value="${escapeAttr(item.action||'placeholder')}" oninput="state.customization.items[${i}].action=this.value"></div><div><label>上層目錄</label><select onchange="state.customization.items[${i}].parentId=this.value||null">${parentOptions(item)}</select></div><div><label>啟用</label><select onchange="state.customization.items[${i}].enabled=this.value==='1'"><option value="1" ${item.enabled!==false?'selected':''}>顯示</option><option value="0" ${item.enabled===false?'selected':''}>隱藏</option></select></div></div></div><button class="danger" onclick="removeCustomMenu(${i})">刪除</button></div>`).join('');
+  const roots=customMenuChildren(c.items,null);
+  const rootRows=customMenuTreeRows(c.items,null,0,new Set());
   const isOverride=!isPlatform && !!c.overrides?.[c.scope];
   const title=isPlatform?'🌐 平台標準工作目錄':'🧩 企業客製化工作目錄';
   const intro=isPlatform?'這裡是整個平台的「基本標準目錄」。所有沒有另外客製的企業都會使用這套目錄；企業客製化不會反過來修改這裡。':'這裡只調整指定企業的工作目錄。只有該企業會受到影響，不會改變其他企業。';
   const status=isPlatform?'目前正在編輯：平台預設｜這套目錄會作為所有企業的基準。':`目前：${escapeHtml(t?.name||'尚未選擇公司')}｜${isOverride?'已使用企業客製目錄':'目前沿用平台預設目錄'}`;
-  el.innerHTML=`<div class="panel"><div class="section-title">${title}</div><p>${intro}</p><div class="editor-grid"><div><label>設定對象</label><select id="customTargetSelect">${targetOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">${status}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">可新增、刪除、改名、改圖示、調整上下層與啟用狀態。人員實際能不能使用，仍由公司人員權限與後端 API 再驗證。</p>${rows||'<div class="empty">目前沒有目錄項目。</div>'}<div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增目錄項目</button>${isPlatform?'':'<button class="secondary" onclick="resetCustomMenu()">↩ 這家公司恢復平台預設</button>'}<button onclick="saveCustomMenu()">💾 ${isPlatform?'儲存平台預設':'儲存這家公司設定'}</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 權限分流說明</div><div class="guide-grid"><div><strong>🏢 內勤</strong><br>公司財務、會計、總務、人事、公司資源等內勤工作。</div><div><strong>🏠 駐點</strong><br>代辦、工作日誌、管理委員會、住戶、廠商、交接等社區工作。</div><div><strong>🏢＋🏠 內勤＋兼任駐點</strong><br>同一人可同時擁有兩個工作空間的可處理項目。</div><div><strong>🧩 企業客製</strong><br>企業若有特殊需求，可在「設定對象」選擇公司後獨立調整，不影響其他企業。</div></div></div>`;
-  $('customTargetSelect').addEventListener('change',async e=>{
-    const v=e.target.value;
-    if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}
-    await loadCustomization();renderCustomization();
-  });
+  el.innerHTML=`<div class="panel"><div class="section-title">${title}</div><p>${intro}</p><div class="editor-grid"><div><label>設定對象</label><select id="customTargetSelect">${targetOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">${status}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">母目錄與子目錄會自動整理成樹狀結構。新增子目錄後會直接掛在母目錄下方；點「＋／−」可展開或收合。上下箭頭只會調整同一層級的順序。</p><div class="custom-menu-tree">${rootRows||'<div class="empty">目前沒有目錄項目。</div>'}</div><div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增母目錄</button>${isPlatform?'':'<button class="secondary" onclick="resetCustomMenu()">↩ 這家公司恢復平台預設</button>'}<button onclick="saveCustomMenu()">💾 ${isPlatform?'儲存平台預設':'儲存這家公司設定'}</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 權限分流說明</div><div class="guide-grid"><div><strong>🏢 內勤</strong><br>公司財務、會計、總務、人事、公司資源等內勤工作。</div><div><strong>🏠 駐點</strong><br>代辦、工作日誌、管理委員會、住戶、廠商、交接等社區工作。</div><div><strong>🏢＋🏠 內勤＋兼任駐點</strong><br>同一人可同時擁有兩個工作空間的可處理項目。</div><div><strong>🧩 企業客製</strong><br>企業若有特殊需求，可在「設定對象」選擇公司後獨立調整，不影響其他企業。</div></div></div>`;
+  $('customTargetSelect').addEventListener('change',async e=>{const v=e.target.value;if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}await loadCustomization();renderCustomization();});
   $('customScopeSelect').addEventListener('change',async e=>{c.scope=e.target.value;await loadCustomization();renderCustomization();});
 }
+function toggleCustomMenuNode(id){
+  const node=document.querySelector(`.custom-menu-node[data-menu-id="${CSS.escape(String(id))}"]`);if(!node)return;
+  const children=node.querySelector(':scope > .custom-menu-children');if(!children)return;
+  const btn=node.querySelector(':scope > .custom-menu-node-head .menu-tree-toggle');
+  const opening=children.classList.contains('is-collapsed');children.classList.toggle('is-collapsed',!opening);children.classList.toggle('is-open',opening);if(btn){btn.textContent=opening?'−':'＋';btn.setAttribute('aria-expanded',opening?'true':'false');}
+}
+function setCustomMenuField(id,key,value){const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;item[key]=value;}
 function addCustomMenu(){state.customization.items.push({id:'custom_'+Date.now(),parentId:null,icon:'•',label:'新功能',action:'placeholder',enabled:true});renderCustomization()}
-function removeCustomMenu(i){state.customization.items.splice(i,1);renderCustomization()}
-function moveCustomMenu(i,d){const j=i+d;if(j<0||j>=state.customization.items.length)return;[state.customization.items[i],state.customization.items[j]]=[state.customization.items[j],state.customization.items[i]];renderCustomization()}
+function addCustomChild(parentId){state.customization.items.push({id:'custom_'+Date.now(),parentId:parentId,icon:'↳',label:'新子目錄',action:'placeholder',enabled:true});renderCustomization()}
+function removeCustomMenuById(id){
+  const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;
+  const descendants=new Set(customMenuDescendantIds(state.customization.items,item.id));
+  const count=1+descendants.size;
+  if(count>1&&!confirm(`「${item.label||'未命名'}」底下還有 ${count-1} 個子目錄，刪除後會一併刪除。確定嗎？`))return;
+  state.customization.items=state.customization.items.filter(x=>String(x.id)!==String(id)&&!descendants.has(x.id));renderCustomization();
+}
+function removeCustomMenu(i){const item=state.customization.items[i];if(item)removeCustomMenuById(item.id)}
+function moveCustomMenuTree(id,d){
+  state.customization.items=normalizeCustomMenuTree(state.customization.items);
+  const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;
+  const siblings=customMenuChildren(state.customization.items,item.parentId||null);const pos=siblings.findIndex(x=>String(x.id)===String(id));const targetPos=pos+d;if(targetPos<0||targetPos>=siblings.length)return;
+  const target=siblings[targetPos];
+  const blockIds=new Set([item.id,...customMenuDescendantIds(state.customization.items,item.id)]);
+  const targetBlockIds=new Set([target.id,...customMenuDescendantIds(state.customization.items,target.id)]);
+  const remaining=state.customization.items.filter(x=>!blockIds.has(x.id)&&!targetBlockIds.has(x.id));
+  const blocks=pos<targetPos?[target,item]:[item,target];
+  // Rebuild by walking the original sibling order, swapping the two sibling blocks.
+  const originalSiblings=siblings.map(x=>x.id);const swapA=String(item.id),swapB=String(target.id);
+  const orderedSiblingIds=originalSiblings.map(x=>String(x)===swapA?swapB:String(x)===swapB?swapA:String(x));
+  const byId=new Map(state.customization.items.map(x=>[x.id,x]));
+  const siblingBlocks=orderedSiblingIds.map(sid=>{const root=byId.get(sid);return [root,...customMenuDescendantIds(state.customization.items,root.id).map(cid=>byId.get(cid))]});
+  const siblingSet=new Set(siblings.map(x=>x.id));
+  const rebuilt=[];const consumed=new Set();
+  for(const x of state.customization.items){
+    if(!siblingSet.has(x.id)){rebuilt.push(x);continue;}
+    if(consumed.has(x.id))continue;
+    const block=siblingBlocks.find(b=>b[0]?.id===x.id);if(block){for(const b of block){rebuilt.push(b);consumed.add(b.id)}}
+  }
+  state.customization.items=normalizeCustomMenuTree(rebuilt);renderCustomization();
+}
 async function saveCustomMenu(){
   try{
+    state.customization.items=normalizeCustomMenuTree(state.customization.items);
     const body={scope:state.customization.scope,items:state.customization.items};
     if(state.customization.mode!=='platform') body.tenant_id=state.customization.tenantId;
     await api('/api/admin/menu-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
