@@ -1,4 +1,4 @@
-let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]}};
+let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{mode:'platform',tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]}};
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
@@ -178,30 +178,57 @@ async function saveFormConfig(){const msg=$('formSaveMsg');state.config.title=$(
 
 async function loadCustomization(){
   if(!state.tenants.length) state.tenants=await api('/api/admin/tenants');
-  const active=state.customization.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
-  state.customization.tenantId=active?Number(active):null;
-  if(!active){state.customization.global=[];state.customization.items=[];state.customization.overrides={};return;}
+  const c=state.customization;
+  // mode: platform = 平台標準預設；company = 指定企業客製
+  if(c.mode==='platform'){
+    const d=await api('/api/admin/menu-config');
+    c.tenantId=null;
+    c.global=(d?.[c.scope]||[]).map(x=>({...x}));
+    c.overrides={};
+    c.items=c.global.map(x=>({...x}));
+    return;
+  }
+  const active=c.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
+  c.tenantId=active?Number(active):null;
+  if(!active){c.global=[];c.items=[];c.overrides={};return;}
   const d=await api(`/api/admin/menu-config?tenant_id=${encodeURIComponent(active)}`);
-  state.customization.global=(d.global?.[state.customization.scope]||[]).map(x=>({...x}));
-  state.customization.overrides=d.overrides||{};
-  state.customization.items=(d.overrides?.[state.customization.scope]||d.global?.[state.customization.scope]||[]).map(x=>({...x}));
+  c.global=(d.global?.[c.scope]||[]).map(x=>({...x}));
+  c.overrides=d.overrides||{};
+  c.items=(d.overrides?.[c.scope]||d.global?.[c.scope]||[]).map(x=>({...x}));
 }
 function renderCustomization(){
   const el=$('tab-customization'); if(!el)return;
-  const c=state.customization; const t=state.tenants.find(x=>Number(x.id)===Number(c.tenantId));
-  const tenantOptions=state.tenants.map(x=>`<option value="${x.id}" ${Number(x.id)===Number(c.tenantId)?'selected':''}>${escapeHtml(x.name)}（${escapeHtml(x.code)}）</option>`).join('');
+  const c=state.customization;
+  const isPlatform=c.mode==='platform';
+  const t=state.tenants.find(x=>Number(x.id)===Number(c.tenantId));
+  const targetOptions=`<option value="platform" ${isPlatform?'selected':''}>🌐 平台預設（所有企業的標準目錄）</option>${state.tenants.map(x=>`<option value="tenant:${x.id}" ${!isPlatform&&Number(x.id)===Number(c.tenantId)?'selected':''}>🏢 ${escapeHtml(x.name)}（${escapeHtml(x.code)}）</option>`).join('')}`;
   const scopeOptions=`<option value="company" ${c.scope==='company'?'selected':''}>🏢 公司內勤工作目錄</option><option value="staff" ${c.scope==='staff'?'selected':''}>🏠 社區駐點工作目錄</option>`;
   const parentOptions=(item)=>`<option value="">最上層</option>${c.items.filter(x=>x.id!==item.id).map(x=>`<option value="${escapeAttr(x.id)}" ${String(item.parentId||'')===String(x.id)?'selected':''}>${escapeHtml(x.label)}</option>`).join('')}`;
   const rows=c.items.map((item,i)=>`<div class="question-card"><div class="move-buttons"><button class="icon-btn" onclick="moveCustomMenu(${i},-1)" ${i===0?'disabled':''}>↑</button><button class="icon-btn" onclick="moveCustomMenu(${i},1)" ${i===c.items.length-1?'disabled':''}>↓</button></div><div class="grow"><div class="editor-grid"><div><label>圖示</label><input value="${escapeAttr(item.icon||'•')}" oninput="state.customization.items[${i}].icon=this.value"></div><div><label>名稱</label><input value="${escapeAttr(item.label||'未命名')}" oninput="state.customization.items[${i}].label=this.value"></div><div><label>動作代碼</label><input value="${escapeAttr(item.action||'placeholder')}" oninput="state.customization.items[${i}].action=this.value"></div><div><label>上層目錄</label><select onchange="state.customization.items[${i}].parentId=this.value||null">${parentOptions(item)}</select></div><div><label>啟用</label><select onchange="state.customization.items[${i}].enabled=this.value==='1'"><option value="1" ${item.enabled!==false?'selected':''}>顯示</option><option value="0" ${item.enabled===false?'selected':''}>隱藏</option></select></div></div></div><button class="danger" onclick="removeCustomMenu(${i})">刪除</button></div>`).join('');
-  const isOverride=!!c.overrides?.[c.scope];
-  el.innerHTML=`<div class="panel"><div class="section-title">🧩 企業客製化控制台</div><p>這裡由系統總後台控制「單一企業」的工作環境。平台標準功能仍維持共用，但每家公司可以擁有自己的工作目錄、名稱、圖示與功能開關，不會影響其他公司。</p><div class="editor-grid"><div><label>企業</label><select id="customTenantSelect">${tenantOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">目前：${escapeHtml(t?.name||'尚未選擇公司')}｜${isOverride?'已使用企業客製目錄':'目前使用平台預設目錄'}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">這裡只控制「目錄外觀與功能項目」。真正能不能讀取資料，仍由後端權限 API 再驗證。</p>${rows||'<div class="empty">目前沒有目錄項目。</div>'}<div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增目錄項目</button><button class="secondary" onclick="resetCustomMenu()">↩ 恢復平台預設</button><button onclick="saveCustomMenu()">💾 儲存這家公司設定</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 建議的權限分流</div><div class="guide-grid"><div><strong>會計／財務</strong><br>預設只需要財務相關目錄；公司管理員可再微調。</div><div><strong>總務</strong><br>以公司資源、採購、廠商等功能為主。</div><div><strong>人事</strong><br>以人員資料與人事工作為主。</div><div><strong>經理／秘書／保全</strong><br>主要使用社區駐點工作空間，不直接進入公司內勤資料。</div></div></div>`;
-  $('customTenantSelect').addEventListener('change',async e=>{c.tenantId=Number(e.target.value);await loadCustomization();renderCustomization();});
+  const isOverride=!isPlatform && !!c.overrides?.[c.scope];
+  const title=isPlatform?'🌐 平台標準工作目錄':'🧩 企業客製化工作目錄';
+  const intro=isPlatform?'這裡是整個平台的「基本標準目錄」。所有沒有另外客製的企業都會使用這套目錄；企業客製化不會反過來修改這裡。':'這裡只調整指定企業的工作目錄。只有該企業會受到影響，不會改變其他企業。';
+  const status=isPlatform?'目前正在編輯：平台預設｜這套目錄會作為所有企業的基準。':`目前：${escapeHtml(t?.name||'尚未選擇公司')}｜${isOverride?'已使用企業客製目錄':'目前沿用平台預設目錄'}`;
+  el.innerHTML=`<div class="panel"><div class="section-title">${title}</div><p>${intro}</p><div class="editor-grid"><div><label>設定對象</label><select id="customTargetSelect">${targetOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">${status}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">可新增、刪除、改名、改圖示、調整上下層與啟用狀態。人員實際能不能使用，仍由公司人員權限與後端 API 再驗證。</p>${rows||'<div class="empty">目前沒有目錄項目。</div>'}<div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增目錄項目</button>${isPlatform?'':'<button class="secondary" onclick="resetCustomMenu()">↩ 這家公司恢復平台預設</button>'}<button onclick="saveCustomMenu()">💾 ${isPlatform?'儲存平台預設':'儲存這家公司設定'}</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 權限分流說明</div><div class="guide-grid"><div><strong>🏢 內勤</strong><br>公司財務、會計、總務、人事、公司資源等內勤工作。</div><div><strong>🏠 駐點</strong><br>代辦、工作日誌、管理委員會、住戶、廠商、交接等社區工作。</div><div><strong>🏢＋🏠 內勤＋兼任駐點</strong><br>同一人可同時擁有兩個工作空間的可處理項目。</div><div><strong>🧩 企業客製</strong><br>企業若有特殊需求，可在「設定對象」選擇公司後獨立調整，不影響其他企業。</div></div></div>`;
+  $('customTargetSelect').addEventListener('change',async e=>{
+    const v=e.target.value;
+    if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}
+    await loadCustomization();renderCustomization();
+  });
   $('customScopeSelect').addEventListener('change',async e=>{c.scope=e.target.value;await loadCustomization();renderCustomization();});
 }
 function addCustomMenu(){state.customization.items.push({id:'custom_'+Date.now(),parentId:null,icon:'•',label:'新功能',action:'placeholder',enabled:true});renderCustomization()}
 function removeCustomMenu(i){state.customization.items.splice(i,1);renderCustomization()}
 function moveCustomMenu(i,d){const j=i+d;if(j<0||j>=state.customization.items.length)return;[state.customization.items[i],state.customization.items[j]]=[state.customization.items[j],state.customization.items[i]];renderCustomization()}
-async function saveCustomMenu(){try{await api('/api/admin/menu-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId,items:state.customization.items})});$('customSaveMsg').innerHTML='<span class="msg success inline-msg">✓ 已儲存這家公司的客製目錄</span>';await loadCustomization();renderCustomization();}catch(err){$('customSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}}
+async function saveCustomMenu(){
+  try{
+    const body={scope:state.customization.scope,items:state.customization.items};
+    if(state.customization.mode!=='platform') body.tenant_id=state.customization.tenantId;
+    await api('/api/admin/menu-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    $('customSaveMsg').innerHTML=`<span class="msg success inline-msg">✓ 已儲存${state.customization.mode==='platform'?'平台預設':'這家公司'}目錄</span>`;
+    await loadCustomization();renderCustomization();
+  }catch(err){$('customSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}
+}
 async function resetCustomMenu(){if(!confirm('確定讓這家公司恢復使用平台預設目錄嗎？不會刪除任何人員或業務資料。'))return;try{await api('/api/admin/menu-config/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId})});await loadCustomization();renderCustomization();}catch(err){alert(err.message)}}
 async function loadMessageAudit(){
   if(!state.tenants.length) state.tenants=await api('/api/admin/tenants');
