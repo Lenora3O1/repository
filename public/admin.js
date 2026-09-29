@@ -366,8 +366,8 @@ function moveCustomMenuTree(id,d){
   const siblingSet=new Set(siblings.map(x=>x.id));
   const rebuilt=[];const consumed=new Set();
   for(const x of state.customization.items){
-    if(!siblingSet.has(x.id)){rebuilt.push(x);continue;}
     if(consumed.has(x.id))continue;
+    if(!siblingSet.has(x.id)){rebuilt.push(x);continue;}
     const block=siblingBlocks.find(b=>b[0]?.id===x.id);if(block){for(const b of block){rebuilt.push(b);consumed.add(b.id)}}
   }
   state.customization.items=normalizeCustomMenuTree(rebuilt);renderCustomization();
