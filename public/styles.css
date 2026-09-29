@@ -2261,3 +2261,29 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
   .custom-menu-editor{grid-template-columns:1fr}
   .custom-menu-editor>.danger{justify-self:end}
 }
+
+/* V5.8.1: compact tree editor + modal editing */
+.custom-menu-tree{display:flex;flex-direction:column;gap:7px;max-height:62vh;overflow:auto;padding-right:4px}
+.custom-menu-node{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.custom-menu-node-head{display:flex;align-items:center;gap:7px;min-height:44px;padding-top:6px;padding-bottom:6px;background:#fbfcfb}
+.custom-menu-node-head strong{font-size:.98rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.custom-menu-tree-icon{width:24px;text-align:center;flex:0 0 24px}
+.custom-menu-child-count{font-size:.72rem;color:var(--ink-soft);background:var(--accent-soft);padding:2px 7px;border-radius:999px;white-space:nowrap}
+.custom-menu-node-actions{display:flex;align-items:center;gap:4px;margin-left:auto;flex-wrap:nowrap}
+.menu-tree-toggle,.menu-tree-toggle-placeholder{width:28px;height:28px;flex:0 0 28px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--accent-dark);display:inline-flex;align-items:center;justify-content:center;font-weight:700;cursor:pointer}
+.menu-tree-toggle:hover{background:var(--accent-soft)}
+.menu-tree-edit{font-size:.78rem;padding:5px 9px!important;white-space:nowrap}
+.custom-menu-node-actions .icon-btn{width:28px;height:28px;padding:0;min-width:28px}
+.custom-menu-children{display:flex;flex-direction:column;gap:6px;padding:6px 8px 8px 18px;background:#f7f9f8;border-top:1px dashed #dbe4df}
+.custom-menu-children.is-open{display:flex}
+.custom-menu-editor-modal{width:min(620px,calc(100vw - 32px));padding:20px}
+.custom-menu-modal-grid{grid-template-columns:1fr 1fr;gap:12px}
+.custom-menu-modal-grid>div:nth-child(3){grid-column:1 / -1}
+.custom-menu-modal-grid input,.custom-menu-modal-grid select{width:100%}
+@media(max-width:700px){
+ .custom-menu-tree{max-height:68vh}
+ .custom-menu-node-head{align-items:center;flex-wrap:wrap}
+ .custom-menu-node-actions{margin-left:auto;flex-wrap:wrap}
+ .custom-menu-modal-grid{grid-template-columns:1fr}
+ .custom-menu-modal-grid>div:nth-child(3){grid-column:auto}
+}

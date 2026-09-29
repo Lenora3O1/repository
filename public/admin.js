@@ -221,31 +221,21 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
     const open=openIds.has(String(item.id));
     const allSiblings=nodes;
     const pos=allSiblings.findIndex(x=>x.id===item.id);
-    const childRows=hasChildren?customMenuTreeRows(items,item.id,depth+1,openIds,false):'';
-    const parentOptions=items.filter(x=>x.id!==item.id&&!customMenuDescendantIds(items,item.id).includes(x.id)).map(x=>`<option value="${escapeAttr(x.id)}" ${String(item.parentId||'')===String(x.id)?'selected':''}>${escapeHtml(x.label||'未命名')}</option>`).join('');
-    const hasParent=item.parentId!=null&&item.parentId!=='';
-    const toggle=hasChildren?`<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}">${open?'−':'＋'}</button>`:'<span class="menu-tree-toggle-placeholder"></span>';
+    const childRows=hasChildren&&open?customMenuTreeRows(items,item.id,depth+1,openIds,false):'';
     const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
-    const card=`<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}">
-      <div class="custom-menu-node-head" style="padding-left:${depth*24}px">
+    const toggle=hasChildren?`<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`:'<span class="menu-tree-toggle-placeholder"></span>';
+    const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
+    const card=`<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}" style="--menu-depth:${depth}">
+      <div class="custom-menu-node-head" style="padding-left:${10+depth*18}px">
         ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
         <div class="custom-menu-node-actions">
-          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',-1)" ${pos===0?'disabled':''}>↑</button>
-          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',1)" ${pos===allSiblings.length-1?'disabled':''}>↓</button>
+          ${editButton}
+          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',-1)" ${pos===0?'disabled':''} title="同層上移">↑</button>
+          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',1)" ${pos===allSiblings.length-1?'disabled':''} title="同層下移">↓</button>
           ${childButton}
         </div>
       </div>
-      <div class="custom-menu-editor" style="padding-left:${depth*24}px">
-        <div class="editor-grid">
-          <div><label>圖示</label><input value="${escapeAttr(item.icon||'•')}" oninput="setCustomMenuField('${escapeAttr(String(item.id))}','icon',this.value)"></div>
-          <div><label>名稱</label><input value="${escapeAttr(item.label||'未命名')}" oninput="setCustomMenuField('${escapeAttr(String(item.id))}','label',this.value)"></div>
-          <div><label>動作代碼</label><input value="${escapeAttr(item.action||'placeholder')}" oninput="setCustomMenuField('${escapeAttr(String(item.id))}','action',this.value)"></div>
-          <div><label>上層目錄</label><select onchange="setCustomMenuField('${escapeAttr(String(item.id))}','parentId',this.value||null)"><option value="">最上層（母目錄）</option>${parentOptions}</select></div>
-          <div><label>啟用</label><select onchange="setCustomMenuField('${escapeAttr(String(item.id))}','enabled',this.value==='1')"><option value="1" ${item.enabled!==false?'selected':''}>顯示</option><option value="0" ${item.enabled===false?'selected':''}>隱藏</option></select></div>
-        </div>
-        <button type="button" class="danger" onclick="removeCustomMenuById('${escapeAttr(String(item.id))}')">刪除</button>
-      </div>
-      ${hasChildren?`<div class="custom-menu-children ${open?'is-open':'is-collapsed'}">${childRows}</div>`:''}
+      ${hasChildren&&open?`<div class="custom-menu-children is-open">${childRows}</div>`:''}
     </div>`;
     return card;
   }).join('');
@@ -272,11 +262,85 @@ function toggleCustomMenuNode(id){
   const node=document.querySelector(`.custom-menu-node[data-menu-id="${CSS.escape(String(id))}"]`);if(!node)return;
   const children=node.querySelector(':scope > .custom-menu-children');if(!children)return;
   const btn=node.querySelector(':scope > .custom-menu-node-head .menu-tree-toggle');
-  const opening=children.classList.contains('is-collapsed');children.classList.toggle('is-collapsed',!opening);children.classList.toggle('is-open',opening);if(btn){btn.textContent=opening?'−':'＋';btn.setAttribute('aria-expanded',opening?'true':'false');}
+  const opening=!children.classList.contains('is-open');children.classList.toggle('is-open',opening);if(btn){btn.textContent=opening?'−':'＋';btn.setAttribute('aria-expanded',opening?'true':'false');btn.title=opening?'收合子目錄':'展開子目錄';}
+}
+function ensureCustomMenuModal(){
+  let modal=document.getElementById('customMenuEditorModal');
+  if(modal)return modal;
+  modal=document.createElement('div');modal.id='customMenuEditorModal';modal.className='modal-backdrop';modal.style.display='none';
+  modal.innerHTML=`<div class="modal custom-menu-editor-modal" role="dialog" aria-modal="true" aria-labelledby="customMenuEditorTitle">
+    <button type="button" class="modal-close" onclick="closeCustomMenuEditor()" aria-label="關閉">×</button>
+    <h2 id="customMenuEditorTitle">📂 編輯目錄</h2>
+    <p id="customMenuEditorNote" class="modal-note">新增後會自動依母目錄整理；不會立即展開整棵目錄。</p>
+    <div class="editor-grid custom-menu-modal-grid">
+      <div><label>圖示</label><input id="customMenuModalIcon" placeholder="例如 📄"></div>
+      <div><label>名稱</label><input id="customMenuModalLabel" placeholder="例如 公司制式文件"></div>
+      <div><label>動作代碼</label><input id="customMenuModalAction" placeholder="例如 manage-templates"></div>
+      <div><label>上層目錄</label><select id="customMenuModalParent"></select></div>
+      <div><label>啟用</label><select id="customMenuModalEnabled"><option value="1">顯示</option><option value="0">隱藏</option></select></div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" onclick="closeCustomMenuEditor()">取消</button>
+      <button type="button" id="customMenuModalDelete" class="danger" style="display:none" onclick="deleteCustomMenuFromModal()">刪除</button>
+      <button type="button" onclick="saveCustomMenuFromModal()">💾 儲存</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{if(e.target===modal)closeCustomMenuEditor()});
+  return modal;
+}
+let customMenuEditorState={id:null,parentId:null,mode:'add'};
+function fillCustomMenuParentOptions(selectedId,parentId){
+  const select=document.getElementById('customMenuModalParent');if(!select)return;
+  const items=state.customization.items||[];
+  const descendants=selectedId?new Set(customMenuDescendantIds(items,selectedId)):new Set();
+  const roots=normalizeCustomMenuTree(items);
+  const options=['<option value="">最上層（母目錄）</option>'];
+  const add=(pid,depth)=>{
+    const children=customMenuChildren(items,pid);
+    for(const x of children){
+      if(String(x.id)===String(selectedId)||descendants.has(x.id))continue;
+      options.push(`<option value="${escapeAttr(String(x.id))}" ${String(parentId||'')===String(x.id)?'selected':''}>${'　'.repeat(depth)}${escapeHtml(x.icon||'•')} ${escapeHtml(x.label||'未命名')}</option>`);
+      add(x.id,depth+1);
+    }
+  };
+  add(null,0);select.innerHTML=options.join('');
+}
+function openCustomMenuEditor(id=null,parentId=null){
+  const modal=ensureCustomMenuModal();
+  const item=id?state.customization.items.find(x=>String(x.id)===String(id)):null;
+  customMenuEditorState={id:item?item.id:null,parentId:item?item.parentId:(parentId||null),mode:item?'edit':'add'};
+  document.getElementById('customMenuEditorTitle').textContent=item?'📂 編輯目錄':'＋ 新增目錄';
+  document.getElementById('customMenuEditorNote').textContent=item?'修改後只會改變目前這一筆目錄。子目錄會維持在它的母目錄下面。':'新增後會依你選擇的母目錄自動歸位；儲存後預設收合，不會把整棵目錄攤開。';
+  document.getElementById('customMenuModalIcon').value=item?.icon||'📄';
+  document.getElementById('customMenuModalLabel').value=item?.label||'新目錄';
+  document.getElementById('customMenuModalAction').value=item?.action||'placeholder';
+  document.getElementById('customMenuModalEnabled').value=item?.enabled===false?'0':'1';
+  fillCustomMenuParentOptions(item?.id||null,item?.parentId??parentId??null);
+  document.getElementById('customMenuModalDelete').style.display=item?'inline-flex':'none';
+  modal.style.display='flex';setTimeout(()=>document.getElementById('customMenuModalLabel').focus(),0);
+}
+function closeCustomMenuEditor(){const modal=document.getElementById('customMenuEditorModal');if(modal)modal.style.display='none';}
+function saveCustomMenuFromModal(){
+  const label=document.getElementById('customMenuModalLabel').value.trim();
+  if(!label){alert('請輸入目錄名稱。');return;}
+  const item=customMenuEditorState.id?state.customization.items.find(x=>String(x.id)===String(customMenuEditorState.id)):null;
+  const data={icon:document.getElementById('customMenuModalIcon').value.trim()||'📄',label,action:document.getElementById('customMenuModalAction').value.trim()||'placeholder',parentId:document.getElementById('customMenuModalParent').value||null,enabled:document.getElementById('customMenuModalEnabled').value==='1'};
+  if(item)Object.assign(item,data);else state.customization.items.push({id:'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),...data});
+  closeCustomMenuEditor();renderCustomization();
+}
+function deleteCustomMenuFromModal(){
+  const id=customMenuEditorState.id;if(!id)return;
+  const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;
+  const descendants=new Set(customMenuDescendantIds(state.customization.items,item.id));
+  const count=descendants.size;
+  if(count&&!confirm(`「${item.label||'未命名'}」底下還有 ${count} 個子目錄，刪除後會一併刪除。確定嗎？`))return;
+  state.customization.items=state.customization.items.filter(x=>String(x.id)!==String(id)&&!descendants.has(x.id));
+  closeCustomMenuEditor();renderCustomization();
 }
 function setCustomMenuField(id,key,value){const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;item[key]=value;}
-function addCustomMenu(){state.customization.items.push({id:'custom_'+Date.now(),parentId:null,icon:'•',label:'新功能',action:'placeholder',enabled:true});renderCustomization()}
-function addCustomChild(parentId){state.customization.items.push({id:'custom_'+Date.now(),parentId:parentId,icon:'↳',label:'新子目錄',action:'placeholder',enabled:true});renderCustomization()}
+function addCustomMenu(){openCustomMenuEditor(null,null)}
+function addCustomChild(parentId){openCustomMenuEditor(null,parentId)}
 function removeCustomMenuById(id){
   const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;
   const descendants=new Set(customMenuDescendantIds(state.customization.items,item.id));
@@ -339,3 +403,5 @@ async function saveMessageAudit(){try{const ids=[...document.querySelectorAll('.
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function escapeAttr(s){return escapeHtml(s)}
 checkSession();
+
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCustomMenuEditor()});
