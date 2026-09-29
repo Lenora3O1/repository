@@ -186,6 +186,7 @@ async function loadCustomization(){
     c.global=(d?.[c.scope]||[]).map(x=>({...x}));
     c.overrides={};
     c.items=c.global.map(x=>({...x}));
+    c.openIds=[];
     return;
   }
   const active=c.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
@@ -195,6 +196,7 @@ async function loadCustomization(){
   c.global=(d.global?.[c.scope]||[]).map(x=>({...x}));
   c.overrides=d.overrides||{};
   c.items=(d.overrides?.[c.scope]||d.global?.[c.scope]||[]).map(x=>({...x}));
+  c.openIds=[];
 }
 function customMenuChildren(items,parentId){
   return items.filter(x=>String(x.parentId||'')===String(parentId||''));
@@ -235,7 +237,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
           ${childButton}
         </div>
       </div>
-      ${hasChildren?`<div class="custom-menu-children${open?' is-open':''}" style="display:${open?'flex':'none'} !important">${childRows}</div>`:''}
+      ${hasChildren?`<div class="custom-menu-children${open?' is-open':''}" ${open?'':'hidden'}>${childRows}</div>`:''}
     </div>`;
     return card;
   }).join('');
@@ -249,22 +251,23 @@ function renderCustomization(){
   const targetOptions=`<option value="platform" ${isPlatform?'selected':''}>🌐 平台預設（所有企業的標準目錄）</option>${state.tenants.map(x=>`<option value="tenant:${x.id}" ${!isPlatform&&Number(x.id)===Number(c.tenantId)?'selected':''}>🏢 ${escapeHtml(x.name)}（${escapeHtml(x.code)}）</option>`).join('')}`;
   const scopeOptions=`<option value="company" ${c.scope==='company'?'selected':''}>🏢 公司內勤工作目錄</option><option value="staff" ${c.scope==='staff'?'selected':''}>🏠 社區駐點工作目錄</option>`;
   const roots=customMenuChildren(c.items,null);
-  const rootRows=customMenuTreeRows(c.items,null,0,new Set());
+  const openIds=new Set((c.openIds||[]).map(String));
+  const rootRows=customMenuTreeRows(c.items,null,0,openIds);
   const isOverride=!isPlatform && !!c.overrides?.[c.scope];
   const title=isPlatform?'🌐 平台標準工作目錄':'🧩 企業客製化工作目錄';
   const intro=isPlatform?'這裡是整個平台的「基本標準目錄」。所有沒有另外客製的企業都會使用這套目錄；企業客製化不會反過來修改這裡。':'這裡只調整指定企業的工作目錄。只有該企業會受到影響，不會改變其他企業。';
   const status=isPlatform?'目前正在編輯：平台預設｜這套目錄會作為所有企業的基準。':`目前：${escapeHtml(t?.name||'尚未選擇公司')}｜${isOverride?'已使用企業客製目錄':'目前沿用平台預設目錄'}`;
   el.innerHTML=`<div class="panel"><div class="section-title">${title}</div><p>${intro}</p><div class="editor-grid"><div><label>設定對象</label><select id="customTargetSelect">${targetOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">${status}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">母目錄與子目錄會自動整理成樹狀結構。新增子目錄後會直接掛在母目錄下方；點「＋／−」可展開或收合。上下箭頭只會調整同一層級的順序。</p><div class="custom-menu-tree">${rootRows||'<div class="empty">目前沒有目錄項目。</div>'}</div><div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增母目錄</button>${isPlatform?'':'<button class="secondary" onclick="resetCustomMenu()">↩ 這家公司恢復平台預設</button>'}<button onclick="saveCustomMenu()">💾 ${isPlatform?'儲存平台預設':'儲存這家公司設定'}</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 權限分流說明</div><div class="guide-grid"><div><strong>🏢 內勤</strong><br>公司財務、會計、總務、人事、公司資源等內勤工作。</div><div><strong>🏠 駐點</strong><br>代辦、工作日誌、管理委員會、住戶、廠商、交接等社區工作。</div><div><strong>🏢＋🏠 內勤＋兼任駐點</strong><br>同一人可同時擁有兩個工作空間的可處理項目。</div><div><strong>🧩 企業客製</strong><br>企業若有特殊需求，可在「設定對象」選擇公司後獨立調整，不影響其他企業。</div></div></div>`;
-  $('customTargetSelect').addEventListener('change',async e=>{const v=e.target.value;if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}await loadCustomization();renderCustomization();});
-  $('customScopeSelect').addEventListener('change',async e=>{c.scope=e.target.value;await loadCustomization();renderCustomization();});
+  $('customTargetSelect').addEventListener('change',async e=>{const v=e.target.value;if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}c.openIds=[];await loadCustomization();renderCustomization();});
+  $('customScopeSelect').addEventListener('change',async e=>{c.scope=e.target.value;c.openIds=[];await loadCustomization();renderCustomization();});
 }
 function toggleCustomMenuNode(id){
-  const node=document.querySelector(`.custom-menu-node[data-menu-id="${CSS.escape(String(id))}"]`);if(!node)return;
-  const children=node.querySelector(':scope > .custom-menu-children');if(!children)return;
-  const btn=node.querySelector(':scope > .custom-menu-node-head .menu-tree-toggle');
-  const opening=!children.classList.contains('is-open');children.classList.toggle('is-open',opening);
-  children.style.setProperty('display',opening?'flex':'none','important');
-  if(btn){btn.textContent=opening?'−':'＋';btn.setAttribute('aria-expanded',opening?'true':'false');btn.title=opening?'收合子目錄':'展開子目錄';}
+  const c=state.customization;
+  const open=new Set((c.openIds||[]).map(String));
+  const key=String(id);
+  if(open.has(key)) open.delete(key); else open.add(key);
+  c.openIds=[...open];
+  renderCustomization();
 }
 function ensureCustomMenuModal(){
   let modal=document.getElementById('customMenuEditorModal');
@@ -329,6 +332,7 @@ function saveCustomMenuFromModal(){
   const item=customMenuEditorState.id?state.customization.items.find(x=>String(x.id)===String(customMenuEditorState.id)):null;
   const data={icon:document.getElementById('customMenuModalIcon').value.trim()||'📄',label,action:document.getElementById('customMenuModalAction').value.trim()||'placeholder',parentId:document.getElementById('customMenuModalParent').value||null,enabled:document.getElementById('customMenuModalEnabled').value==='1'};
   if(item)Object.assign(item,data);else state.customization.items.push({id:'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),...data});
+  if(data.parentId){const open=new Set((state.customization.openIds||[]).map(String));open.add(String(data.parentId));state.customization.openIds=[...open];}
   closeCustomMenuEditor();renderCustomization();
 }
 function deleteCustomMenuFromModal(){
@@ -338,6 +342,7 @@ function deleteCustomMenuFromModal(){
   const count=descendants.size;
   if(count&&!confirm(`「${item.label||'未命名'}」底下還有 ${count} 個子目錄，刪除後會一併刪除。確定嗎？`))return;
   state.customization.items=state.customization.items.filter(x=>String(x.id)!==String(id)&&!descendants.has(x.id));
+  state.customization.openIds=(state.customization.openIds||[]).filter(x=>String(x)!==String(id)&&!descendants.has(x));
   closeCustomMenuEditor();renderCustomization();
 }
 function setCustomMenuField(id,key,value){const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;item[key]=value;}
@@ -348,7 +353,9 @@ function removeCustomMenuById(id){
   const descendants=new Set(customMenuDescendantIds(state.customization.items,item.id));
   const count=1+descendants.size;
   if(count>1&&!confirm(`「${item.label||'未命名'}」底下還有 ${count-1} 個子目錄，刪除後會一併刪除。確定嗎？`))return;
-  state.customization.items=state.customization.items.filter(x=>String(x.id)!==String(id)&&!descendants.has(x.id));renderCustomization();
+  state.customization.items=state.customization.items.filter(x=>String(x.id)!==String(id)&&!descendants.has(x.id));
+  state.customization.openIds=(state.customization.openIds||[]).filter(x=>String(x)!==String(id)&&!descendants.has(x));
+  renderCustomization();
 }
 function removeCustomMenu(i){const item=state.customization.items[i];if(item)removeCustomMenuById(item.id)}
 function moveCustomMenuTree(id,d){

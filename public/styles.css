@@ -2296,6 +2296,10 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
  .custom-menu-modal-grid>div:nth-child(3){grid-column:auto}
 }
 
+/* V5.8.2：目錄樹展開狀態改由 JS 狀態控制，避免按鈕變成「−」但子目錄仍不可見 */
+.custom-menu-children[hidden]{display:none!important}
+.custom-menu-children:not([hidden]){display:flex!important;flex-direction:column!important;gap:10px!important;width:100%!important;box-sizing:border-box!important;padding:10px 10px 12px 20px!important;background:#f7f9f8!important;border-top:1px dashed #dbe4df!important}
+
 /* V5.9.1：目錄樹強制保護層 — 確保文字、圖示、按鈕一定看得到，不被任何其他規則蓋掉 */
 .custom-menu-tree{display:flex!important;flex-direction:column!important;gap:14px!important;width:100%!important;box-sizing:border-box!important;}
 .custom-menu-node{display:block!important;width:100%!important;min-height:56px!important;height:auto!important;box-sizing:border-box!important;overflow:visible!important;border:1px solid var(--line)!important;border-radius:12px!important;background:#fff!important;}
