@@ -1,23 +1,280 @@
 {
-  "_schemaVersion": 3,
+  "_schemaVersion": 4,
   "staff": [
-    {"id":"todo","parentId":null,"icon":"📌","label":"代辦事項","action":"todo","enabled":true},
-    {"id":"work-journal","parentId":null,"icon":"📝","label":"工作日誌","action":"work-journal","enabled":true},
-    {"id":"finance","parentId":null,"icon":"💰","label":"財務報表","action":"finance","enabled":true},
-    {"id":"committee","parentId":null,"icon":"👥","label":"管理委員會","action":"committee","enabled":true},
-    {"id":"residents","parentId":null,"icon":"🏠","label":"住戶名冊","action":"residents","enabled":true},
-    {"id":"vendors","parentId":null,"icon":"🏢","label":"廠商聯繫","action":"vendors","enabled":true},
-    {"id":"handover","parentId":null,"icon":"📋","label":"交接清冊","action":"handover","enabled":true},
-    {"id":"company-resources","parentId":null,"icon":"📦","label":"公司資源","action":"company-resources","enabled":true}
+    {
+      "id": "todo",
+      "parentId": null,
+      "icon": "📌",
+      "label": "代辦事項",
+      "action": "todo",
+      "enabled": true
+    },
+    {
+      "id": "todo_archived",
+      "parentId": "todo",
+      "icon": "↳",
+      "label": "已封存",
+      "action": "todo-archived",
+      "enabled": true
+    },
+    {
+      "id": "work-journal",
+      "parentId": null,
+      "icon": "📝",
+      "label": "工作日誌",
+      "action": "work-journal",
+      "enabled": true
+    },
+    {
+      "id": "finance",
+      "parentId": null,
+      "icon": "💰",
+      "label": "財務報表",
+      "action": "finance",
+      "enabled": true
+    },
+    {
+      "id": "finance-income",
+      "parentId": "finance",
+      "icon": "↳",
+      "label": "收入報表",
+      "action": "finance-income",
+      "enabled": true
+    },
+    {
+      "id": "finance-payable",
+      "parentId": "finance",
+      "icon": "↳",
+      "label": "支出應付",
+      "action": "finance-payable",
+      "enabled": true
+    },
+    {
+      "id": "committee",
+      "parentId": null,
+      "icon": "👥",
+      "label": "管理委員會",
+      "action": "committee",
+      "enabled": true
+    },
+    {
+      "id": "committee-current",
+      "parentId": "committee",
+      "icon": "↳",
+      "label": "本屆委員",
+      "action": "committee-current",
+      "enabled": true
+    },
+    {
+      "id": "committee-monthly",
+      "parentId": "committee",
+      "icon": "↳",
+      "label": "月例會",
+      "action": "committee-monthly",
+      "enabled": true
+    },
+    {
+      "id": "committee-owners",
+      "parentId": "committee",
+      "icon": "↳",
+      "label": "區權會",
+      "action": "committee-owners",
+      "enabled": true
+    },
+    {
+      "id": "residents",
+      "parentId": null,
+      "icon": "🏠",
+      "label": "住戶名冊",
+      "action": "residents",
+      "enabled": true
+    },
+    {
+      "id": "residents-contact",
+      "parentId": "residents",
+      "icon": "↳",
+      "label": "住戶聯繫表",
+      "action": "residents-contact",
+      "enabled": true
+    },
+    {
+      "id": "residents-owners",
+      "parentId": "residents",
+      "icon": "↳",
+      "label": "區分所有權人",
+      "action": "residents-owners",
+      "enabled": true
+    },
+    {
+      "id": "residents-tenants",
+      "parentId": "residents",
+      "icon": "↳",
+      "label": "承租人",
+      "action": "residents-tenants",
+      "enabled": true
+    },
+    {
+      "id": "vendors",
+      "parentId": null,
+      "icon": "🏢",
+      "label": "廠商聯繫",
+      "action": "vendors",
+      "enabled": true
+    },
+    {
+      "id": "vendors-maintenance",
+      "parentId": "vendors",
+      "icon": "↳",
+      "label": "簽約保養廠商",
+      "action": "vendors-maintenance",
+      "enabled": true
+    },
+    {
+      "id": "vendors-general",
+      "parentId": "vendors",
+      "icon": "↳",
+      "label": "一般廠商",
+      "action": "vendors-general",
+      "enabled": true
+    },
+    {
+      "id": "vendors-special",
+      "parentId": "vendors",
+      "icon": "↳",
+      "label": "特約廠商",
+      "action": "vendors-special",
+      "enabled": true
+    },
+    {
+      "id": "handover",
+      "parentId": null,
+      "icon": "📋",
+      "label": "交接清冊",
+      "action": "handover",
+      "enabled": true
+    },
+    {
+      "id": "handover-manager",
+      "parentId": "handover",
+      "icon": "↳",
+      "label": "經理交接清冊",
+      "action": "handover-manager",
+      "enabled": true
+    },
+    {
+      "id": "handover-secretary",
+      "parentId": "handover",
+      "icon": "↳",
+      "label": "秘書交接清冊",
+      "action": "handover-secretary",
+      "enabled": true
+    },
+    {
+      "id": "company-resources",
+      "parentId": null,
+      "icon": "📦",
+      "label": "公司資源",
+      "action": "company-resources",
+      "enabled": true
+    }
   ],
   "company": [
-    {"id":"company-overview","parentId":null,"icon":"🏠","label":"管理首頁","action":"overview","enabled":true},
-    {"id":"company-staff","parentId":null,"icon":"👥","label":"公司人員管理","action":"manage-staff","enabled":true},
-    {"id":"company-communities","parentId":null,"icon":"🏘","label":"社區管理","action":"manage-communities","enabled":true},
-    {"id":"company-submissions","parentId":null,"icon":"📋","label":"交接紀錄","action":"view-submissions","enabled":true},
-    {"id":"company-templates","parentId":null,"icon":"📄","label":"公司文件／範本","action":"manage-templates","enabled":true},
-    {"id":"company-finance","parentId":null,"icon":"💰","label":"公司財務／會計","action":"finance","enabled":true},
-    {"id":"company-resources","parentId":null,"icon":"📦","label":"公司資源／總務","action":"company-resources","enabled":true}
+    {
+      "id": "company-overview",
+      "parentId": null,
+      "icon": "🏠",
+      "label": "公司管理首頁",
+      "action": "overview",
+      "enabled": true
+    },
+    {
+      "id": "company-staff",
+      "parentId": null,
+      "icon": "👥",
+      "label": "公司人員管理",
+      "action": "manage-staff",
+      "enabled": true
+    },
+    {
+      "id": "company-communities",
+      "parentId": null,
+      "icon": "🏘",
+      "label": "社區管理",
+      "action": "manage-communities",
+      "enabled": true
+    },
+    {
+      "id": "company-submissions",
+      "parentId": null,
+      "icon": "📋",
+      "label": "交接清冊紀錄",
+      "action": "view-submissions",
+      "enabled": true
+    },
+    {
+      "id": "company-templates",
+      "parentId": null,
+      "icon": "📄",
+      "label": "公司制式文件",
+      "action": "manage-templates",
+      "enabled": true
+    },
+    {
+      "id": "company-work-journal",
+      "parentId": null,
+      "icon": "📝",
+      "label": "工作日誌管理",
+      "action": "work-journal",
+      "enabled": true
+    },
+    {
+      "id": "company-accounting",
+      "parentId": null,
+      "icon": "💰",
+      "label": "會計",
+      "action": "finance",
+      "enabled": true
+    },
+    {
+      "id": "company-general-affairs",
+      "parentId": null,
+      "icon": "🧰",
+      "label": "總務管理",
+      "action": "company-resources",
+      "enabled": true
+    },
+    {
+      "id": "company-personnel",
+      "parentId": null,
+      "icon": "👤",
+      "label": "人員",
+      "action": "manage-staff",
+      "enabled": true
+    },
+    {
+      "id": "company-finance",
+      "parentId": null,
+      "icon": "💵",
+      "label": "公司財務",
+      "action": "finance",
+      "enabled": true
+    },
+    {
+      "id": "company-hr",
+      "parentId": null,
+      "icon": "🧑‍💼",
+      "label": "人事管理",
+      "action": "manage-staff",
+      "enabled": true
+    },
+    {
+      "id": "company-new-record",
+      "parentId": null,
+      "icon": "🗒️",
+      "label": "新日錄",
+      "action": "new-record",
+      "enabled": true
+    }
   ],
   "tenants": {}
 }
