@@ -91,15 +91,24 @@ function readMenuConfig(){
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // V5.7.8：恢復完整平台目錄，但採「只補缺、不覆蓋」原則。
+  // V5.7.9：恢復完整平台目錄與目錄重複保護，但採「只補缺、不覆蓋」原則。
   // 這樣既能把舊版遺漏的目錄補回來，也不會把公司過去自行新增／改名／排序的項目覆蓋掉。
   try{
     const seed=defaultMenuConfig();
     let changed=false;
     for(const scope of ['staff','company']){
+      // 先去除同一層目錄中意外重複的 id，避免更新後出現重複選單。保留第一筆，絕不覆蓋既有自訂內容。
+      const seen=new Set();
+      const dedup=[];
+      for(const item of c[scope]){
+        const id=String(item?.id||'').trim();
+        if(!id || seen.has(id)){ changed=true; continue; }
+        seen.add(id); dedup.push(item);
+      }
+      c[scope]=dedup;
       const existingIds=new Set(c[scope].map(x=>String(x.id)));
       for(const item of (seed[scope]||[])){
-        if(!existingIds.has(String(item.id))){ c[scope].push({...item}); changed=true; }
+        if(!existingIds.has(String(item.id))){ c[scope].push({...item}); existingIds.add(String(item.id)); changed=true; }
       }
     }
     if(Number(c._schemaVersion||0)<4){ c._schemaVersion=4; changed=true; }
