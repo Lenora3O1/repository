@@ -90,21 +90,26 @@ function readMenuConfig(){
   if(!fs.existsSync(MENU_CONFIG_PATH)) fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(defaultMenuConfig(),null,2),'utf-8');
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
-  // V5.7：補上公司內勤預設工作目錄；只在既有公司目錄為空時初始化，不覆蓋既有自訂。
-  if(c.company.length===0){
-    const seedPath=path.join(__dirname,'config','menu-config.json');
-    try{const seed=JSON.parse(fs.readFileSync(seedPath,'utf-8'));if(Array.isArray(seed.company)&&seed.company.length)c.company=seed.company;}catch(e){}
-  }
-  // V5.1：把「已封存」加入代辦事項底下。只做一次版本遷移，不會覆蓋現有公司／平台自訂目錄。
-  if(Number(c._schemaVersion||0)<2){
-    const hasTodo=c.staff.some(x=>String(x.id)==='todo');
-    const hasArchived=c.staff.some(x=>String(x.id)==='todo_archived');
-    if(hasTodo && !hasArchived){
-      c.staff.push({id:'todo_archived',parentId:'todo',icon:'↳',label:'已封存',action:'todo-archived',enabled:true});
+  c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
+  // V5.7.8：恢復完整平台目錄，但採「只補缺、不覆蓋」原則。
+  // 這樣既能把舊版遺漏的目錄補回來，也不會把公司過去自行新增／改名／排序的項目覆蓋掉。
+  try{
+    const seed=defaultMenuConfig();
+    let changed=false;
+    for(const scope of ['staff','company']){
+      const existingIds=new Set(c[scope].map(x=>String(x.id)));
+      for(const item of (seed[scope]||[])){
+        if(!existingIds.has(String(item.id))){ c[scope].push({...item}); changed=true; }
+      }
     }
-    c._schemaVersion=2;
-    fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');
-  }
+    if(Number(c._schemaVersion||0)<4){ c._schemaVersion=4; changed=true; }
+    if(changed){
+      const backupDir=path.join(DATA_DIR,'backups'); fs.mkdirSync(backupDir,{recursive:true});
+      const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+      try{fs.copyFileSync(MENU_CONFIG_PATH,path.join(backupDir,`menu-config-before-v5.7.8-${stamp}.json`));}catch(e){}
+      fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');
+    }
+  }catch(e){}
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -124,10 +129,11 @@ function cleanMenuItems(items){
 const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources'];
 const STAFF_PERMISSION_LABELS={
   'todo':'代辦事項','work-journal':'工作日誌','finance':'財務／會計','committee':'管理委員會','residents':'住戶名冊','vendors':'廠商聯繫','handover':'交接清冊','company-resources':'公司資源',
-  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本'
+  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本',
+  'company-work-journal':'工作日誌管理','company-accounting':'會計','company-general-affairs':'總務管理','company-personnel':'人員','company-finance':'公司財務','company-hr':'人事管理','company-new-record':'新日錄'
 };
-const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates']);
-const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover']);
+const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record']);
+const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover','company-resources']);
 function parsePermissions(u){
   try{const p=JSON.parse(u?.permission_json||'[]');return Array.isArray(p)?p.map(String):[];}catch{return []}
 }
@@ -494,11 +500,10 @@ app.post('/api/messages/typing',requireMessageUser,(req,res)=>{const u=getUser(r
 // ===== 企業訊息稽核：預設關閉；由總後臺啟用並指定稽核人員。總後臺本身不直接查看內容。 =====
 app.get('/api/admin/message-audit-settings',requireSuperAdmin,(req,res)=>{
   const tid=Number(req.query?.tenant_id); if(!tid)return res.status(400).json({error:'請指定公司'});
-  const tenant=db.prepare('SELECT id,name,code FROM tenants WHERE id=?').get(tid); if(!tenant)return res.status(404).json({error:'找不到公司'});
+  const tenant=db.prepare('SELECT id,name FROM tenants WHERE id=?').get(tid); if(!tenant)return res.status(404).json({error:'找不到公司'});
   const cfg=getMessageAuditSettings(tid);
-  const owner=db.prepare(`SELECT id,employee_id,name,role,position,job_category,job_level,work_type,admin_level,is_active FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY id LIMIT 1`).get(tid) || null;
-  const staff=db.prepare(`SELECT id,employee_id,name,role,position,job_category,job_level,work_type,admin_level,is_active FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND (role='company_admin' OR work_type IN ('internal','hybrid')) ORDER BY CASE WHEN role='company_admin' AND admin_level='owner' THEN 0 WHEN role='company_admin' THEN 1 WHEN work_type='internal' THEN 2 ELSE 3 END, employee_id`).all(tid);
-  res.json({tenant,cfg,owner,staff});
+  const staff=db.prepare(`SELECT id,employee_id,name,role,position,job_category,admin_level FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY CASE WHEN role='company_admin' THEN 0 ELSE 1 END, employee_id`).all(tid);
+  res.json({tenant,cfg,staff});
 });
 app.put('/api/admin/message-audit-settings',requireSuperAdmin,(req,res)=>{
   const tid=Number(req.body?.tenant_id); if(!tid)return res.status(400).json({error:'請指定公司'});
