@@ -494,10 +494,11 @@ app.post('/api/messages/typing',requireMessageUser,(req,res)=>{const u=getUser(r
 // ===== 企業訊息稽核：預設關閉；由總後臺啟用並指定稽核人員。總後臺本身不直接查看內容。 =====
 app.get('/api/admin/message-audit-settings',requireSuperAdmin,(req,res)=>{
   const tid=Number(req.query?.tenant_id); if(!tid)return res.status(400).json({error:'請指定公司'});
-  const tenant=db.prepare('SELECT id,name FROM tenants WHERE id=?').get(tid); if(!tenant)return res.status(404).json({error:'找不到公司'});
+  const tenant=db.prepare('SELECT id,name,code FROM tenants WHERE id=?').get(tid); if(!tenant)return res.status(404).json({error:'找不到公司'});
   const cfg=getMessageAuditSettings(tid);
-  const staff=db.prepare(`SELECT id,employee_id,name,role,position,job_category,admin_level FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY CASE WHEN role='company_admin' THEN 0 ELSE 1 END, employee_id`).all(tid);
-  res.json({tenant,cfg,staff});
+  const owner=db.prepare(`SELECT id,employee_id,name,role,position,job_category,job_level,work_type,admin_level,is_active FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY id LIMIT 1`).get(tid) || null;
+  const staff=db.prepare(`SELECT id,employee_id,name,role,position,job_category,job_level,work_type,admin_level,is_active FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND (role='company_admin' OR work_type IN ('internal','hybrid')) ORDER BY CASE WHEN role='company_admin' AND admin_level='owner' THEN 0 WHEN role='company_admin' THEN 1 WHEN work_type='internal' THEN 2 ELSE 3 END, employee_id`).all(tid);
+  res.json({tenant,cfg,owner,staff});
 });
 app.put('/api/admin/message-audit-settings',requireSuperAdmin,(req,res)=>{
   const tid=Number(req.body?.tenant_id); if(!tid)return res.status(400).json({error:'請指定公司'});
