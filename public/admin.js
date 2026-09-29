@@ -235,7 +235,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot
           ${childButton}
         </div>
       </div>
-      ${hasChildren?`<div class="custom-menu-children${open?' is-open':''}">${childRows}</div>`:''}
+      ${hasChildren?`<div class="custom-menu-children${open?' is-open':''}" style="display:${open?'flex':'none'} !important">${childRows}</div>`:''}
     </div>`;
     return card;
   }).join('');
@@ -262,7 +262,9 @@ function toggleCustomMenuNode(id){
   const node=document.querySelector(`.custom-menu-node[data-menu-id="${CSS.escape(String(id))}"]`);if(!node)return;
   const children=node.querySelector(':scope > .custom-menu-children');if(!children)return;
   const btn=node.querySelector(':scope > .custom-menu-node-head .menu-tree-toggle');
-  const opening=!children.classList.contains('is-open');children.classList.toggle('is-open',opening);if(btn){btn.textContent=opening?'−':'＋';btn.setAttribute('aria-expanded',opening?'true':'false');btn.title=opening?'收合子目錄':'展開子目錄';}
+  const opening=!children.classList.contains('is-open');children.classList.toggle('is-open',opening);
+  children.style.setProperty('display',opening?'flex':'none','important');
+  if(btn){btn.textContent=opening?'−':'＋';btn.setAttribute('aria-expanded',opening?'true':'false');btn.title=opening?'收合子目錄':'展開子目錄';}
 }
 function ensureCustomMenuModal(){
   let modal=document.getElementById('customMenuEditorModal');
@@ -350,27 +352,30 @@ function removeCustomMenuById(id){
 }
 function removeCustomMenu(i){const item=state.customization.items[i];if(item)removeCustomMenuById(item.id)}
 function moveCustomMenuTree(id,d){
-  state.customization.items=normalizeCustomMenuTree(state.customization.items);
-  const item=state.customization.items.find(x=>String(x.id)===String(id));if(!item)return;
-  const siblings=customMenuChildren(state.customization.items,item.parentId||null);const pos=siblings.findIndex(x=>String(x.id)===String(id));const targetPos=pos+d;if(targetPos<0||targetPos>=siblings.length)return;
-  const target=siblings[targetPos];
-  const blockIds=new Set([item.id,...customMenuDescendantIds(state.customization.items,item.id)]);
-  const targetBlockIds=new Set([target.id,...customMenuDescendantIds(state.customization.items,target.id)]);
-  const remaining=state.customization.items.filter(x=>!blockIds.has(x.id)&&!targetBlockIds.has(x.id));
-  const blocks=pos<targetPos?[target,item]:[item,target];
-  // Rebuild by walking the original sibling order, swapping the two sibling blocks.
-  const originalSiblings=siblings.map(x=>x.id);const swapA=String(item.id),swapB=String(target.id);
-  const orderedSiblingIds=originalSiblings.map(x=>String(x)===swapA?swapB:String(x)===swapB?swapA:String(x));
-  const byId=new Map(state.customization.items.map(x=>[x.id,x]));
-  const siblingBlocks=orderedSiblingIds.map(sid=>{const root=byId.get(sid);return [root,...customMenuDescendantIds(state.customization.items,root.id).map(cid=>byId.get(cid))]});
+  const items=normalizeCustomMenuTree(state.customization.items);
+  const item=items.find(x=>String(x.id)===String(id));if(!item)return;
+  const siblings=customMenuChildren(items,item.parentId||null);
+  const pos=siblings.findIndex(x=>String(x.id)===String(id));
+  const targetPos=pos+d;if(targetPos<0||targetPos>=siblings.length)return;
+  const newSiblingOrder=siblings.slice();
+  [newSiblingOrder[pos],newSiblingOrder[targetPos]]=[newSiblingOrder[targetPos],newSiblingOrder[pos]];
+  const byId=new Map(items.map(x=>[x.id,x]));
   const siblingSet=new Set(siblings.map(x=>x.id));
-  const rebuilt=[];const consumed=new Set();
-  for(const x of state.customization.items){
-    if(consumed.has(x.id))continue;
-    if(!siblingSet.has(x.id)){rebuilt.push(x);continue;}
-    const block=siblingBlocks.find(b=>b[0]?.id===x.id);if(block){for(const b of block){rebuilt.push(b);consumed.add(b.id)}}
+  const insertAt=items.findIndex(x=>siblingSet.has(x.id));
+  const removedIds=new Set();
+  for(const s of siblings){removedIds.add(s.id);for(const did of customMenuDescendantIds(items,s.id))removedIds.add(did);}
+  const remaining=items.filter(x=>!removedIds.has(x.id));
+  let removedBefore=0;
+  for(let i=0;i<insertAt;i++){if(removedIds.has(items[i].id))removedBefore++;}
+  const adjustedInsertAt=insertAt-removedBefore;
+  const newBlocks=[];
+  for(const s of newSiblingOrder){
+    newBlocks.push(byId.get(s.id));
+    for(const did of customMenuDescendantIds(items,s.id))newBlocks.push(byId.get(did));
   }
-  state.customization.items=normalizeCustomMenuTree(rebuilt);renderCustomization();
+  remaining.splice(adjustedInsertAt,0,...newBlocks);
+  state.customization.items=normalizeCustomMenuTree(remaining);
+  renderCustomization();
 }
 async function saveCustomMenu(){
   try{
