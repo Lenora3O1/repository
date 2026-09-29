@@ -215,38 +215,32 @@ function normalizeCustomMenuTree(items){
   for(const item of items) if(!out.includes(item)) out.push(item);
   return out;
 }
-function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),isRoot=true){
-  // V5.8.7：子目錄改成「明確渲染 + 明確顯示」，不再依賴 hidden/class 的舊 CSS。
+function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),ancestorsVisible=true){
   const nodes=customMenuChildren(items,parentId);
   return nodes.map((item)=>{
     const children=customMenuChildren(items,item.id);
     const hasChildren=children.length>0;
     const open=openIds.has(String(item.id));
-    const allSiblings=nodes;
-    const pos=allSiblings.findIndex(x=>String(x.id)===String(item.id));
-    const childRows=hasChildren ? customMenuTreeRows(items,item.id,depth+1,openIds,false) : '';
+    const pos=nodes.findIndex(x=>String(x.id)===String(item.id));
+    const visible=ancestorsVisible;
+    const childRows=customMenuTreeRows(items,item.id,depth+1,openIds,visible&&open);
+    const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
     const toggle=hasChildren
       ? `<button type="button" class="menu-tree-toggle" onclick="toggleCustomMenuNode('${escapeAttr(String(item.id))}')" aria-expanded="${open?'true':'false'}" title="${open?'收合子目錄':'展開子目錄'}">${open?'−':'＋'}</button>`
       : '<span class="menu-tree-toggle-placeholder"></span>';
-    const childButton=`<button type="button" class="menu-tree-add-child secondary" onclick="addCustomChild('${escapeAttr(String(item.id))}')">＋ 子目錄</button>`;
     const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
-    const childContainer=hasChildren ? `
-      <div class="custom-menu-children-v587" data-parent-id="${escapeAttr(String(item.id))}" data-child-count="${children.length}" style="display:${open?'block':'none'} !important;">
-        ${childRows}
-      </div>` : '';
-    return `<div class="custom-menu-node" data-menu-id="${escapeAttr(String(item.id))}" style="--menu-depth:${depth}">
+    const nodeStyle=`display:${visible?'block':'none'};`;
+    return `<div class="custom-menu-node custom-menu-node-v588" data-menu-id="${escapeAttr(String(item.id))}" data-parent-id="${escapeAttr(String(item.parentId||''))}" data-depth="${depth}" style="${nodeStyle}">
       <div class="custom-menu-node-head" style="padding-left:${10+depth*18}px">
-        ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>
-        ${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
+        ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
         <div class="custom-menu-node-actions">
           ${editButton}
           <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',-1)" ${pos===0?'disabled':''} title="同層上移">↑</button>
-          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',1)" ${pos===allSiblings.length-1?'disabled':''} title="同層下移">↓</button>
+          <button type="button" class="icon-btn" onclick="moveCustomMenuTree('${escapeAttr(String(item.id))}',1)" ${pos===nodes.length-1?'disabled':''} title="同層下移">↓</button>
           ${childButton}
         </div>
       </div>
-      ${childContainer}
-    </div>`;
+    </div>${childRows}`;
   }).join('');
 }
 
@@ -273,16 +267,27 @@ function toggleCustomMenuNode(id){
   const c=state.customization;
   const key=String(id);
   const open=new Set((c.openIds||[]).map(String));
-  const willOpen=!open.has(key);
-  if(willOpen) open.add(key); else open.delete(key);
+  if(open.has(key)) open.delete(key); else open.add(key);
   c.openIds=[...open];
-
-  // 先直接操作目前這一顆節點，避免整棵樹重繪造成狀態不同步。
-  const node=document.querySelector(`.custom-menu-node[data-menu-id="${CSS.escape(key)}"]`);
-  const child=node?.querySelector(`.custom-menu-children-v587[data-parent-id="${CSS.escape(key)}"]`);
-  const button=node?.querySelector('.menu-tree-toggle');
-  if(child){ child.style.setProperty('display',willOpen?'block':'none','important'); }
-  if(button){ button.textContent=willOpen?'−':'＋'; button.setAttribute('aria-expanded',willOpen?'true':'false'); button.title=willOpen?'收合子目錄':'展開子目錄'; }
+  // V5.8.8：不重新渲染整棵樹；直接依照 parentId 更新所有後代的可見狀態，避免舊版 nested container/CSS 互相干擾。
+  const root=document.querySelector('.custom-menu-tree');
+  if(!root)return;
+  const nodes=[...root.querySelectorAll('.custom-menu-node-v588')];
+  const isOpen=(x)=>open.has(String(x));
+  const byId=new Map(nodes.map(n=>[String(n.dataset.menuId),n]));
+  const visibleCache=new Map();
+  const calcVisible=(node)=>{
+    const id=String(node.dataset.menuId);
+    if(visibleCache.has(id))return visibleCache.get(id);
+    const parent=String(node.dataset.parentId||'');
+    if(!parent){visibleCache.set(id,true);return true;}
+    const p=byId.get(parent);
+    const value=!!p && isOpen(parent) && calcVisible(p);
+    visibleCache.set(id,value);return value;
+  };
+  nodes.forEach(node=>{node.style.display=calcVisible(node)?'block':'none';});
+  const button=byId.get(key)?.querySelector('.menu-tree-toggle');
+  if(button){button.textContent=isOpen(key)?'−':'＋';button.setAttribute('aria-expanded',isOpen(key)?'true':'false');button.title=isOpen(key)?'收合子目錄':'展開子目錄';}
 }
 
 function ensureCustomMenuModal(){
