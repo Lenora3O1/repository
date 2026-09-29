@@ -2295,3 +2295,15 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
  .custom-menu-modal-grid{grid-template-columns:1fr}
  .custom-menu-modal-grid>div:nth-child(3){grid-column:auto}
 }
+
+/* V5.9.1：目錄樹強制保護層 — 確保文字、圖示、按鈕一定看得到，不被任何其他規則蓋掉 */
+.custom-menu-tree{display:flex!important;flex-direction:column!important;gap:14px!important;width:100%!important;box-sizing:border-box!important;}
+.custom-menu-node{display:block!important;width:100%!important;min-height:56px!important;height:auto!important;box-sizing:border-box!important;overflow:visible!important;border:1px solid var(--line)!important;border-radius:12px!important;background:#fff!important;}
+.custom-menu-node-head{display:flex!important;flex-wrap:wrap!important;align-items:center!important;width:100%!important;height:auto!important;min-height:56px!important;box-sizing:border-box!important;padding:12px 16px!important;overflow:visible!important;opacity:1!important;visibility:visible!important;background:#fbfcfb!important;}
+.custom-menu-node-head strong{display:inline-block!important;font-size:1.05rem!important;line-height:1.4!important;font-weight:500!important;color:#17312A!important;opacity:1!important;visibility:visible!important;max-width:100%!important;overflow:visible!important;white-space:normal!important;}
+.custom-menu-tree-icon{display:inline-block!important;font-size:1.2rem!important;line-height:1.4!important;opacity:1!important;visibility:visible!important;width:auto!important;min-width:24px!important;}
+.custom-menu-child-count{display:inline-block!important;font-size:.78rem!important;line-height:1.4!important;color:#4B5D63!important;opacity:1!important;visibility:visible!important;}
+.custom-menu-node-actions{display:flex!important;flex-wrap:wrap!important;align-items:center!important;gap:6px!important;margin-left:auto!important;opacity:1!important;visibility:visible!important;}
+.custom-menu-node-actions button{display:inline-flex!important;align-items:center!important;justify-content:center!important;font-size:.85rem!important;line-height:1.4!important;opacity:1!important;visibility:visible!important;color:inherit!important;}
+.custom-menu-children{display:none;flex-direction:column!important;gap:10px!important;width:100%!important;box-sizing:border-box!important;padding:10px 10px 12px 20px!important;background:#f7f9f8!important;}
+.custom-menu-children.is-open{display:flex!important;}
