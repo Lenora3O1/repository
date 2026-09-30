@@ -418,7 +418,7 @@ async function saveCustomMenu(){
     await loadCustomization();renderCustomization();
   }catch(err){$('customSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}
 }
-async function resetCustomMenu(){if(!confirm('確定讓這家公司恢復使用平台預設目錄嗎？不會刪除任何人員或業務資料。'))return;try{await api('/api/admin/menu-config/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId})});await loadCustomization();renderCustomization();}catch(err){alert(err.message)}}
+async function resetCustomMenu(){if(!confirm('確定把「目前的平台預設目錄」複製到這家公司嗎？這會覆蓋這家公司目前的目錄設定，但不會刪除任何人員或業務資料。複製後仍與平台預設獨立，未來平台再修改也不會同步到這家公司。'))return;try{await api('/api/admin/menu-config/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId})});await loadCustomization();renderCustomization();}catch(err){alert(err.message)}}
 async function loadMessageAudit(){
   if(!state.tenants.length) state.tenants=await api('/api/admin/tenants');
   const active=state.messageAudit.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
