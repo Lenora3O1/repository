@@ -2312,6 +2312,8 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .custom-menu-children{display:none;flex-direction:column!important;gap:10px!important;width:100%!important;box-sizing:border-box!important;padding:10px 10px 12px 20px!important;background:#f7f9f8!important;}
 .custom-menu-children.is-open{display:flex!important;}
 
-/* V5.9 保全班表第一階段 */
-.schedule-staff-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin:8px 0 18px}.schedule-self-count{padding:12px 16px;border:1px solid var(--line,#ddd);border-radius:12px;background:var(--panel,#fff)}.schedule-self-count strong{font-size:24px;margin:0 4px}.schedule-legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0;font-size:14px}.schedule-calendar-week,.schedule-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}.schedule-calendar-week span{text-align:center;font-weight:700;padding:8px 0;color:#666}.schedule-day{min-height:74px;border:1px solid var(--line,#ddd);border-radius:10px;background:#fff;padding:8px;text-align:left;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start}.schedule-day:hover:not(:disabled){border-color:var(--accent,#176b45);box-shadow:0 0 0 2px rgba(23,107,69,.08)}.schedule-day span{font-size:16px;font-weight:700}.schedule-day small{font-size:12px}.schedule-day.is-selected{border-color:var(--accent,#176b45);background:rgba(23,107,69,.08);color:var(--accent-dark,#0f4d33)}.schedule-day.is-manager-locked{border-color:#d85b5b;background:#fff0f0;color:#a22}.schedule-day:disabled{cursor:not-allowed;opacity:.8}.schedule-day.empty{visibility:hidden;cursor:default}.schedule-msg{margin-top:12px}.tag.success{white-space:nowrap}
-@media (max-width:700px){.schedule-staff-head{flex-direction:column}.schedule-day{min-height:62px;padding:6px}.schedule-day small{font-size:11px}.schedule-calendar-grid{gap:4px}.schedule-calendar-week{gap:4px}}
+
+/* V5.8.8：平台預設目錄樹改為扁平 DOM + parentId 控制顯示，避免舊 nested CSS 影響子目錄。 */
+.custom-menu-node-v588{display:none!important; width:100%; box-sizing:border-box; overflow:visible;}
+.custom-menu-node-v588.is-v588-visible{display:block!important;}
+.custom-menu-node-v588 .custom-menu-node-head{width:100%; box-sizing:border-box;}
