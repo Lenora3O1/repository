@@ -57,7 +57,7 @@ function showHome(user){
   }
   window.refreshWorkspaceMenu?.('staff');loadHome(user); if(Array.isArray(user.site_assignments)&&user.site_assignments.length>1) openSiteContextPicker(user.site_assignments); else if(Array.isArray(user.site_assignments)&&user.site_assignments.length===1) selectSiteContext(user.site_assignments[0].community_id);
 }
-async function selectSiteContext(communityId){try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(communityId)})});}catch(e){console.warn('site context select failed',e)}}
+async function selectSiteContext(communityId){window.__activeCommunityId=Number(communityId);try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(communityId)})});}catch(e){console.warn('site context select failed',e)}}
 function openSiteContextPicker(assignments){const old=document.getElementById('siteContextPicker');if(old)old.remove();const modal=document.createElement('div');modal.id='siteContextPicker';modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal" role="dialog" aria-modal="true"><div class="eyebrow">現場工作台</div><h2>請選擇要進入的案場</h2><p class="modal-note">您同時服務多個案場。進入後只會看到該案場的資料，不會與其他社區混在一起。</p><div class="community-choice-list">${assignments.map(a=>`<button type="button" class="community-choice" data-cid="${a.community_id}"><span>🏠</span><strong>${escapeHtml(a.community_name||'未命名案場')}</strong><span>→</span></button>`).join('')}</div></div>`;document.body.appendChild(modal);document.body.classList.add('modal-open');modal.querySelectorAll('[data-cid]').forEach(btn=>btn.addEventListener('click',async()=>{await selectSiteContext(btn.dataset.cid);modal.remove();document.body.classList.remove('modal-open');setTopbarCompany((assignments.find(a=>String(a.community_id)===String(btn.dataset.cid))||{}).community_name||'（公司名稱）');loadHome();}));}
 async function showStaffProfile(user){
   const old=document.getElementById('staffProfileModal');
@@ -253,6 +253,26 @@ function showWorkspacePlaceholder(label){
   const el=$('staffHome');el.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">工作項目</div><h1>🚧 ${escapeHtml(label||'工作功能')}</h1><p>這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。</p><div class="placeholder-note">您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。</div></div>`;
 }
 
+
+async function loadSecuritySchedulePage(){
+  const el=$('staffHome');if(!el)return;
+  showWorkspaceLoading('保全班表');
+  try{
+    const session=await api('/api/staff/session');const u=session.user||{};if(!(u.job_categories||[]).includes('保全') || u.security_role!=='stationed')throw new Error('目前第一階段先開放「駐點保全」自選休假。');
+    const assignments=u.site_assignments||[];let cid=Number(window.__activeCommunityId||0);
+    if(!cid&&assignments.length===1)cid=Number(assignments[0].community_id);
+    if(!cid&&assignments.length>1){await new Promise(resolve=>{const modal=document.createElement('div');modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal"><button class="modal-close" type="button">×</button><div class="eyebrow">🛡️ 保全班表</div><h2>請先選擇案場</h2><p class="modal-note">您的帳號服務多個案場，請選擇要查看／自選休假的案場。</p><div class="community-choice-list">${assignments.map(a=>`<button type="button" class="community-choice" data-cid="${a.community_id}"><span>🏠</span><strong>${escapeHtml(a.community_name||'未命名案場')}</strong><span>→</span></button>`).join('')}</div></div>`;document.body.appendChild(modal);document.body.classList.add('modal-open');const close=()=>{modal.remove();document.body.classList.remove('modal-open');resolve()};modal.querySelector('.modal-close').addEventListener('click',close);modal.querySelectorAll('[data-cid]').forEach(b=>b.addEventListener('click',async()=>{cid=Number(b.dataset.cid);window.__activeCommunityId=cid;await selectSiteContext(cid);close();}));});}
+    if(!cid)throw new Error('目前沒有可使用的駐點案場。');
+    const nowDate=new Date();const year=nowDate.getFullYear(),month=nowDate.getMonth()+1;const d=await api(`/api/security-schedule/my?community_id=${cid}&year=${year}&month=${month}`);const selected=new Set((d.entries||[]).filter(x=>x.status==='off'&&x.off_type==='self').map(x=>x.work_date));
+    const days=new Date(Date.UTC(year,month,0)).getUTCDate();const first=new Date(Date.UTC(year,month-1,1));const offset=first.getUTCDay();
+    const cells=[];for(let i=0;i<offset;i++)cells.push('<div class="schedule-day empty"></div>');for(let day=1;day<=days;day++){const date=`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;const isSelected=selected.has(date);cells.push(`<button type="button" class="schedule-day ${isSelected?'is-selected':''}" data-date="${date}"><span>${day}</span>${isSelected?'<small>自選休</small>':''}</button>`)}
+    el.innerHTML=`<div class="panel"><div class="section-title">🛡️ 保全班表</div><div class="schedule-staff-head"><div><div class="eyebrow">${escapeHtml(u.name||'保全人員')}｜${escapeHtml((assignments.find(a=>Number(a.community_id)===cid)||{}).community_name||'')}</div><h1>${year} 年 ${month} 月</h1></div><div class="schedule-self-count">自選休假 <strong id="securitySelfCount">${selected.size}</strong> / 2 天</div></div><p class="hint">請先選擇本月 2 天自選休假。已由主管安排的日期之後會鎖定；這一階段先不處理剩餘 4 天。</p><div class="schedule-legend"><span>🟢 可選</span><span>🔵 已自選</span><span>🔴 已被主管安排／不可選</span></div><div class="schedule-calendar-week"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="schedule-calendar-grid">${cells.join('')}</div><div id="securityScheduleMsg" class="schedule-msg"></div></div>`;
+    const refresh=async()=>{const x=await api(`/api/security-schedule/my?community_id=${cid}&year=${year}&month=${month}`);const self=new Set((x.entries||[]).filter(e=>e.status==='off'&&e.off_type==='self').map(e=>e.work_date));const manager=new Set((x.entries||[]).filter(e=>e.status==='off'&&e.off_type==='manager').map(e=>e.work_date));$('securitySelfCount').textContent=self.size;el.querySelectorAll('[data-date]').forEach(b=>{const dt=b.dataset.date;b.classList.toggle('is-selected',self.has(dt));b.classList.toggle('is-manager-locked',manager.has(dt));b.disabled=manager.has(dt)||(!self.has(dt)&&self.size>=2);b.innerHTML=`<span>${Number(dt.slice(-2))}</span>${self.has(dt)?'<small>自選休</small>':manager.has(dt)?'<small>主管安排</small>':''}`});};
+    el.querySelectorAll('[data-date]').forEach(btn=>btn.addEventListener('click',async()=>{const date=btn.dataset.date;const msg=$('securityScheduleMsg');btn.disabled=true;try{if(btn.classList.contains('is-selected')){await api(`/api/security-schedule/my/off/${date}`,{method:'DELETE'});msg.innerHTML='<div class="msg success">已取消這天的自選休假。</div>';}else{await api('/api/security-schedule/my/off',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:cid,work_date:date})});msg.innerHTML='<div class="msg success">已登記這天為自選休假。</div>';}await refresh();}catch(e){msg.innerHTML=`<div class="msg error">${escapeHtml(e.message)}</div>`;await refresh();}}));
+    await refresh();
+  }catch(e){showWorkspaceError('保全班表',e);}
+}
+
 function showWorkspaceLoading(label){
   const el=$('staffHome');
   if(!el)return;
@@ -281,6 +301,7 @@ async function handleWorkspaceMenu(e){
     try{await openManagerChecklist(label||'經理交接清冊');}catch(err){showWorkspaceError(label||'經理交接清冊',err);}
     return;
   }
+  if(action==='security-schedule'||String(label||'').includes('保全')){await loadSecuritySchedulePage();return;}
   if(action==='checklist'||action==='secretary-checklist'){
     showWorkspaceLoading(label||'交接清冊');
     try{await loadChecklistModule(label||'交接清冊');}catch(err){showWorkspaceError(label||'交接清冊',err);}
