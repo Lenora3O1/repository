@@ -230,7 +230,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),ancest
       : '<span class="menu-tree-toggle-placeholder"></span>';
     const editButton=`<button type="button" class="secondary menu-tree-edit" onclick="openCustomMenuEditor('${escapeAttr(String(item.id))}')">編輯</button>`;
     const nodeClass=`custom-menu-node custom-menu-node-v588${visible?' is-v588-visible':''}`;
-    return `<div class="${nodeClass}" data-menu-id="${escapeAttr(String(item.id))}" data-parent-id="${escapeAttr(String(item.parentId||''))}" data-depth="${depth}" style="${nodeStyle}">
+    return `<div class="${nodeClass}" data-menu-id="${escapeAttr(String(item.id))}" data-parent-id="${escapeAttr(String(item.parentId||''))}" data-depth="${depth}">
       <div class="custom-menu-node-head" style="padding-left:${10+depth*18}px">
         ${toggle}<span class="custom-menu-tree-icon">${escapeHtml(item.icon||'•')}</span><strong>${escapeHtml(item.label||'未命名')}</strong>${hasChildren?`<span class="custom-menu-child-count">${children.length} 個子目錄</span>`:''}
         <div class="custom-menu-node-actions">
