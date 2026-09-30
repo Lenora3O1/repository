@@ -91,8 +91,26 @@ function readMenuConfig(){
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // V5.8.8：正式資料檔是平台目前的真實設定。讀取時絕對不能再自動把 config/menu-config.json 的預設項目補回來，
-  // 否則管理員刪除一個母目錄並儲存後，下一次讀取又會被補回。只有 /data/menu-config.json 第一次建立時才使用 config/menu-config.json 作為初始種子。
+  // V5.9：平台預設與企業目錄必須完全隔離。
+  // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
+  // 之後平台管理員修改平台預設，不會回頭同步已存在公司的目錄。
+  // 「恢復平台預設」也不是刪掉企業設定改成即時繼承，而是把「目前平台預設」複製一份到該公司，
+  // 讓該公司從這一刻起再次獨立。
+  try{
+    const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
+    let changed=false;
+    for(const t of tenantRows){
+      const key=String(t.id);
+      if(!c.tenants[key] || typeof c.tenants[key]!=='object') c.tenants[key]={};
+      for(const scope of ['staff','company']){
+        if(!Array.isArray(c.tenants[key][scope])){
+          c.tenants[key][scope]=(c[scope]||[]).map(x=>({...x}));
+          changed=true;
+        }
+      }
+    }
+    if(changed) writeMenuConfig(c);
+  }catch(e){ console.error('menu tenant snapshot migration error',e); }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -282,7 +300,19 @@ app.put('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   }catch(e){res.status(400).json({error:e.message||'目錄設定儲存失敗'});}
 });
 app.post('/api/admin/menu-config/reset',requireSuperAdmin,(req,res)=>{
-  try{const scope=req.body?.scope,tid=req.body?.tenant_id?Number(req.body.tenant_id):null;if(!['staff','company'].includes(scope)||!tid)return res.status(400).json({error:'請指定公司與目錄類型'});const c=readMenuConfig();if(c.tenants?.[String(tid)]){delete c.tenants[String(tid)][scope];if(!Object.keys(c.tenants[String(tid)]).length)delete c.tenants[String(tid)];}writeMenuConfig(c);res.json({success:true});}catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
+  try{
+    const scope=req.body?.scope,tid=req.body?.tenant_id?Number(req.body.tenant_id):null;
+    if(!['staff','company'].includes(scope)||!tid)return res.status(400).json({error:'請指定公司與目錄類型'});
+    const c=readMenuConfig();
+    const tenant=db.prepare('SELECT id FROM tenants WHERE id=?').get(tid);
+    if(!tenant)return res.status(404).json({error:'找不到公司'});
+    c.tenants=c.tenants||{};
+    c.tenants[String(tid)]=c.tenants[String(tid)]||{};
+    // 恢復平台預設＝複製「此刻的平台預設」到該公司，之後仍與平台獨立。
+    c.tenants[String(tid)][scope]=(c[scope]||[]).map(x=>({...x}));
+    writeMenuConfig(c);
+    res.json({success:true,items:c.tenants[String(tid)][scope]});
+  }catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
 });
 
 
@@ -619,7 +649,13 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   if(db.prepare('SELECT id FROM tenants WHERE name=?').get(name))return res.status(400).json({error:'已有同名公司。請直接使用既有公司，不要重新建立相同公司。'});
   const finalCode=code||`company-${Date.now()}`; const t=now(); const tx=db.transaction(()=>{
     const info=db.prepare('INSERT INTO tenants (name,code,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(name,finalCode,'active',t,t);
-    const tid=info.lastInsertRowid; const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
+    const tid=info.lastInsertRowid;
+    // 新公司建立當下就複製一份平台目錄，之後平台預設的變更不會同步到這家公司。
+    const menuNow=readMenuConfig();
+    menuNow.tenants=menuNow.tenants||{};
+    menuNow.tenants[String(tid)]={staff:(menuNow.staff||[]).map(x=>({...x})),company:(menuNow.company||[]).map(x=>({...x}))};
+    writeMenuConfig(menuNow);
+    const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
     db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tid,'請建立第一個社區','active',t,t);
     return {tenantId:tid,userId:u.lastInsertRowid};
   });
