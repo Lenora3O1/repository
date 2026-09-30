@@ -69,7 +69,6 @@ addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('staff_users', 'job_categories_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('staff_users', 'person_uid', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'person_status', "TEXT DEFAULT 'active'");
-addColumnIfMissing('staff_users', 'security_role', "TEXT DEFAULT ''");
 addColumnIfMissing('submissions', 'tenant_id', "INTEGER");
 addColumnIfMissing('submissions', 'community_id', "INTEGER");
 addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
@@ -185,23 +184,6 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_staff_work_assignments_staff ON staff_work_assignments(staff_id);
   CREATE INDEX IF NOT EXISTS idx_staff_work_assignments_scope ON staff_work_assignments(tenant_id,scope_type,community_id);
-  CREATE TABLE IF NOT EXISTS security_schedule_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER NOT NULL,
-    community_id INTEGER NOT NULL,
-    staff_id INTEGER NOT NULL,
-    work_date TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'off',
-    off_type TEXT NOT NULL DEFAULT 'self',
-    created_by_staff_id INTEGER,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(tenant_id, staff_id, work_date),
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
-    FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
-    FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_security_schedule_month ON security_schedule_entries(tenant_id,community_id,work_date);
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL,
