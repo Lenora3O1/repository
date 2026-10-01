@@ -677,15 +677,24 @@ const ADMIN_AI_SYSTEM_PROMPT = `你是「物業管理平台｜系統總後臺」
 9. 使用者說「幫我做」時，可以產生具體的實作規格與待修改檔案清單，並提醒需要確認後才能進入下一階段。
 `;
 
-app.get('/api/admin/ai/status',requireSuperAdmin,(req,res)=>{
+app.get('/api/admin/ai/status',requireSuperAdmin,async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
-  res.json({
-    success:true,
-    enabled: !!String(process.env.OPENAI_API_KEY||'').trim(),
-    model: ADMIN_AI_MODEL,
-    mode: 'platform-consultant',
-    endpoint: ADMIN_AI_ENDPOINT
-  });
+  const key=String(process.env.OPENAI_API_KEY||'').trim();
+  if(!key){
+    return res.json({success:true,enabled:false,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'missing_key'});
+  }
+  try{
+    const r=await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(ADMIN_AI_MODEL)}`,{headers:{'Authorization':`Bearer ${key}`}});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok){
+      console.error('Admin AI status error:',r.status,data);
+      return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'api_error',httpStatus:r.status,detail:data?.error?.message||`OpenAI HTTP ${r.status}`});
+    }
+    return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'ready'});
+  }catch(err){
+    console.error('Admin AI status request failed:',err);
+    return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'network_error',detail:err?.message||'network error'});
+  }
 });
 
 app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
