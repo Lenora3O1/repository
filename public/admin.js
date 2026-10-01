@@ -436,8 +436,61 @@ function renderMessageAudit(){
 }
 async function saveMessageAudit(){try{const ids=[...document.querySelectorAll('.audit-person:checked')].map(x=>Number(x.value));const enabled=$('auditEnabled').value==='1';await api('/api/admin/message-audit-settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant_id:state.messageAudit.tenantId,enabled,auditor_ids:ids})});$('auditSaveMsg').innerHTML='<span class="msg success inline-msg">✓ 已儲存企業訊息稽核設定</span>';await loadMessageAudit();renderMessageAudit();}catch(err){$('auditSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}}
 
+
+// ===== 平台智慧 AI 助手 =====
+const adminAiState={history:[],busy:false};
+function appendAdminAiMessage(role,text){
+  const box=$('adminAiMessages'); if(!box)return;
+  const row=document.createElement('div'); row.className=`ai-msg ${role}`;
+  const bubble=document.createElement('div'); bubble.className='ai-bubble'; bubble.textContent=text;
+  row.appendChild(bubble); box.appendChild(row); box.scrollTop=box.scrollHeight;
+}
+async function loadAdminAiStatus(){
+  try{
+    const d=await api('/api/admin/ai/status');
+    $('adminAiStatus').textContent=d.enabled?`● 已連線 · ${d.model}`:'○ 尚未設定 API Key';
+    $('adminAiStatus').style.color=d.enabled?'#2c7256':'#9a6b2b';
+    if(!d.enabled) $('adminAiInput').placeholder='先在 Zeabur 設定 OPENAI_API_KEY，再來跟我聊天 🤖';
+  }catch{
+    $('adminAiStatus').textContent='○ 無法檢查連線';
+  }
+}
+async function sendAdminAiMessage(text){
+  const msg=String(text||'').trim(); if(!msg||adminAiState.busy)return;
+  adminAiState.busy=true;
+  $('adminAiSend').disabled=true;
+  $('adminAiInput').disabled=true;
+  appendAdminAiMessage('user',msg);
+  adminAiState.history.push({role:'user',content:msg});
+  const loading='正在思考…';
+  appendAdminAiMessage('assistant',loading);
+  const loadingEl=$('adminAiMessages').lastElementChild;
+  try{
+    const d=await api('/api/admin/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,history:adminAiState.history.slice(-12)})});
+    loadingEl.querySelector('.ai-bubble').textContent=d.reply||'AI 沒有回覆內容。';
+    adminAiState.history.push({role:'assistant',content:d.reply||''});
+  }catch(err){
+    loadingEl.querySelector('.ai-bubble').textContent=err.message||'AI 目前無法回應。';
+  }finally{
+    adminAiState.busy=false;
+    $('adminAiSend').disabled=false;
+    $('adminAiInput').disabled=false;
+    $('adminAiInput').focus();
+  }
+}
+function initAdminAi(){
+  if(!$('adminAiForm'))return;
+  $('adminAiForm').addEventListener('submit',e=>{e.preventDefault();const input=$('adminAiInput');const msg=input.value;input.value='';sendAdminAiMessage(msg);});
+  $('adminAiInput').addEventListener('keydown',e=>{
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('adminAiForm').requestSubmit();}
+  });
+  document.querySelectorAll('[data-ai-quick]').forEach(b=>b.addEventListener('click',()=>sendAdminAiMessage(b.dataset.aiQuick)));
+  loadAdminAiStatus();
+}
+
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function escapeAttr(s){return escapeHtml(s)}
+initAdminAi();
 checkSession();
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCustomMenuEditor()});

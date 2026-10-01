@@ -1,6 +1,41 @@
-<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>物業管理平台｜系統總後臺</title><link rel="stylesheet" href="styles.css?v=5.8.9"></head><body>
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>物業管理平台｜系統總後臺</title><link rel="stylesheet" href="styles.css?v=5.8.9">
+<style>
+.ai-assistant-card{margin:18px 22px 0;background:linear-gradient(135deg,#f4fbf7,#ffffff);border:1px solid #cfe3d8;border-radius:16px;box-shadow:0 8px 28px rgba(24,80,56,.08);overflow:hidden}
+.ai-assistant-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid #dcebe3}
+.ai-assistant-title{font-size:20px;font-weight:800;color:#174f3a;display:flex;gap:9px;align-items:center}
+.ai-assistant-status{font-size:12px;color:#587064}
+.ai-assistant-body{padding:14px 18px 16px}
+.ai-assistant-messages{height:180px;overflow:auto;background:#fbfdfc;border:1px solid #e3eee8;border-radius:12px;padding:10px}
+.ai-msg{display:flex;margin:7px 0}.ai-msg.user{justify-content:flex-end}.ai-bubble{max-width:82%;padding:9px 12px;border-radius:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;font-size:14px}.ai-msg.assistant .ai-bubble{background:#edf7f1;color:#204d3a}.ai-msg.user .ai-bubble{background:#1f654a;color:#fff}
+.ai-assistant-form{display:flex;gap:8px;margin-top:10px}.ai-assistant-input{flex:1;min-height:42px;resize:vertical;border:1px solid #cbded4;border-radius:10px;padding:9px 11px;font:inherit}.ai-assistant-send{min-width:90px;border:0;border-radius:10px;background:#176044;color:#fff;font-weight:700;cursor:pointer}.ai-assistant-send:disabled{opacity:.55;cursor:not-allowed}
+.ai-quick{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.ai-quick button{border:1px solid #c8ddd2;background:#fff;border-radius:999px;padding:6px 10px;color:#245843;cursor:pointer}.ai-quick button:hover{background:#eef8f2}
+.ai-note{margin-top:8px;font-size:12px;color:#687c73}
+</style>
+</head><body>
 <div class="topbar"><button class="sidebar-toggle" id="sidebarToggle" aria-label="開啟選單">☰</button><div><div class="brand">物業管理平台｜系統總後臺</div><div class="sub">System Owner / Super Admin</div></div><div id="logoutWrap" style="display:none"><button class="top-link" id="logoutBtn">登出</button></div></div>
 <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
 <div id="appSidebar" class="app-sidebar"><div class="sidebar-head"><div class="sidebar-title">系統總後臺</div><div class="sidebar-caption">System Owner / Super Admin</div></div><div class="nav-tabs"><button data-tab="tenants" class="active">🏢 公司管理</button><button data-tab="submissions">📋 全部交接</button><button data-tab="staff">👥 全系統人員</button><button data-tab="templates">📄 平台制式範本</button><button data-tab="form">🛠 中央表單設計</button><button data-tab="branding">🎨 公司系統美編</button><button data-tab="customization">🧩 企業客製化</button><button data-tab="messageAudit">🔐 訊息稽核</button></div></div>
 <div class="shell"><div id="loginView" class="panel login-box" style="display:none"><h2>🔐 系統總管理員登入</h2><p class="hint">這裡是系統擁有者的總後臺。可以建立物業管理公司、查看全系統資料與管理中央表單。</p><div id="loginMsg"></div><form id="loginForm"><div class="field"><label>總後臺帳號</label><input type="text" id="username" required autocomplete="username"></div><div class="field"><label>總後臺密碼</label><input type="password" id="password" required autocomplete="current-password"></div><button type="submit">登入總後臺</button></form></div>
-<div id="mainView" style="display:none"><div id="pageNotice" class="floating-notice"><button type="button" class="notice-close" data-close-notice aria-label="關閉通知">×</button><div class="notice-kicker">🌿 系統通知</div><strong>這裡是整個系統的最高管理層</strong><p>公司管理員只會進入各自的公司後臺；一般物業人員只會看到自己的填表前台。</p></div><div id="tab-tenants"></div><div id="tab-submissions" style="display:none"></div><div id="tab-staff" style="display:none"></div><div id="tab-templates" style="display:none"></div><div id="tab-form" style="display:none"></div><div id="tab-branding" style="display:none"></div><div id="tab-customization" style="display:none"></div><div id="tab-messageAudit" style="display:none"></div></div></div><script src="sidebar.js?v=5.8.9"></script><script src="admin.js?v=5.8.9"></script></body></html>
+<div id="mainView" style="display:none">
+<div id="adminAiAssistant" class="ai-assistant-card">
+  <div class="ai-assistant-head">
+    <div class="ai-assistant-title">🤖 平台智慧 AI 助手 <span style="font-size:12px;font-weight:600;color:#6b8177">Beta</span></div>
+    <div id="adminAiStatus" class="ai-assistant-status">正在檢查 AI 連線…</div>
+  </div>
+  <div class="ai-assistant-body">
+    <div id="adminAiMessages" class="ai-assistant-messages">
+      <div class="ai-msg assistant"><div class="ai-bubble">嗨！我是你的平台智慧助手 🤖<br>目前先負責「系統架構顧問」：你可以直接跟我說想新增什麼模組、哪裡不好用、權限怎麼設計，我會用你的「總後台 → C2C 公司 → 員工／案場」架構幫你分析。</div></div>
+    </div>
+    <div class="ai-quick">
+      <button type="button" data-ai-quick="幫我規劃一個新的物業管理模組，先不要修改現有目錄。">💡 規劃新模組</button>
+      <button type="button" data-ai-quick="請幫我檢查目前這套系統的權限分層應該怎麼設計，重點是客戶資料隔離。">🔐 檢查權限架構</button>
+      <button type="button" data-ai-quick="如果我要做一個讓物業經理更省時間的智慧功能，你會建議從哪種工作流程開始？">🚀 想智慧功能</button>
+    </div>
+    <form id="adminAiForm" class="ai-assistant-form">
+      <textarea id="adminAiInput" class="ai-assistant-input" rows="2" placeholder="例如：我想新增一個巡檢模組，但不要動現在的母目錄…"></textarea>
+      <button id="adminAiSend" class="ai-assistant-send" type="submit">送出</button>
+    </form>
+    <div class="ai-note">🔒 第一階段只做平台規劃與問題分析，不讀取客戶營運資料，也不會自行修改或部署系統。</div>
+  </div>
+</div>
+<div id="pageNotice" class="floating-notice"><button type="button" class="notice-close" data-close-notice aria-label="關閉通知">×</button><div class="notice-kicker">🌿 系統通知</div><strong>這裡是整個系統的最高管理層</strong><p>公司管理員只會進入各自的公司後臺；一般物業人員只會看到自己的填表前台。</p></div><div id="tab-tenants"></div><div id="tab-submissions" style="display:none"></div><div id="tab-staff" style="display:none"></div><div id="tab-templates" style="display:none"></div><div id="tab-form" style="display:none"></div><div id="tab-branding" style="display:none"></div><div id="tab-customization" style="display:none"></div><div id="tab-messageAudit" style="display:none"></div></div></div><script src="sidebar.js?v=5.8.9"></script><script src="admin.js?v=5.8.9-ai1"></script></body></html>
