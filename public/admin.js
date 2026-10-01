@@ -489,6 +489,7 @@ async function sendAdminAiMessage(text){
     adminAiState.history.push({role:'assistant',content:d.reply||''});
   }catch(err){
     loadingEl.querySelector('.ai-bubble').textContent=err.message||'AI 目前無法回應。';
+    loadingEl.scrollIntoView({block:'nearest'});
   }finally{
     adminAiState.busy=false;
     $('adminAiSend').disabled=false;
