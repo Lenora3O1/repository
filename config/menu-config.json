@@ -176,6 +176,30 @@
       "label": "公司資源",
       "action": "company-resources",
       "enabled": true
+    },
+    {
+      "id": "sop",
+      "parentId": null,
+      "icon": "📚",
+      "label": "案場 SOP",
+      "action": "sop",
+      "enabled": true
+    },
+    {
+      "id": "sop-admin",
+      "parentId": "sop",
+      "icon": "↳",
+      "label": "行政 SOP",
+      "action": "sop-admin",
+      "enabled": true
+    },
+    {
+      "id": "sop-duty",
+      "parentId": "sop",
+      "icon": "↳",
+      "label": "勤務 SOP",
+      "action": "sop-duty",
+      "enabled": true
     }
   ],
   "company": [
@@ -273,6 +297,14 @@
       "icon": "🗒️",
       "label": "新日錄",
       "action": "new-record",
+      "enabled": true
+    },
+    {
+      "id": "company-sop",
+      "parentId": null,
+      "icon": "📚",
+      "label": "案場 SOP 管理",
+      "action": "sop",
       "enabled": true
     }
   ],
