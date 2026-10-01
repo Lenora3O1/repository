@@ -39,15 +39,7 @@ const sopUpload=multer({
 
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('admin.js') || filePath.endsWith('admin.html')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-    }
-  }
-}));
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
   resave: false, saveUninitialized: false,
@@ -663,118 +655,6 @@ app.post('/api/admin/login',(req,res)=>{const {username,password}=req.body||{};i
 app.post('/api/admin/logout',(req,res)=>{req.session.destroy(()=>res.json({success:true}));});
 app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin}));
 
-
-// ===== 總後臺智慧 AI 助手 =====
-// 第一階段為「平台架構顧問」：只提供系統設計、模組規劃與問題分析，
-// 不直接讀取或修改 C2C 客戶營運資料，也不直接執行資料異動。
-const ADMIN_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
-const ADMIN_AI_ENDPOINT = 'https://api.openai.com/v1/responses';
-const ADMIN_AI_MAX_HISTORY = 12;
-const ADMIN_AI_SYSTEM_PROMPT = `你是「物業管理平台｜系統總後臺」的智慧平台工程師。
-你服務的對象是平台 System Owner / Super Admin。
-
-你的工作：
-1. 協助平台擁有者規劃、設計與改善物業管理 SaaS 的模組、母目錄、子目錄、權限與使用流程。
-2. 用繁體中文、自然、白話、實務導向回答；不要把事情講得過度複雜。
-3. 永遠區分三層：平台層（System Owner）、公司租戶層（C2C 客戶）、公司內部人員／案場層。
-4. 平台層可以管理「模組、功能、母目錄、版本、開通能力」；客戶公司自行決定公司內部權限與實際業務資料。
-5. 不應主動要求、猜測或揭露任何 C2C 客戶的住戶、財務、社區、員工、SOP 內容或其他營運機密。
-6. 如果使用者要求修改系統，先提出清楚的變更方案、會影響哪些檔案／資料結構、風險與測試方式。除非後續工具明確授權，不要聲稱自己已經真的修改、部署或上線。
-7. 不要自行建立、刪除或改寫平台母目錄；除非使用者明確要求，而且要先確認變更範圍。
-8. 這個第一階段助手沒有寫入系統的工具，因此只能提供分析、規劃、檢查與建議，不得假裝有執行權限。
-9. 使用者說「幫我做」時，可以產生具體的實作規格與待修改檔案清單，並提醒需要確認後才能進入下一階段。
-`;
-
-app.get('/api/admin/ai/status',requireSuperAdmin,async(req,res)=>{
-  res.setHeader('Cache-Control','no-store');
-  const key=String(process.env.OPENAI_API_KEY||'').trim();
-  if(!key){
-    return res.json({success:true,enabled:false,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'missing_key'});
-  }
-  try{
-    // 不只檢查模型是否存在，直接做一次極小的 Responses API 測試，才能確認「真的能聊天」。
-    const r=await fetch(ADMIN_AI_ENDPOINT,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
-      body:JSON.stringify({model:ADMIN_AI_MODEL,input:'請只回答 OK',max_output_tokens:16,store:false})
-    });
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok){
-      console.error('Admin AI status response test error:',r.status,data);
-      return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'api_error',httpStatus:r.status,detail:data?.error?.message||`OpenAI HTTP ${r.status}`,requestId:r.headers.get('x-request-id')||null});
-    }
-    const text=data.output_text || '';
-    return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'ready',testReply:text||'OK'});
-  }catch(err){
-    console.error('Admin AI status response test failed:',err);
-    return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'network_error',detail:err?.message||'network error'});
-  }
-});
-
-app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
-  try{
-    if(!process.env.OPENAI_API_KEY){
-      return res.status(503).json({
-        error:'尚未設定 OPENAI_API_KEY',
-        code:'OPENAI_API_KEY_MISSING',
-        setup:'請在 Zeabur 的 Environment Variables 設定 OPENAI_API_KEY，儲存後重新部署。不要把金鑰寫進前端檔案。'
-      });
-    }
-    const body=req.body||{};
-    const message=String(body.message||'').trim();
-    if(!message) return res.status(400).json({error:'請輸入訊息'});
-    if(message.length>4000) return res.status(400).json({error:'單次訊息最多 4000 字'});
-    const history=Array.isArray(body.history)?body.history.slice(-ADMIN_AI_MAX_HISTORY).map(x=>({
-      role:x?.role==='assistant'?'assistant':'user',
-      content:String(x?.content||'').slice(0,6000)
-    })).filter(x=>x.content):[];
-
-    const platformContext = {
-      role: 'System Owner / Super Admin',
-      currentAdminSections: ['公司管理','全部交接','全系統人員','平台制式範本','中央表單設計','公司系統美編','企業客製化','訊息稽核'],
-      architectureRules: [
-        '總後台是平台母系統與模組建置基準點',
-        'C2C 客戶公司自行決定開通哪些已提供的模組與公司內部權限',
-        '平台擁有者不應介入或查看客戶的營運機密',
-        '系統測試公司可作為產品體驗與流程測試環境'
-      ]
-    };
-
-    // 先把歷史對話整理成純文字，避免不同 Responses API 版本對 message content 結構的相容性差異。
-    const historyText=history.map(x=>`${x.role==='assistant'?'AI':'使用者'}：${x.content}`).join('\n');
-    const input=`平台背景（僅供架構討論，不含客戶營運資料）：${JSON.stringify(platformContext, null, 2)}\n\n${historyText?`先前對話：\n${historyText}\n\n`:''}使用者目前的問題：${message}`;
-
-    const r=await fetch(ADMIN_AI_ENDPOINT,{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':`Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body:JSON.stringify({
-        model:ADMIN_AI_MODEL,
-        instructions:ADMIN_AI_SYSTEM_PROMPT,
-        input,
-        max_output_tokens:1200,
-        store:false
-      })
-    });
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok){
-      console.error('Admin AI API error:',r.status,data);
-      const requestId=r.headers.get('x-request-id')||null;
-      const detail=data?.error?.message||`OpenAI HTTP ${r.status}`;
-      return res.status(502).json({error:`AI 服務目前無法回應：${detail}`,code:'OPENAI_API_ERROR',httpStatus:r.status,detail,requestId});
-    }
-    const text=data.output_text || (Array.isArray(data.output)?data.output.flatMap(o=>Array.isArray(o.content)?o.content.filter(c=>c.type==='output_text').map(c=>c.text):[]).join('\n'):'');
-    if(!text) return res.status(502).json({error:'AI 沒有回傳文字結果，請稍後再試。'});
-    res.json({reply:text,model:data.model||ADMIN_AI_MODEL});
-  }catch(err){
-    console.error('Admin AI request failed:',err);
-    const detail=err?.message||'unknown error';
-    res.status(500).json({error:`智慧助手後端發生錯誤：${detail}`,code:'ADMIN_AI_SERVER_ERROR',detail});
-  }
-});
-
 // ===== 公司系統白標／美編 =====
 app.get('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(Number(req.params.id));if(!row)return res.status(404).json({error:'找不到公司'});res.json(sanitizeBranding(row));});
 app.put('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!row)return res.status(404).json({error:'找不到公司'});const b=req.body||{};const v={title:String(b.title||'').trim(),subtitle:String(b.subtitle||'').trim(),loginTitle:String(b.loginTitle||'').trim(),loginHint:String(b.loginHint||'').trim(),intro:String(b.intro||'').trim(),logoText:String(b.logoText||'').trim(),accent:validHex(b.accent,'#2F6F5E'),accentDark:validHex(b.accentDark,'#204F42'),bg:validHex(b.bg,'#F7F7F4'),panel:validHex(b.panel,'#FFFFFF')};if(!v.title)return res.status(400).json({error:'系統名稱不可空白'});db.prepare('UPDATE tenants SET brand_title=?,brand_subtitle=?,brand_login_title=?,brand_login_hint=?,brand_intro=?,brand_logo_text=?,brand_accent=?,brand_accent_dark=?,brand_bg=?,brand_panel=?,updated_at=? WHERE id=?').run(v.title,v.subtitle,v.loginTitle,v.loginHint,v.intro,v.logoText,v.accent,v.accentDark,v.bg,v.panel,now(),id);res.json({success:true,branding:{tenant_id:id,...v}});});
@@ -854,7 +734,24 @@ function parseSopTargetJobsJson(v){try{return parseSopTargetJobs(JSON.parse(v||'
 function getSopCommunityIds(sopId){return db.prepare('SELECT community_id FROM sop_communities WHERE sop_id=? ORDER BY community_id').all(sopId).map(x=>Number(x.community_id));}
 function getSopTargetJobs(sop){return parseSopTargetJobsJson(sop?.target_jobs_json);}
 function getUserSiteCommunityIds(u){return getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);}
-function isSiteManager(u){if(!u||u.role==='company_admin')return false;const jobs=getJobCategories(u);return String(u.job_level||'')==='經理'||jobs.includes('經理');}
+function isSiteManager(u){
+  if(!u||u.role==='company_admin')return false;
+  const jobs=getJobCategories(u);
+  const level=String(u.job_level||'').trim();
+  const position=String(u.position||'').trim();
+  const category=String(u.job_category||'').trim();
+  // 經理身分可能來自「職務位階」、「職務類別」或舊資料的 position/job_category；統一視為案場經理。
+  return level==='經理'||jobs.includes('經理')||position==='經理'||position.includes('經理')||category==='經理'||category.includes('經理');
+}
+function staffSopModuleEnabled(u){
+  if(!u||!u.tenant_id)return false;
+  const c=readMenuConfig();
+  const items=(c.tenants&&Array.isArray(c.tenants[String(u.tenant_id)]?.staff))?c.tenants[String(u.tenant_id)].staff:(c.staff||[]);
+  return items.some(x=>x?.enabled!==false&&['sop','sop-admin','sop-duty','sop-company','sop-community'].includes(String(x?.action||'')));
+}
+function canManagerUploadSop(u){
+  return isSiteManager(u)&&staffSopModuleEnabled(u);
+}
 function sopTargetMatchesUser(sop,u){
   const targets=getSopTargetJobs(sop); if(!targets.length||targets.includes('全部'))return true;
   const jobs=getJobCategories(u); const level=String(u.job_level||'');
@@ -898,7 +795,7 @@ app.post('/api/company/sops',requireCompanyAdmin,requireCompanyPermission('manag
 
 // 案場經理上傳「派駐社區注意事項」：資料直接回到同一家公司 SOP 中，內勤不必代為整理上傳。
 app.post('/api/staff/sops/community-upload',requireStaffFiller,sopUpload.single('file'),(req,res)=>{
-  const u=getUser(req); if(!isSiteManager(u) || !effectivePermissions(u).includes('sop')){cleanupUploadedFile(req.file);return res.status(403).json({error:'只有具備 SOP 權限的案場經理可以上傳派駐社區 SOP'});}
+  const u=getUser(req); if(!canManagerUploadSop(u)){cleanupUploadedFile(req.file);return res.status(403).json({error:'只有已開通「案場 SOP」模組的案場經理可以上傳派駐社區 SOP'});}
   if(!req.file)return res.status(400).json({error:'請選擇 SOP 檔案'});
   const title=String(req.body?.title||'').trim(); const version=String(req.body?.version||'1.0').trim()||'1.0'; const description=String(req.body?.description||'').trim(); let cid=Number(req.body?.community_id||0); let targets=[];
   try{targets=req.body?.target_jobs?parseSopTargetJobs(JSON.parse(req.body.target_jobs)):[]}catch{targets=[]}
@@ -920,7 +817,7 @@ app.post('/api/company/sops/:id/file',requireCompanyAdmin,requireCompanyPermissi
 app.post('/api/company/sops/:id/toggle',requireCompanyAdmin,requireCompanyPermission('manage-sop'),(req,res)=>{const id=Number(req.params.id),sop=db.prepare('SELECT * FROM sops WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!sop)return res.status(404).json({error:'找不到 SOP'});const u=getUser(req);db.prepare('UPDATE sops SET is_active=?,updated_at=?,updated_by=? WHERE id=? AND tenant_id=?').run(req.body?.is_active?1:0,now(),u.name||u.employee_id||'',id,tenantId(req));auditSop(u,'toggle',id,{is_active:!!req.body?.is_active});res.json({success:true});});
 app.delete('/api/company/sops/:id',requireCompanyAdmin,requireCompanyPermission('manage-sop'),(req,res)=>{const id=Number(req.params.id),sop=db.prepare('SELECT * FROM sops WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!sop)return res.status(404).json({error:'找不到 SOP'});const p=path.join(SOPS_DIR,sop.filename);if(fs.existsSync(p))try{fs.unlinkSync(p)}catch{};const u=getUser(req);db.prepare('DELETE FROM sops WHERE id=? AND tenant_id=?').run(id,tenantId(req));auditSop(u,'delete',id,{title:sop.title});res.json({success:true});});
 app.get('/api/company/sops/:id/download',requireCompanyAdmin,requireCompanyPermission('manage-sop'),(req,res)=>{const sop=db.prepare('SELECT * FROM sops WHERE id=? AND tenant_id=?').get(Number(req.params.id),tenantId(req));if(!sop)return res.status(404).json({error:'找不到 SOP'});const p=path.join(SOPS_DIR,sop.filename);if(!fs.existsSync(p))return res.status(404).json({error:'SOP 檔案不存在，請重新上傳'});res.download(p,sopDownloadName(sop));});
-app.get('/api/staff/sops',requireStaffFiller,(req,res)=>{const u=getUser(req);const category=['行政','勤務','應變','案場注意事項'].includes(String(req.query?.category||''))?String(req.query.category):'';const scope=String(req.query?.scope||'').trim();const rows=sopRowsForTenant(tenantId(req),category).filter(x=>x.is_active&&x.review_status!=='draft'&&(!scope||String(x.scope_type||'company_basic')===scope)&&canStaffAccessSop(req,x));const manager=isSiteManager(u);const canUpload=manager&&effectivePermissions(u).includes('sop');res.json({sops:rows,viewer:{job_level:u.job_level||'',job_categories:getJobCategories(u),manager,can_upload:canUpload,upload_reason:manager&&!canUpload?'公司尚未開通您的「案場 SOP」權限':''}});});
+app.get('/api/staff/sops',requireStaffFiller,(req,res)=>{const u=getUser(req);const category=['行政','勤務','應變','案場注意事項'].includes(String(req.query?.category||''))?String(req.query.category):'';const scope=String(req.query?.scope||'').trim();const rows=sopRowsForTenant(tenantId(req),category).filter(x=>x.is_active&&x.review_status!=='draft'&&(!scope||String(x.scope_type||'company_basic')===scope)&&canStaffAccessSop(req,x));const manager=isSiteManager(u);const canUpload=canManagerUploadSop(u);res.json({sops:rows,viewer:{job_level:u.job_level||'',position:u.position||'',job_category:u.job_category||'',job_categories:getJobCategories(u),manager,can_upload:canUpload,upload_reason:manager&&!canUpload?'目前公司尚未開通「案場 SOP」模組':''}});});
 app.get('/api/staff/sops/:id/download',requireStaffFiller,(req,res)=>{const sop=db.prepare('SELECT * FROM sops WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));if(!sop||sop.review_status==='draft'||!canStaffAccessSop(req,sop))return res.status(404).json({error:'找不到您目前可以閱讀的 SOP'});const p=path.join(SOPS_DIR,sop.filename);if(!fs.existsSync(p))return res.status(404).json({error:'SOP 檔案不存在，請通知公司重新上傳'});res.download(p,sopDownloadName(sop));});
 
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
@@ -951,4 +848,4 @@ app.post('/api/admin/templates/:id/activate',requireSuperAdmin,(req,res)=>{const
 app.delete('/api/admin/templates/:id',requireSuperAdmin,(req,res)=>{const tpl=db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);if(tpl){const p=path.join(TEMPLATES_DIR,tpl.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM templates WHERE id=?').run(req.params.id);}res.json({success:true});});
 app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const submission=db.prepare('SELECT * FROM submissions WHERE id=?').get(req.params.submissionId);if(!submission)return res.status(404).json({error:'找不到該筆紀錄'});const template=req.query.templateId?db.prepare('SELECT * FROM templates WHERE id=?').get(req.query.templateId):(db.prepare('SELECT * FROM templates WHERE tenant_id=? AND is_active=1').get(submission.tenant_id)||db.prepare('SELECT * FROM templates WHERE tenant_id IS NULL AND is_active=1').get());if(!template)return res.status(400).json({error:'尚未設定該公司的 Word 範本'});try{const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),JSON.parse(submission.data));const d=JSON.parse(submission.data);const fileName=`交接清冊_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗',detail:err.message});}});
 
-app.listen(PORT,()=>console.log(`V7 伺服器已啟動：http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
