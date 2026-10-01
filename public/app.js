@@ -265,6 +265,12 @@ function showWorkspaceError(label,err){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
   el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label||'工作功能')}</div><h1>目前無法開啟</h1><p>${escapeHtml(err?.message||'系統暫時無法取得資料。')}</p><button type="button" class="secondary" onclick="location.reload()">重新整理</button></div>`;
 }
+async function loadSopPage(category,label){
+  const el=$('staffHome'); if(!el)return;
+  const d=await api(`/api/staff/sops?category=${encodeURIComponent(category||'')}`); const rows=d.sops||[];
+  const items=rows.map(x=>`<div class="panel"><div class="section-title">📘 ${escapeHtml(x.title)}</div><div class="hint">版本 ${escapeHtml(x.version||'1.0')}　｜　更新 ${formatDate(x.updated_at)}${x.description?`<br>${escapeHtml(x.description)}`:''}</div><div class="modal-actions"><button type="button" onclick="window.open('/api/staff/sops/${x.id}/download','_blank','noopener')">開啟／下載 SOP</button></div></div>`).join('');
+  el.innerHTML=`<div class="panel"><div class="eyebrow">📚 案場 SOP</div><h1>${escapeHtml(label||'案場 SOP')}</h1><p>這裡只顯示您目前服務案場適用的「${escapeHtml(category||'全部')}」SOP。</p></div>${items||'<div class="panel empty">目前還沒有可閱讀的 SOP。</div>'}`;
+}
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
@@ -276,6 +282,9 @@ async function handleWorkspaceMenu(e){
     try{await loadArchivedTodos();}catch(err){showWorkspaceError(label||'已封存',err);}
     return;
   }
+  if(action==='sop-admin'){showWorkspaceLoading(label||'行政 SOP');try{await loadSopPage('行政',label||'行政 SOP')}catch(err){showWorkspaceError(label||'行政 SOP',err)}return;}
+  if(action==='sop-duty'){showWorkspaceLoading(label||'勤務 SOP');try{await loadSopPage('勤務',label||'勤務 SOP')}catch(err){showWorkspaceError(label||'勤務 SOP',err)}return;}
+  if(action==='sop'){showWorkspaceLoading(label||'案場 SOP');try{await loadSopPage('',label||'案場 SOP')}catch(err){showWorkspaceError(label||'案場 SOP',err)}return;}
   if(action==='manager-checklist'){
     showWorkspaceLoading(label||'經理交接清冊');
     try{await openManagerChecklist(label||'經理交接清冊');}catch(err){showWorkspaceError(label||'經理交接清冊',err);}
