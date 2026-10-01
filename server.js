@@ -696,7 +696,7 @@ app.get('/api/admin/ai/status',requireSuperAdmin,async(req,res)=>{
     const r=await fetch(ADMIN_AI_ENDPOINT,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
-      body:JSON.stringify({model:ADMIN_AI_MODEL,input:'請只回答 OK',max_output_tokens:8,store:false})
+      body:JSON.stringify({model:ADMIN_AI_MODEL,input:'請只回答 OK',max_output_tokens:16,store:false})
     });
     const data=await r.json().catch(()=>({}));
     if(!r.ok){
@@ -951,4 +951,4 @@ app.post('/api/admin/templates/:id/activate',requireSuperAdmin,(req,res)=>{const
 app.delete('/api/admin/templates/:id',requireSuperAdmin,(req,res)=>{const tpl=db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);if(tpl){const p=path.join(TEMPLATES_DIR,tpl.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM templates WHERE id=?').run(req.params.id);}res.json({success:true});});
 app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const submission=db.prepare('SELECT * FROM submissions WHERE id=?').get(req.params.submissionId);if(!submission)return res.status(404).json({error:'找不到該筆紀錄'});const template=req.query.templateId?db.prepare('SELECT * FROM templates WHERE id=?').get(req.query.templateId):(db.prepare('SELECT * FROM templates WHERE tenant_id=? AND is_active=1').get(submission.tenant_id)||db.prepare('SELECT * FROM templates WHERE tenant_id IS NULL AND is_active=1').get());if(!template)return res.status(400).json({error:'尚未設定該公司的 Word 範本'});try{const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),JSON.parse(submission.data));const d=JSON.parse(submission.data);const fileName=`交接清冊_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗',detail:err.message});}});
 
-app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`V7 伺服器已啟動：http://localhost:${PORT}`));
