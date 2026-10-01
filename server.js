@@ -655,6 +655,96 @@ app.post('/api/admin/login',(req,res)=>{const {username,password}=req.body||{};i
 app.post('/api/admin/logout',(req,res)=>{req.session.destroy(()=>res.json({success:true}));});
 app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin}));
 
+
+// ===== 總後臺智慧 AI 助手 =====
+// 第一階段為「平台架構顧問」：只提供系統設計、模組規劃與問題分析，
+// 不直接讀取或修改 C2C 客戶營運資料，也不直接執行資料異動。
+const ADMIN_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+const ADMIN_AI_MAX_HISTORY = 12;
+const ADMIN_AI_SYSTEM_PROMPT = `你是「物業管理平台｜系統總後臺」的智慧平台工程師。
+你服務的對象是平台 System Owner / Super Admin。
+
+你的工作：
+1. 協助平台擁有者規劃、設計與改善物業管理 SaaS 的模組、母目錄、子目錄、權限與使用流程。
+2. 用繁體中文、自然、白話、實務導向回答；不要把事情講得過度複雜。
+3. 永遠區分三層：平台層（System Owner）、公司租戶層（C2C 客戶）、公司內部人員／案場層。
+4. 平台層可以管理「模組、功能、母目錄、版本、開通能力」；客戶公司自行決定公司內部權限與實際業務資料。
+5. 不應主動要求、猜測或揭露任何 C2C 客戶的住戶、財務、社區、員工、SOP 內容或其他營運機密。
+6. 如果使用者要求修改系統，先提出清楚的變更方案、會影響哪些檔案／資料結構、風險與測試方式。除非後續工具明確授權，不要聲稱自己已經真的修改、部署或上線。
+7. 不要自行建立、刪除或改寫平台母目錄；除非使用者明確要求，而且要先確認變更範圍。
+8. 這個第一階段助手沒有寫入系統的工具，因此只能提供分析、規劃、檢查與建議，不得假裝有執行權限。
+9. 使用者說「幫我做」時，可以產生具體的實作規格與待修改檔案清單，並提醒需要確認後才能進入下一階段。
+`;
+
+app.get('/api/admin/ai/status',requireSuperAdmin,(req,res)=>{
+  res.json({
+    enabled: !!process.env.OPENAI_API_KEY,
+    model: ADMIN_AI_MODEL,
+    mode: 'platform-consultant'
+  });
+});
+
+app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
+  try{
+    if(!process.env.OPENAI_API_KEY){
+      return res.status(503).json({
+        error:'尚未設定 OPENAI_API_KEY',
+        setup:'請在 Zeabur 的 Environment Variables 設定 OPENAI_API_KEY；不需要把金鑰寫進程式碼。'
+      });
+    }
+    const body=req.body||{};
+    const message=String(body.message||'').trim();
+    if(!message) return res.status(400).json({error:'請輸入訊息'});
+    if(message.length>4000) return res.status(400).json({error:'單次訊息最多 4000 字'});
+    const history=Array.isArray(body.history)?body.history.slice(-ADMIN_AI_MAX_HISTORY).map(x=>({
+      role:x?.role==='assistant'?'assistant':'user',
+      content:String(x?.content||'').slice(0,6000)
+    })).filter(x=>x.content):[];
+
+    const platformContext = {
+      role: 'System Owner / Super Admin',
+      currentAdminSections: ['公司管理','全部交接','全系統人員','平台制式範本','中央表單設計','公司系統美編','企業客製化','訊息稽核'],
+      architectureRules: [
+        '總後台是平台母系統與模組建置基準點',
+        'C2C 客戶公司自行決定開通哪些已提供的模組與公司內部權限',
+        '平台擁有者不應介入或查看客戶的營運機密',
+        '系統測試公司可作為產品體驗與流程測試環境'
+      ]
+    };
+
+    const input=[
+      ...history,
+      {role:'user',content:`平台背景（僅供架構討論，不含客戶營運資料）：${JSON.stringify(platformContext, null, 2)}\n\n使用者目前的問題：${message}`}
+    ];
+
+    const r=await fetch('https://api.openai.com/v1/responses',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':`Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body:JSON.stringify({
+        model:ADMIN_AI_MODEL,
+        instructions:ADMIN_AI_SYSTEM_PROMPT,
+        input,
+        max_output_tokens:1200,
+        store:false
+      })
+    });
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok){
+      console.error('Admin AI API error:',r.status,data);
+      return res.status(502).json({error:'AI 服務目前無法回應，請稍後再試。',detail:process.env.NODE_ENV==='development'?(data?.error?.message||''):undefined});
+    }
+    const text=data.output_text || (Array.isArray(data.output)?data.output.flatMap(o=>Array.isArray(o.content)?o.content.filter(c=>c.type==='output_text').map(c=>c.text):[]).join('\n'):'');
+    if(!text) return res.status(502).json({error:'AI 沒有回傳文字結果，請稍後再試。'});
+    res.json({reply:text,model:data.model||ADMIN_AI_MODEL});
+  }catch(err){
+    console.error('Admin AI request failed:',err);
+    res.status(500).json({error:'智慧助手目前無法連線，請稍後再試。'});
+  }
+});
+
 // ===== 公司系統白標／美編 =====
 app.get('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(Number(req.params.id));if(!row)return res.status(404).json({error:'找不到公司'});res.json(sanitizeBranding(row));});
 app.put('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!row)return res.status(404).json({error:'找不到公司'});const b=req.body||{};const v={title:String(b.title||'').trim(),subtitle:String(b.subtitle||'').trim(),loginTitle:String(b.loginTitle||'').trim(),loginHint:String(b.loginHint||'').trim(),intro:String(b.intro||'').trim(),logoText:String(b.logoText||'').trim(),accent:validHex(b.accent,'#2F6F5E'),accentDark:validHex(b.accentDark,'#204F42'),bg:validHex(b.bg,'#F7F7F4'),panel:validHex(b.panel,'#FFFFFF')};if(!v.title)return res.status(400).json({error:'系統名稱不可空白'});db.prepare('UPDATE tenants SET brand_title=?,brand_subtitle=?,brand_login_title=?,brand_login_hint=?,brand_intro=?,brand_logo_text=?,brand_accent=?,brand_accent_dark=?,brand_bg=?,brand_panel=?,updated_at=? WHERE id=?').run(v.title,v.subtitle,v.loginTitle,v.loginHint,v.intro,v.logoText,v.accent,v.accentDark,v.bg,v.panel,now(),id);res.json({success:true,branding:{tenant_id:id,...v}});});
