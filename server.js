@@ -21,6 +21,23 @@ const FORM_CONFIG_PATH = path.join(DATA_DIR, 'form-config.json');
 const MENU_CONFIG_PATH = path.join(DATA_DIR, 'menu-config.json');
 for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
 
+const sopUpload=multer({
+  storage:multer.diskStorage({
+    destination:(req,file,cb)=>cb(null,SOPS_DIR),
+    filename:(req,file,cb)=>{
+      const ext=path.extname(file.originalname||'').toLowerCase();
+      const safeBase=path.basename(file.originalname||'sop',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'sop';
+      cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safeBase}${ext}`);
+    }
+  }),
+  limits:{fileSize:20*1024*1024},
+  fileFilter:(req,file,cb)=>{
+    const ext=path.extname(file.originalname||'').toLowerCase();
+    cb(['.pdf','.doc','.docx','.xls','.xlsx','.xlsm','.txt'].includes(ext)?null:new Error('SOP 僅允許 PDF、Word、Excel 或 TXT 檔案'),true);
+  }
+});
+
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
@@ -772,21 +789,6 @@ app.get('/api/staff/sops/:id/download',requireStaffFiller,(req,res)=>{const sop=
 
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
 const upload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,Date.now()+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>file.originalname.toLowerCase().endsWith('.docx')?cb(null,true):cb(new Error('只允許上傳 .docx 檔案'))});
-const sopUpload=multer({
-  storage:multer.diskStorage({
-    destination:(req,file,cb)=>cb(null,SOPS_DIR),
-    filename:(req,file,cb)=>{
-      const ext=path.extname(file.originalname||'').toLowerCase();
-      const safeBase=path.basename(file.originalname||'sop',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'sop';
-      cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safeBase}${ext}`);
-    }
-  }),
-  limits:{fileSize:20*1024*1024},
-  fileFilter:(req,file,cb)=>{
-    const ext=path.extname(file.originalname||'').toLowerCase();
-    cb(['.pdf','.doc','.docx','.xls','.xlsx','.xlsm','.txt'].includes(ext)?null:new Error('SOP 僅允許 PDF、Word、Excel 或 TXT 檔案'),true);
-  }
-});
 const analyzerUpload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,'__analysis__'+Date.now()+'-'+file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>['.docx','.xlsx','.xlsm'].includes(path.extname(file.originalname).toLowerCase())?cb(null,true):cb(new Error('只允許上傳 .docx、.xlsx、.xlsm 檔案'))});
 app.post('/api/admin/template-analyze',requireSuperAdmin,analyzerUpload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});const filePath=path.join(TEMPLATES_DIR,req.file.filename);try{const result=analyzeTemplate(filePath);res.json({success:true,analysis:result});}catch(err){console.error(err);res.status(400).json({error:'模板分析失敗',detail:err.message});}finally{try{fs.unlinkSync(filePath)}catch(e){}}});
 app.post('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),upload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});db.prepare('INSERT INTO templates (name,filename,is_active,created_at,tenant_id) VALUES (?,?,0,?,?)').run(req.body.name||req.file.originalname,req.file.filename,now(),tenantId(req));res.json({success:true});});
