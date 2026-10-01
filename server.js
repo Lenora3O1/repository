@@ -39,7 +39,15 @@ const sopUpload=multer({
 
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('admin.js') || filePath.endsWith('admin.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
   resave: false, saveUninitialized: false,
@@ -754,14 +762,16 @@ app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
     if(!r.ok){
       console.error('Admin AI API error:',r.status,data);
       const requestId=r.headers.get('x-request-id')||null;
-      return res.status(502).json({error:'AI 服務目前無法回應。',code:'OPENAI_API_ERROR',httpStatus:r.status,detail:data?.error?.message||`OpenAI HTTP ${r.status}`,requestId});
+      const detail=data?.error?.message||`OpenAI HTTP ${r.status}`;
+      return res.status(502).json({error:`AI 服務目前無法回應：${detail}`,code:'OPENAI_API_ERROR',httpStatus:r.status,detail,requestId});
     }
     const text=data.output_text || (Array.isArray(data.output)?data.output.flatMap(o=>Array.isArray(o.content)?o.content.filter(c=>c.type==='output_text').map(c=>c.text):[]).join('\n'):'');
     if(!text) return res.status(502).json({error:'AI 沒有回傳文字結果，請稍後再試。'});
     res.json({reply:text,model:data.model||ADMIN_AI_MODEL});
   }catch(err){
     console.error('Admin AI request failed:',err);
-    res.status(500).json({error:'智慧助手後端發生錯誤。',code:'ADMIN_AI_SERVER_ERROR',detail:err?.message||'unknown error'});
+    const detail=err?.message||'unknown error';
+    res.status(500).json({error:`智慧助手後端發生錯誤：${detail}`,code:'ADMIN_AI_SERVER_ERROR',detail});
   }
 });
 
