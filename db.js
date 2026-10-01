@@ -348,6 +348,34 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboard_pins (
 )`);
 
 // V5.1：現場人員代辦事項。每位人員獨立保存，完成後不刪除，改為封存並保留時間。
+
+// V5.10：案場 SOP。SOP 屬於公司，可指定全部案場或特定案場；檔案實體存放於 DATA_DIR/uploads/sops。
+db.exec(`CREATE TABLE IF NOT EXISTS sops (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '行政',
+  description TEXT DEFAULT '',
+  version TEXT NOT NULL DEFAULT '1.0',
+  filename TEXT NOT NULL,
+  original_filename TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT DEFAULT '',
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sops_tenant_category ON sops(tenant_id, category, is_active, updated_at);
+CREATE TABLE IF NOT EXISTS sop_communities (
+  sop_id INTEGER NOT NULL,
+  community_id INTEGER NOT NULL,
+  PRIMARY KEY (sop_id, community_id),
+  FOREIGN KEY (sop_id) REFERENCES sops(id) ON DELETE CASCADE,
+  FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sop_communities_community ON sop_communities(community_id, sop_id);
+`);
+
 db.exec(`CREATE TABLE IF NOT EXISTS staff_todos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   staff_id INTEGER NOT NULL,
@@ -485,6 +513,7 @@ function repairDuplicateNamedTenants() {
           db.prepare('UPDATE audit_logs SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
           db.prepare('UPDATE dashboard_pins SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
           db.prepare('UPDATE staff_todos SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE sops SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
 
           const sourceMenus = db.prepare('SELECT id,scope FROM menu_configs WHERE tenant_id=?').all(sourceId);
           for (const m of sourceMenus) {
