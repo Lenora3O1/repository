@@ -451,8 +451,12 @@ async function loadAdminAiStatus(){
     $('adminAiStatus').textContent=d.enabled?`● 已連線 · ${d.model}`:'○ 尚未設定 API Key';
     $('adminAiStatus').style.color=d.enabled?'#2c7256':'#9a6b2b';
     if(!d.enabled) $('adminAiInput').placeholder='先在 Zeabur 設定 OPENAI_API_KEY，再來跟我聊天 🤖';
-  }catch{
-    $('adminAiStatus').textContent='○ 無法檢查連線';
+  }catch(err){
+    const msg=String(err?.message||'');
+    $('adminAiStatus').textContent=msg.includes('尚未登入')?'○ 後台登入狀態異常':'○ AI 後端尚未連上';
+    $('adminAiStatus').style.color='#a04d3d';
+    if(msg.includes('尚未登入')) $('adminAiInput').placeholder='請重新登入系統總後臺後再使用 AI 🤖';
+    else $('adminAiInput').placeholder='請確認這次部署有包含 server.js，並在 Zeabur 設定 OPENAI_API_KEY 🤖';
   }
 }
 async function sendAdminAiMessage(text){
