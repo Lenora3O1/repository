@@ -660,6 +660,7 @@ app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin
 // 第一階段為「平台架構顧問」：只提供系統設計、模組規劃與問題分析，
 // 不直接讀取或修改 C2C 客戶營運資料，也不直接執行資料異動。
 const ADMIN_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+const ADMIN_AI_ENDPOINT = 'https://api.openai.com/v1/responses';
 const ADMIN_AI_MAX_HISTORY = 12;
 const ADMIN_AI_SYSTEM_PROMPT = `你是「物業管理平台｜系統總後臺」的智慧平台工程師。
 你服務的對象是平台 System Owner / Super Admin。
@@ -677,10 +678,13 @@ const ADMIN_AI_SYSTEM_PROMPT = `你是「物業管理平台｜系統總後臺」
 `;
 
 app.get('/api/admin/ai/status',requireSuperAdmin,(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
   res.json({
-    enabled: !!process.env.OPENAI_API_KEY,
+    success:true,
+    enabled: !!String(process.env.OPENAI_API_KEY||'').trim(),
     model: ADMIN_AI_MODEL,
-    mode: 'platform-consultant'
+    mode: 'platform-consultant',
+    endpoint: ADMIN_AI_ENDPOINT
   });
 });
 
@@ -689,7 +693,8 @@ app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
     if(!process.env.OPENAI_API_KEY){
       return res.status(503).json({
         error:'尚未設定 OPENAI_API_KEY',
-        setup:'請在 Zeabur 的 Environment Variables 設定 OPENAI_API_KEY；不需要把金鑰寫進程式碼。'
+        code:'OPENAI_API_KEY_MISSING',
+        setup:'請在 Zeabur 的 Environment Variables 設定 OPENAI_API_KEY，儲存後重新部署。不要把金鑰寫進前端檔案。'
       });
     }
     const body=req.body||{};
@@ -717,7 +722,7 @@ app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
       {role:'user',content:`平台背景（僅供架構討論，不含客戶營運資料）：${JSON.stringify(platformContext, null, 2)}\n\n使用者目前的問題：${message}`}
     ];
 
-    const r=await fetch('https://api.openai.com/v1/responses',{
+    const r=await fetch(ADMIN_AI_ENDPOINT,{
       method:'POST',
       headers:{
         'Content-Type':'application/json',
@@ -734,14 +739,14 @@ app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
     const data=await r.json().catch(()=>({}));
     if(!r.ok){
       console.error('Admin AI API error:',r.status,data);
-      return res.status(502).json({error:'AI 服務目前無法回應，請稍後再試。',detail:process.env.NODE_ENV==='development'?(data?.error?.message||''):undefined});
+      return res.status(502).json({error:'AI 服務目前無法回應。',code:'OPENAI_API_ERROR',detail:data?.error?.message||`OpenAI HTTP ${r.status}`});
     }
     const text=data.output_text || (Array.isArray(data.output)?data.output.flatMap(o=>Array.isArray(o.content)?o.content.filter(c=>c.type==='output_text').map(c=>c.text):[]).join('\n'):'');
     if(!text) return res.status(502).json({error:'AI 沒有回傳文字結果，請稍後再試。'});
     res.json({reply:text,model:data.model||ADMIN_AI_MODEL});
   }catch(err){
     console.error('Admin AI request failed:',err);
-    res.status(500).json({error:'智慧助手目前無法連線，請稍後再試。'});
+    res.status(500).json({error:'智慧助手後端發生錯誤。',code:'ADMIN_AI_SERVER_ERROR',detail:err?.message||'unknown error'});
   }
 });
 
