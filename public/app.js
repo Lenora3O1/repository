@@ -44,7 +44,7 @@ function showLogin(){
 }
 function showCompanyHint(user){ location.href='company.html'; }
 function showHome(user){
-  window.__messageCurrentUserId=user?.id||null;
+  window.__messageCurrentUserId=user?.id||null; window.__staffUser=user||null;
   window.__workspaceAuthenticated=true;window.setMessageCenterVisible?.(true);
   $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('loginInternal').style.display='none';
   $('staffName').textContent=user.name||'使用者';
@@ -265,11 +265,22 @@ function showWorkspaceError(label,err){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
   el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label||'工作功能')}</div><h1>目前無法開啟</h1><p>${escapeHtml(err?.message||'系統暫時無法取得資料。')}</p><button type="button" class="secondary" onclick="location.reload()">重新整理</button></div>`;
 }
-async function loadSopPage(category,label){
+async function loadSopPage(category,label,scope=''){
   const el=$('staffHome'); if(!el)return;
-  const d=await api(`/api/staff/sops?category=${encodeURIComponent(category||'')}`); const rows=d.sops||[];
-  const items=rows.map(x=>`<div class="panel"><div class="section-title">📘 ${escapeHtml(x.title)}</div><div class="hint">版本 ${escapeHtml(x.version||'1.0')}　｜　更新 ${formatDate(x.updated_at)}${x.description?`<br>${escapeHtml(x.description)}`:''}</div><div class="modal-actions"><button type="button" onclick="window.open('/api/staff/sops/${x.id}/download','_blank','noopener')">開啟／下載 SOP</button></div></div>`).join('');
-  el.innerHTML=`<div class="panel"><div class="eyebrow">📚 案場 SOP</div><h1>${escapeHtml(label||'案場 SOP')}</h1><p>這裡只顯示您目前服務案場適用的「${escapeHtml(category||'全部')}」SOP。</p></div>${items||'<div class="panel empty">目前還沒有可閱讀的 SOP。</div>'}`;
+  const d=await api(`/api/staff/sops?category=${encodeURIComponent(category||'')}&scope=${encodeURIComponent(scope||'')}`); const rows=d.sops||[]; const viewer=d.viewer||{};
+  const user=window.__staffUser||{};
+  const scopeText=scope==='company_basic'?'公司基本 SOP':scope==='community'?'本案場 SOP':category||'全部 SOP';
+  const managerButton=scope==='community'&&viewer.manager?`<button type="button" class="big-action" onclick="openManagerSopUpload()">＋ 上傳本案場注意事項 SOP</button>`:'';
+  const items=rows.map(x=>{const target=(x.target_jobs||[]).length?(x.target_jobs||[]).join('、'):'全部駐點人員';const source=x.source_type==='manager'?'案場經理回傳':'公司內勤建立';return `<div class="panel"><div class="section-title">📘 ${escapeHtml(x.title)}</div><div class="hint">${escapeHtml(x.category||'SOP')}　｜　版本 ${escapeHtml(x.version||'1.0')}　｜　${escapeHtml(source)}${x.description?`<br>${escapeHtml(x.description)}`:''}<br>適用：${escapeHtml(target)}</div><div class="modal-actions"><button type="button" onclick="window.open('/api/staff/sops/${x.id}/download','_blank','noopener')">開啟／下載 SOP</button></div></div>`}).join('');
+  el.innerHTML=`<div class="panel"><div class="eyebrow">📚 案場 SOP</div><h1>${escapeHtml(label||'案場 SOP')}</h1><p>目前登入職務：${escapeHtml(user.job_level||user.job_category||'駐點人員')}。${escapeHtml(scopeText)}只會顯示您目前有權限閱讀的內容。</p>${managerButton}</div>${items||'<div class="panel empty">目前還沒有可閱讀的 SOP。公司基本 SOP 與本案場注意事項會依您的職務自動分流。</div>'}`;
+}
+function openManagerSopUpload(){
+  const user=window.__staffUser||{}; const assignments=Array.isArray(user.site_assignments)?user.site_assignments:[];
+  const old=document.getElementById('managerSopUploadModal'); if(old)old.remove();
+  const modal=document.createElement('div'); modal.id='managerSopUploadModal'; modal.className='modal-backdrop';
+  const options=assignments.map(a=>`<option value="${escapeAttr(a.community_id)}">${escapeHtml(a.community_name||'未命名案場')}</option>`).join('');
+  modal.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><button class="modal-close" type="button">×</button><div class="eyebrow">📤 經理分流上傳</div><h2>上傳派駐社區注意事項</h2><p class="modal-note">上傳後會直接回到公司 SOP 管理，內勤不需要再替您重新整理與上傳。您可以指定「秘書／保全」哪些職務看到這份 SOP；經理本人可查看自己派駐案場的案場注意事項。</p><form id="managerSopForm"><label>派駐案場</label><select id="managerSopCommunity" required>${options}</select><label>SOP 名稱</label><input id="managerSopTitle" placeholder="例如：本社區夜間巡查注意事項" required><label>版本</label><input id="managerSopVersion" value="1.0"><label>檔案</label><input id="managerSopFile" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.txt" required><label>說明</label><textarea id="managerSopDescription" rows="3" placeholder="可補充本案場特殊注意事項"></textarea><div class="panel-lite"><strong>👥 哪些職務可以看到？</strong><div class="check-list"><label class="check-row"><input type="checkbox" data-manager-target value="秘書" checked> 秘書</label><label class="check-row"><input type="checkbox" data-manager-target value="保全" checked> 保全</label></div></div><div class="modal-actions"><button type="button" class="secondary" id="managerSopCancel">取消</button><button type="submit">上傳並回傳公司</button></div></form></div>`;
+  document.body.appendChild(modal); document.body.classList.add('modal-open'); const close=()=>{modal.remove();document.body.classList.remove('modal-open')}; modal.querySelector('.modal-close').onclick=close; modal.querySelector('#managerSopCancel').onclick=close; modal.querySelector('#managerSopForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('community_id',modal.querySelector('#managerSopCommunity').value);fd.append('title',modal.querySelector('#managerSopTitle').value);fd.append('version',modal.querySelector('#managerSopVersion').value);fd.append('description',modal.querySelector('#managerSopDescription').value);fd.append('target_jobs',JSON.stringify([...modal.querySelectorAll('[data-manager-target]:checked')].map(x=>x.value)));fd.append('file',modal.querySelector('#managerSopFile').files[0]);await api('/api/staff/sops/community-upload',{method:'POST',body:fd});close();await loadSopPage('','案場注意事項','community');alert('✅ SOP 已上傳，也已回傳公司管理端。');}catch(err){alert(err.message)}});
 }
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
@@ -284,6 +295,8 @@ async function handleWorkspaceMenu(e){
   }
   if(action==='sop-admin'){showWorkspaceLoading(label||'行政 SOP');try{await loadSopPage('行政',label||'行政 SOP')}catch(err){showWorkspaceError(label||'行政 SOP',err)}return;}
   if(action==='sop-duty'){showWorkspaceLoading(label||'勤務 SOP');try{await loadSopPage('勤務',label||'勤務 SOP')}catch(err){showWorkspaceError(label||'勤務 SOP',err)}return;}
+  if(action==='sop-company'){showWorkspaceLoading(label||'公司基本 SOP');try{await loadSopPage('',label||'公司基本 SOP','company_basic')}catch(err){showWorkspaceError(label||'公司基本 SOP',err)}return;}
+  if(action==='sop-community'){showWorkspaceLoading(label||'案場注意事項');try{await loadSopPage('',label||'案場注意事項','community')}catch(err){showWorkspaceError(label||'案場注意事項',err)}return;}
   if(action==='sop'){showWorkspaceLoading(label||'案場 SOP');try{await loadSopPage('',label||'案場 SOP')}catch(err){showWorkspaceError(label||'案場 SOP',err)}return;}
   if(action==='manager-checklist'){
     showWorkspaceLoading(label||'經理交接清冊');
