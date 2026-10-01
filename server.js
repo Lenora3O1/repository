@@ -684,15 +684,21 @@ app.get('/api/admin/ai/status',requireSuperAdmin,async(req,res)=>{
     return res.json({success:true,enabled:false,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'missing_key'});
   }
   try{
-    const r=await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(ADMIN_AI_MODEL)}`,{headers:{'Authorization':`Bearer ${key}`}});
+    // 不只檢查模型是否存在，直接做一次極小的 Responses API 測試，才能確認「真的能聊天」。
+    const r=await fetch(ADMIN_AI_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+      body:JSON.stringify({model:ADMIN_AI_MODEL,input:'請只回答 OK',max_output_tokens:8,store:false})
+    });
     const data=await r.json().catch(()=>({}));
     if(!r.ok){
-      console.error('Admin AI status error:',r.status,data);
-      return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'api_error',httpStatus:r.status,detail:data?.error?.message||`OpenAI HTTP ${r.status}`});
+      console.error('Admin AI status response test error:',r.status,data);
+      return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'api_error',httpStatus:r.status,detail:data?.error?.message||`OpenAI HTTP ${r.status}`,requestId:r.headers.get('x-request-id')||null});
     }
-    return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'ready'});
+    const text=data.output_text || '';
+    return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'ready',testReply:text||'OK'});
   }catch(err){
-    console.error('Admin AI status request failed:',err);
+    console.error('Admin AI status response test failed:',err);
     return res.json({success:true,enabled:true,model:ADMIN_AI_MODEL,mode:'platform-consultant',status:'network_error',detail:err?.message||'network error'});
   }
 });
@@ -726,10 +732,9 @@ app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
       ]
     };
 
-    const input=[
-      ...history,
-      {role:'user',content:`平台背景（僅供架構討論，不含客戶營運資料）：${JSON.stringify(platformContext, null, 2)}\n\n使用者目前的問題：${message}`}
-    ];
+    // 先把歷史對話整理成純文字，避免不同 Responses API 版本對 message content 結構的相容性差異。
+    const historyText=history.map(x=>`${x.role==='assistant'?'AI':'使用者'}：${x.content}`).join('\n');
+    const input=`平台背景（僅供架構討論，不含客戶營運資料）：${JSON.stringify(platformContext, null, 2)}\n\n${historyText?`先前對話：\n${historyText}\n\n`:''}使用者目前的問題：${message}`;
 
     const r=await fetch(ADMIN_AI_ENDPOINT,{
       method:'POST',
@@ -748,7 +753,8 @@ app.post('/api/admin/ai/chat',requireSuperAdmin,async(req,res)=>{
     const data=await r.json().catch(()=>({}));
     if(!r.ok){
       console.error('Admin AI API error:',r.status,data);
-      return res.status(502).json({error:'AI 服務目前無法回應。',code:'OPENAI_API_ERROR',detail:data?.error?.message||`OpenAI HTTP ${r.status}`});
+      const requestId=r.headers.get('x-request-id')||null;
+      return res.status(502).json({error:'AI 服務目前無法回應。',code:'OPENAI_API_ERROR',httpStatus:r.status,detail:data?.error?.message||`OpenAI HTTP ${r.status}`,requestId});
     }
     const text=data.output_text || (Array.isArray(data.output)?data.output.flatMap(o=>Array.isArray(o.content)?o.content.filter(c=>c.type==='output_text').map(c=>c.text):[]).join('\n'):'');
     if(!text) return res.status(502).json({error:'AI 沒有回傳文字結果，請稍後再試。'});
