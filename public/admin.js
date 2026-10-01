@@ -1,6 +1,6 @@
 let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{mode:'platform',tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]}};
 const $=id=>document.getElementById(id);
-async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
+async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok){const parts=[d.error,d.detail,d.code&&`代碼：${d.code}`,d.httpStatus&&`HTTP ${d.httpStatus}`,d.requestId&&`Request ID：${d.requestId}`].filter(Boolean);throw new Error(parts.join(' · ')||'操作失敗');}return d;}
 async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll();await loadAdminAiStatus()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll();await loadAdminAiStatus()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
@@ -448,9 +448,23 @@ function appendAdminAiMessage(role,text){
 async function loadAdminAiStatus(){
   try{
     const d=await api('/api/admin/ai/status');
-    $('adminAiStatus').textContent=d.enabled?`● 已連線 · ${d.model}`:'○ 尚未設定 API Key';
-    $('adminAiStatus').style.color=d.enabled?'#2c7256':'#9a6b2b';
-    if(!d.enabled) $('adminAiInput').placeholder='先在 Zeabur 設定 OPENAI_API_KEY，再來跟我聊天 🤖';
+    if(d.status==='ready'){
+      $('adminAiStatus').textContent=`● 已連線 · ${d.model}`;
+      $('adminAiStatus').style.color='#2c7256';
+      $('adminAiInput').placeholder='可以開始詢問平台架構、模組、權限與系統問題 🤖';
+    }else if(d.status==='api_error'){
+      $('adminAiStatus').textContent=`● API 測試失敗 · HTTP ${d.httpStatus||'?'}`;
+      $('adminAiStatus').style.color='#a04d3d';
+      $('adminAiInput').placeholder=`AI API 測試失敗：${d.detail||'請查看狀態訊息'}`;
+    }else if(d.status==='network_error'){
+      $('adminAiStatus').textContent='○ AI API 網路連線異常';
+      $('adminAiStatus').style.color='#a04d3d';
+      $('adminAiInput').placeholder=`AI API 網路異常：${d.detail||'請查看 Zeabur 日誌'}`;
+    }else{
+      $('adminAiStatus').textContent='○ 尚未設定 API Key';
+      $('adminAiStatus').style.color='#9a6b2b';
+      $('adminAiInput').placeholder='先在 Zeabur 設定 OPENAI_API_KEY，再來跟我聊天 🤖';
+    }
   }catch(err){
     const msg=String(err?.message||'');
     $('adminAiStatus').textContent=msg.includes('尚未登入')?'○ 後台登入狀態異常':'○ AI 後端尚未連上';
