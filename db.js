@@ -375,6 +375,18 @@ CREATE TABLE IF NOT EXISTS sop_communities (
 );
 CREATE INDEX IF NOT EXISTS idx_sop_communities_community ON sop_communities(community_id, sop_id);
 `);
+// V5.11：SOP 智慧分流。保留既有 SOP，新增「公司基本／案場」來源、上傳人員與職務對象。
+addColumnIfMissing('sops', 'scope_type', "TEXT DEFAULT 'company_basic'");
+addColumnIfMissing('sops', 'target_jobs_json', "TEXT DEFAULT '[]'");
+addColumnIfMissing('sops', 'source_type', "TEXT DEFAULT 'company'");
+addColumnIfMissing('sops', 'uploader_staff_id', "INTEGER");
+addColumnIfMissing('sops', 'uploader_name', "TEXT DEFAULT ''");
+addColumnIfMissing('sops', 'review_status', "TEXT DEFAULT 'published'");
+// 舊 SOP 視為公司基本 SOP，確保升級後原有內容仍會回到前台。
+db.prepare("UPDATE sops SET scope_type='company_basic' WHERE scope_type IS NULL OR scope_type=''").run();
+db.prepare("UPDATE sops SET target_jobs_json='[]' WHERE target_jobs_json IS NULL OR target_jobs_json=''").run();
+db.prepare("UPDATE sops SET source_type='company' WHERE source_type IS NULL OR source_type=''").run();
+db.prepare("UPDATE sops SET review_status='published' WHERE review_status IS NULL OR review_status=''").run();
 
 db.exec(`CREATE TABLE IF NOT EXISTS staff_todos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
