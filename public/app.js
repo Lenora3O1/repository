@@ -315,7 +315,7 @@ async function handleWorkspaceMenu(e){
   }
   if(action==='staff-schedule'){
     showWorkspaceLoading(label||'班表');
-    try{await loadStaffScheduleModule(label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
+    try{const role=String(session?.user?.schedule_role||''); if(role==='admin') await loadStaffScheduleCommunity(label||'班表'); else await loadStaffScheduleModule(label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
     return;
   }
   if(action==='staff-schedule-rules'){
@@ -414,3 +414,5 @@ function renderStaffOvertimeRows(rows){return rows.length?`<div class="table-wra
 window.loadStaffScheduleModule=loadStaffScheduleModule;window.loadStaffScheduleRules=loadStaffScheduleRules;window.loadStaffScheduleRequests=loadStaffScheduleRequests;window.loadStaffScheduleOvertime=loadStaffScheduleOvertime;
 (function(){if(document.getElementById('staffScheduleStylesV2'))return;const s=document.createElement('style');s.id='staffScheduleStylesV2';s.textContent=`.staff-schedule-summary{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.staff-schedule-summary span{padding:8px 12px;border:1px solid #d8e7e0;border-radius:999px;background:#f5faf7}.staff-schedule-calendar{display:grid;grid-template-columns:repeat(7,minmax(70px,1fr));gap:8px;margin-top:16px}.staff-schedule-day{min-height:68px;border:1px solid #d8e4df;border-radius:10px;background:#fff;text-align:left;padding:8px;cursor:pointer}.staff-schedule-day strong{display:block;font-size:18px}.staff-schedule-day small{display:block;margin-top:5px}.staff-schedule-day.work:hover{background:#eef7f2}.staff-schedule-day.off{background:#fff0f0;color:#a63b3b}.staff-schedule-day.night{background:#eef0ff;color:#3f4d91}.staff-schedule-day.leave{background:#fff8df;color:#8a6500}.staff-community-schedule{margin-top:18px;padding-top:14px;border-top:1px solid #dbe7e2}.staff-rule-lock,.staff-rule-card{padding:12px 14px;border:1px solid #d8e7e0;border-radius:10px;background:#f7fbf8;margin:10px 0;line-height:1.7}.staff-rule-card h2{margin:0 0 10px}.rule-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rule-columns>div{padding:12px;background:#fff;border:1px solid #e1ebe7;border-radius:9px}@media(max-width:800px){.staff-schedule-calendar{grid-template-columns:repeat(4,minmax(60px,1fr))}.rule-columns{grid-template-columns:1fr}}`;document.head.appendChild(s)})();
 
+
+(function(){if(document.getElementById('staffScheduleRoleColors'))return;const s=document.createElement('style');s.id='staffScheduleRoleColors';s.textContent=`.staff-role-badge{display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;font-weight:700}.staff-role-admin{color:#17624b;background:#e6f5ee;border:1px solid #9fd3bd}.staff-role-security{color:#174f78;background:#e7f1fb;border:1px solid #9dc5e5}.staff-role-mobile{color:#7a4b12;background:#fff2d8;border:1px solid #e4c17d}`;document.head.appendChild(s)})();
