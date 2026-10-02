@@ -253,7 +253,7 @@ const STAFF_PERMISSION_LABELS={
   'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本','manage-sop':'案場 SOP 管理','sop':'案場 SOP',
   'company-work-journal':'工作日誌管理','company-accounting':'會計','company-general-affairs':'總務管理','company-personnel':'人員','company-finance':'公司財務','company-hr':'人事管理','company-new-record':'新日錄'
 };
-const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record']);
+const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record','schedule']);
 const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','sop']);
 function parsePermissions(u){
   try{const p=JSON.parse(u?.permission_json||'[]');return Array.isArray(p)?p.map(String):[];}catch{return []}
@@ -266,6 +266,7 @@ function suggestedPermissionsForUser(u){
   if(has('人事')) out.add('manage-staff');
   if(has('勤務')) out.add('manage-staff');
   if(has('社區管理')) {out.add('manage-communities');out.add('view-submissions');}
+  if(['internal','hybrid'].includes(u?.work_type||'')) out.add('schedule');
   if((u?.work_type||'site')!=='internal' && (has('社區管理')||has('秘書')||has('保全'))) ['todo','work-journal','committee','residents','vendors','handover'].forEach(x=>out.add(x));
   if(!out.size) out.add((u?.work_type||'site')==='internal'?'company-resources':'todo');
   return [...out];
@@ -399,8 +400,8 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
   }
 });
 // ===== 動態工作目錄 =====
-app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),u)});});
-app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
+app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);const items=resolveMenu('staff',tenantId(req),u);const p=scheduleGetProfile(tenantId(req),u.id);if(p&&['security','mobile'].includes(p.schedule_role)&&!items.some(x=>String(x.id)==='staff-schedule'))items.push({id:'staff-schedule',parentId:null,icon:'📅',label:'我的班表',action:'staff-schedule',enabled:true});res.json({scope:'staff',items});});
+app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{const items=resolveMenu('company',tenantId(req),getUser(req));const ids=new Set(items.map(x=>String(x.id)));const scheduleItems=[{id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},{id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},{id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},{id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},{id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},{id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},{id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}];if(!ids.has('company-schedule')&&(getUser(req)?.role==='company_admin'||effectivePermissions(getUser(req)).includes('schedule')))items.push(...scheduleItems);res.json({scope:'company',items});});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   const c=readMenuConfig();
   const tid=req.query?.tenant_id?Number(req.query.tenant_id):null;
@@ -957,5 +958,272 @@ app.post('/api/admin/templates',requireSuperAdmin,upload.single('template'),(req
 app.post('/api/admin/templates/:id/activate',requireSuperAdmin,(req,res)=>{const tpl=db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);if(!tpl)return res.status(404).json({error:'找不到範本'});if(tpl.tenant_id===null) db.prepare('UPDATE templates SET is_active=0 WHERE tenant_id IS NULL').run(); else db.prepare('UPDATE templates SET is_active=0 WHERE tenant_id=?').run(tpl.tenant_id);db.prepare('UPDATE templates SET is_active=1 WHERE id=?').run(req.params.id);res.json({success:true});});
 app.delete('/api/admin/templates/:id',requireSuperAdmin,(req,res)=>{const tpl=db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);if(tpl){const p=path.join(TEMPLATES_DIR,tpl.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM templates WHERE id=?').run(req.params.id);}res.json({success:true});});
 app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const submission=db.prepare('SELECT * FROM submissions WHERE id=?').get(req.params.submissionId);if(!submission)return res.status(404).json({error:'找不到該筆紀錄'});const template=req.query.templateId?db.prepare('SELECT * FROM templates WHERE id=?').get(req.query.templateId):(db.prepare('SELECT * FROM templates WHERE tenant_id=? AND is_active=1').get(submission.tenant_id)||db.prepare('SELECT * FROM templates WHERE tenant_id IS NULL AND is_active=1').get());if(!template)return res.status(400).json({error:'尚未設定該公司的 Word 範本'});try{const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),JSON.parse(submission.data));const d=JSON.parse(submission.data);const fileName=`交接清冊_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗',detail:err.message});}});
+
+// ===== 智慧班表模組 V1 =====
+// 三套排班規則完全分離：行政／保全／機動。
+// 班表資料一律以 tenant_id 隔離，不讀取其他公司的排班資料。
+
+const SCHEDULE_MENU_ITEMS = [
+  {id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},
+  {id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},
+  {id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},
+  {id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},
+  {id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},
+  {id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},
+  {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}
+];
+
+function scheduleEnsureSchema(){
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schedule_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      staff_id INTEGER NOT NULL,
+      schedule_role TEXT NOT NULL DEFAULT '',
+      default_shift TEXT NOT NULL DEFAULT '',
+      rest_days INTEGER NOT NULL DEFAULT 6,
+      self_select_days INTEGER NOT NULL DEFAULT 2,
+      community_ids_json TEXT NOT NULL DEFAULT '[]',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(tenant_id,staff_id),
+      FOREIGN KEY(staff_id) REFERENCES staff_users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS schedule_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      community_id INTEGER,
+      category TEXT NOT NULL,
+      config_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(tenant_id,community_id,category)
+    );
+    CREATE TABLE IF NOT EXISTS schedule_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      month TEXT NOT NULL,
+      work_date TEXT NOT NULL,
+      staff_id INTEGER NOT NULL,
+      community_id INTEGER,
+      category TEXT NOT NULL,
+      shift_code TEXT NOT NULL DEFAULT 'work',
+      status TEXT NOT NULL DEFAULT 'planned',
+      source TEXT NOT NULL DEFAULT 'manual',
+      note TEXT NOT NULL DEFAULT '',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(tenant_id,work_date,staff_id,community_id),
+      FOREIGN KEY(staff_id) REFERENCES staff_users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_schedule_entries_tenant_month ON schedule_entries(tenant_id,month,category);
+    CREATE TABLE IF NOT EXISTS schedule_swaps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      work_date TEXT NOT NULL,
+      community_id INTEGER,
+      from_staff_id INTEGER NOT NULL,
+      to_staff_id INTEGER NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'approved',
+      created_by INTEGER,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS schedule_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      staff_id INTEGER NOT NULL,
+      community_id INTEGER,
+      work_date TEXT NOT NULL,
+      request_type TEXT NOT NULL,
+      target_staff_id INTEGER,
+      reason TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS schedule_overtime (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      staff_id INTEGER NOT NULL,
+      community_id INTEGER,
+      work_date TEXT NOT NULL,
+      hours REAL NOT NULL DEFAULT 0,
+      category TEXT NOT NULL DEFAULT '',
+      shift_code TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+scheduleEnsureSchema();
+
+function scheduleJson(v, fallback={}){try{const x=JSON.parse(v||'');return x&&typeof x==='object'?x:fallback;}catch{return fallback;}}
+function scheduleArray(v){try{const x=JSON.parse(v||'[]');return Array.isArray(x)?x:[];}catch{return [];}}
+function scheduleMonth(value){const s=String(value||'').trim();return /^\d{4}-\d{2}$/.test(s)?s:(new Date().toISOString().slice(0,7));}
+function scheduleDaysInMonth(month){const [y,m]=scheduleMonth(month).split('-').map(Number);return new Date(Date.UTC(y,m,0)).getUTCDate();}
+function scheduleDate(month,day){return `${scheduleMonth(month)}-${String(day).padStart(2,'0')}`;}
+function scheduleWorkdays(month){return Array.from({length:scheduleDaysInMonth(month)},(_,i)=>scheduleDate(month,i+1));}
+function scheduleDefaultRole(u){
+  const jobs=getJobCategories(u); const text=jobs.join('、');
+  if(jobs.includes('機動')) return 'mobile';
+  if(jobs.includes('保全')) return 'security';
+  if(jobs.includes('秘書')||jobs.includes('社區管理')||u?.job_level==='經理') return 'admin';
+  return '';
+}
+function scheduleGetProfile(tenantIdValue,staffId){
+  let p=db.prepare('SELECT * FROM schedule_profiles WHERE tenant_id=? AND staff_id=?').get(tenantIdValue,staffId);
+  if(p) return {...p,community_ids:scheduleArray(p.community_ids_json)};
+  const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1').get(staffId,tenantIdValue);
+  if(!u) return null;
+  const role=scheduleDefaultRole(u);
+  const defaultShift=role==='security'?'day':'';
+  const restDays=role==='security'||role==='mobile'?6:8;
+  return {tenant_id:tenantIdValue,staff_id:staffId,schedule_role:role,default_shift:defaultShift,rest_days:restDays,self_select_days:2,community_ids:getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean),notes:''};
+}
+function scheduleUpsertProfile(tenantIdValue,staffId,payload){
+  const u=db.prepare('SELECT id,is_active FROM staff_users WHERE id=? AND tenant_id=?').get(staffId,tenantIdValue); if(!u)return null;
+  const role=['admin','security','mobile'].includes(payload.schedule_role)?payload.schedule_role:'';
+  const shift=['day','night',''].includes(payload.default_shift)?payload.default_shift:'';
+  const rest=Math.max(0,Math.min(31,Number(payload.rest_days??6)));
+  const self=Math.max(0,Math.min(rest,Number(payload.self_select_days??2)));
+  const cids=[...new Set((Array.isArray(payload.community_ids)?payload.community_ids:[]).map(Number).filter(Boolean))];
+  const valid=new Set(db.prepare("SELECT id FROM communities WHERE tenant_id=? AND status='active'").all(tenantIdValue).map(x=>Number(x.id)));
+  if(cids.some(x=>!valid.has(x))) throw new Error('班表人員包含不屬於本公司的社區');
+  const t=now();
+  db.prepare(`INSERT INTO schedule_profiles (tenant_id,staff_id,schedule_role,default_shift,rest_days,self_select_days,community_ids_json,notes,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,staff_id) DO UPDATE SET schedule_role=excluded.schedule_role,default_shift=excluded.default_shift,rest_days=excluded.rest_days,self_select_days=excluded.self_select_days,community_ids_json=excluded.community_ids_json,notes=excluded.notes,updated_at=excluded.updated_at`)
+    .run(tenantIdValue,staffId,role,shift,rest,self,JSON.stringify(cids),String(payload.notes||'').slice(0,500),t,t);
+  return scheduleGetProfile(tenantIdValue,staffId);
+}
+function scheduleGetRule(tenantIdValue,communityId,category){
+  const r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS ? AND category=?').get(tenantIdValue,communityId??null,category);
+  if(r)return {...r,config:scheduleJson(r.config_json,{})};
+  const defaults=category==='security'?{rest_days:6,self_select_days:2,max_consecutive:6,shift:'day'}:category==='mobile'?{rest_days:6,self_select_days:2,max_consecutive:6}: {manager:{mode:'red_holiday',rest_days:8,red_dates:[]},secretary:{mode:'rotation',rest_days:8,red_dates:[]}};
+  return {tenant_id:tenantIdValue,community_id:communityId??null,category,config:defaults};
+}
+function scheduleSetRule(tenantIdValue,communityId,category,config){
+  if(!['admin','security','mobile'].includes(category))throw new Error('班表類別不正確');
+  if(communityId!==null && communityId!==undefined){const c=db.prepare('SELECT id FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(Number(communityId),tenantIdValue);if(!c)throw new Error('找不到本公司的啟用社區');}
+  const t=now();db.prepare(`INSERT INTO schedule_rules (tenant_id,community_id,category,config_json,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id,category) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at`).run(tenantIdValue,communityId??null,category,JSON.stringify(config||{}),t,t);
+  return scheduleGetRule(tenantIdValue,communityId??null,category);
+}
+function scheduleListStaff(tenantIdValue){
+  const rows=db.prepare("SELECT id,employee_id,name,is_active,work_type,job_category,job_level,job_categories_json,position FROM staff_users WHERE tenant_id=? AND role='staff' AND is_active=1 ORDER BY employee_id").all(tenantIdValue);
+  return rows.map(u=>{const p=scheduleGetProfile(tenantIdValue,u.id);return {...u,job_categories:getJobCategories(u),schedule_profile:p,site_assignments:getSiteAssignments(u)};});
+}
+function scheduleValidateEntries(tenantIdValue,month){
+  const rows=db.prepare('SELECT * FROM schedule_entries WHERE tenant_id=? AND month=? ORDER BY work_date,staff_id').all(tenantIdValue,month);
+  const byStaff={};for(const r of rows)(byStaff[r.staff_id]??=[]).push(r);
+  const problems=[];
+  for(const [sid,list] of Object.entries(byStaff)){
+    const work=new Set(list.filter(x=>x.shift_code!=='off'&&x.shift_code!=='leave').map(x=>x.work_date));
+    let streak=0;for(const d of scheduleWorkdays(month)){if(work.has(d)){streak++;if(streak>6)problems.push({type:'max-consecutive',staff_id:Number(sid),date:d,message:'連續工作超過 6 天'});}else streak=0;}
+  }
+  return problems;
+}
+function scheduleUpsertEntry(tenantIdValue,body,createdBy){
+  const staffId=Number(body.staff_id),communityId=body.community_id?Number(body.community_id):null,date=String(body.work_date||'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('日期格式不正確');
+  const u=db.prepare('SELECT id FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1').get(staffId,tenantIdValue);if(!u)throw new Error('找不到本公司在職人員');
+  if(communityId){const c=db.prepare('SELECT id FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(communityId,tenantIdValue);if(!c)throw new Error('社區不屬於本公司');}
+  const category=['admin','security','mobile'].includes(body.category)?body.category:'security';
+  const shift=String(body.shift_code||'work');
+  if(!['work','off','leave','day','night','training'].includes(shift))throw new Error('班別不正確');
+  const month=date.slice(0,7),t=now();
+  db.prepare(`INSERT INTO schedule_entries (tenant_id,month,work_date,staff_id,community_id,category,shift_code,status,source,note,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,work_date,staff_id,community_id) DO UPDATE SET month=excluded.month,category=excluded.category,shift_code=excluded.shift_code,status=excluded.status,source=excluded.source,note=excluded.note,created_by=excluded.created_by,updated_at=excluded.updated_at`).run(tenantIdValue,month,date,staffId,communityId,category,shift,body.status||'planned',body.source||'manual',String(body.note||'').slice(0,500),createdBy,t,t);
+  return db.prepare('SELECT * FROM schedule_entries WHERE tenant_id=? AND work_date=? AND staff_id=? AND community_id IS ?').get(tenantIdValue,date,staffId,communityId);
+}
+function scheduleGenerate(tenantIdValue,month,category,communityId,createdBy){
+  const profiles=scheduleListStaff(tenantIdValue).filter(x=>x.schedule_profile?.schedule_role===category);
+  const days=scheduleWorkdays(month);let created=0;
+  for(const person of profiles){
+    const p=person.schedule_profile; const jobs=person.job_categories||[];
+    const cids=(p.community_ids||[]).filter(Boolean);
+    if(category==='mobile' && !cids.length)continue;
+    const targetCommunity=category==='mobile'?null:(communityId||cids[0]||null);
+    const rule=scheduleGetRule(tenantIdValue,targetCommunity,category).config||{};
+    const off=new Set();
+    let totalRest=Number(p.rest_days||rule.rest_days||6);
+    let selfDays=Math.min(Number(p.self_select_days||rule.self_select_days||2),totalRest);
+    let mode='rotation',redDates=[];
+    if(category==='admin'){
+      const isManager=jobs.includes('社區管理')||person.job_level==='經理';
+      const sub=isManager?(rule.manager||{}):(rule.secretary||{});
+      mode=sub.mode||'rotation'; totalRest=Number(sub.rest_days||p.rest_days||8); redDates=Array.isArray(sub.red_dates)?sub.red_dates.map(String):[]; selfDays=0;
+    }
+    const existingSelf=db.prepare("SELECT work_date FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").all(tenantIdValue,month,person.id).map(x=>x.work_date);
+    existingSelf.slice(0,selfDays).forEach(d=>off.add(d));
+    if(category==='admin' && mode==='red_holiday'){
+      for(const d of days){const dt=new Date(`${d}T00:00:00`);const dow=dt.getDay();if(dow===0||dow===6||redDates.includes(d))off.add(d);}
+      if(off.size>totalRest){
+        // 見紅休超過合約月休時，保留前 totalRest 天；多出的紅字改由主管人工處理，避免系統過度排休。
+        [...off].slice(totalRest).forEach(d=>off.delete(d));
+      }
+    }
+    while(off.size<totalRest){
+      let picked=null;
+      for(const d of days){
+        if(off.has(d))continue;
+        const idx=days.indexOf(d);const recent=days.slice(Math.max(0,idx-6),idx).filter(x=>!off.has(x));
+        if(recent.length>=6){picked=d;break;}
+      }
+      if(!picked){
+        const candidates=days.filter(d=>!off.has(d));
+        if(!candidates.length)break;
+        const step=Math.max(1,Math.floor(days.length/Math.max(1,totalRest)));
+        picked=candidates[Math.min(candidates.length-1,Math.floor(off.size*step))];
+      }
+      off.add(picked);
+    }
+    let ci=0;
+    for(const d of days){
+      const isOff=off.has(d);let cid=targetCommunity;
+      if(category==='mobile'&&!isOff){cid=cids[ci%cids.length];ci++;}
+      if(category==='mobile'&&isOff)cid=cids.length?cids[Math.max(0,(ci-1)%cids.length)]:null;
+      const shift=category==='security'?(p.default_shift||rule.shift||'day'):'work';
+      scheduleUpsertEntry(tenantIdValue,{staff_id:person.id,community_id:cid,work_date:d,category,shift_code:isOff?'off':shift,source:'auto'},createdBy);created++;
+    }
+  }
+  return {created,problems:scheduleValidateEntries(tenantIdValue,month)};
+}
+
+// 讓新模組出現在公司內勤工作目錄；不寫回既有企業目錄，不覆蓋使用者原本的母目錄設定。
+const _scheduleOriginalCompanyMenuConfig = app._scheduleOriginalCompanyMenuConfig;
+app.get('/api/company/schedule/menu-state',requireCompanyAdmin,(req,res)=>res.json({enabled:true,items:SCHEDULE_MENU_ITEMS}));
+
+app.get('/api/company/schedule/staff',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>res.json({staff:scheduleListStaff(tenantId(req)),communities:db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY status DESC,name").all(tenantId(req))}));
+app.put('/api/company/schedule/staff/:id',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const p=scheduleUpsertProfile(tenantId(req),Number(req.params.id),req.body||{});if(!p)return res.status(404).json({error:'找不到人員'});res.json({success:true,profile:p});}catch(e){res.status(400).json({error:e.message||'班表人員設定失敗'});}});
+app.get('/api/company/schedule/rules',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{const cid=req.query?.community_id?Number(req.query.community_id):null;const category=String(req.query?.category||'security');res.json(scheduleGetRule(tenantId(req),cid,category));});
+app.put('/api/company/schedule/rules',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const cid=req.body?.community_id?Number(req.body.community_id):null;const category=String(req.body?.category||'');res.json({success:true,rule:scheduleSetRule(tenantId(req),cid,category,req.body?.config||{})});}catch(e){res.status(400).json({error:e.message||'班表規則儲存失敗'});}});
+app.get('/api/company/schedule/month',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{const month=scheduleMonth(req.query?.month);const category=['admin','security','mobile'].includes(String(req.query?.category))?String(req.query.category):'security';const cid=req.query?.community_id?Number(req.query.community_id):null;const rows=db.prepare(`SELECT e.*,u.name staff_name,u.employee_id,c.name community_name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id LEFT JOIN communities c ON c.id=e.community_id WHERE e.tenant_id=? AND e.month=? AND e.category=? ${cid?'AND e.community_id=?':''} ORDER BY e.work_date,u.employee_id`).all(...(cid?[tenantId(req),month,category,cid]:[tenantId(req),month,category]));res.json({month,category,community_id:cid,entries:rows,problems:scheduleValidateEntries(tenantId(req),month)});});
+app.post('/api/company/schedule/generate',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const month=scheduleMonth(req.body?.month);const category=String(req.body?.category||'security');const cid=req.body?.community_id?Number(req.body.community_id):null;const r=scheduleGenerate(tenantId(req),month,category,cid,getUser(req).id);res.json({success:true,...r});}catch(e){res.status(400).json({error:e.message||'智慧排班失敗'});}});
+app.post('/api/company/schedule/entry',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{res.json({success:true,entry:scheduleUpsertEntry(tenantId(req),req.body||{},getUser(req).id)});}catch(e){res.status(400).json({error:e.message||'班表儲存失敗'});}});
+app.delete('/api/company/schedule/entry/:id',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{db.prepare('DELETE FROM schedule_entries WHERE id=? AND tenant_id=?').run(Number(req.params.id),tenantId(req));res.json({success:true});});
+app.get('/api/company/schedule/swaps',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{const rows=db.prepare(`SELECT s.*,a.name from_name,b.name to_name,c.name community_name FROM schedule_swaps s JOIN staff_users a ON a.id=s.from_staff_id JOIN staff_users b ON b.id=s.to_staff_id LEFT JOIN communities c ON c.id=s.community_id WHERE s.tenant_id=? ORDER BY s.created_at DESC`).all(tenantId(req));res.json({rows});});
+app.post('/api/company/schedule/swaps',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const t=now();const cid=req.body?.community_id?Number(req.body.community_id):null;const from=Number(req.body?.from_staff_id),to=Number(req.body?.to_staff_id);if(!from||!to||from===to)throw new Error('請選擇不同的換班人員');db.prepare('INSERT INTO schedule_swaps (tenant_id,work_date,community_id,from_staff_id,to_staff_id,reason,status,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(tenantId(req),String(req.body.work_date||''),cid,from,to,String(req.body.reason||''),String(req.body.status||'approved'),getUser(req).id,t);res.json({success:true});}catch(e){res.status(400).json({error:e.message||'換班紀錄建立失敗'});}});
+app.get('/api/company/schedule/requests',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{const rows=db.prepare(`SELECT r.*,u.name staff_name,t.name target_staff_name,c.name community_name FROM schedule_requests r JOIN staff_users u ON u.id=r.staff_id LEFT JOIN staff_users t ON t.id=r.target_staff_id LEFT JOIN communities c ON c.id=r.community_id WHERE r.tenant_id=? ORDER BY r.created_at DESC`).all(tenantId(req));res.json({rows});});
+app.post('/api/company/schedule/requests',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const t=now();const sid=Number(req.body?.staff_id),cid=req.body?.community_id?Number(req.body.community_id):null;if(!sid)throw new Error('請選擇人員');db.prepare('INSERT INTO schedule_requests (tenant_id,staff_id,community_id,work_date,request_type,target_staff_id,reason,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),sid,cid,String(req.body.work_date||''),String(req.body.request_type||'leave'),req.body.target_staff_id?Number(req.body.target_staff_id):null,String(req.body.reason||''),'approved',getUser(req).id,t,t);res.json({success:true});}catch(e){res.status(400).json({error:e.message||'請假／代班紀錄建立失敗'});}});
+app.get('/api/company/schedule/overtime',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{const rows=db.prepare(`SELECT o.*,u.name staff_name,u.employee_id,c.name community_name FROM schedule_overtime o JOIN staff_users u ON u.id=o.staff_id LEFT JOIN communities c ON c.id=o.community_id WHERE o.tenant_id=? ORDER BY o.work_date DESC,o.id DESC`).all(tenantId(req));res.json({rows});});
+app.post('/api/company/schedule/overtime',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const sid=Number(req.body?.staff_id),cid=req.body?.community_id?Number(req.body.community_id):null,h=Number(req.body?.hours||0);if(!sid||!(h>0))throw new Error('請填寫人員與加班時數');const t=now();db.prepare('INSERT INTO schedule_overtime (tenant_id,staff_id,community_id,work_date,hours,category,shift_code,reason,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),sid,cid,String(req.body.work_date||''),h,String(req.body.category||''),String(req.body.shift_code||''),String(req.body.reason||''),'pending',getUser(req).id,t,t);res.json({success:true});}catch(e){res.status(400).json({error:e.message||'加班紀錄建立失敗'});}});
+
+// 現場人員：機動／保全的自選休假與自己的班表資料，後端先備妥；前台介面可獨立接上，不會看到行政資料。
+app.get('/api/staff/schedule/month',requireStaffFiller,(req,res)=>{const month=scheduleMonth(req.query?.month);const u=getUser(req);const p=scheduleGetProfile(tenantId(req),u.id);if(!p)return res.status(404).json({error:'尚未設定班表身分'});const category=p.schedule_role;const rows=db.prepare('SELECT e.*,c.name community_name FROM schedule_entries e LEFT JOIN communities c ON c.id=e.community_id WHERE e.tenant_id=? AND e.month=? AND e.staff_id=? ORDER BY e.work_date').all(tenantId(req),month,u.id);res.json({month,category,profile:p,entries:rows,problems:scheduleValidateEntries(tenantId(req),month).filter(x=>x.staff_id===u.id)});});
+app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{const u=getUser(req),p=scheduleGetProfile(tenantId(req),u.id);if(!p||!['security','mobile'].includes(p.schedule_role))return res.status(403).json({error:'目前只有保全／機動可使用自選休假'});const month=scheduleMonth(req.body?.month),date=String(req.body?.work_date||'');if(!scheduleWorkdays(month).includes(date))throw new Error('日期不在所選月份');const used=db.prepare("SELECT COUNT(*) c FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").get(tenantId(req),month,u.id).c;if(used>=Number(p.self_select_days||2))throw new Error(`本月最多可自選 ${p.self_select_days||2} 天`);
+  const ids=(p.community_ids||[]).map(Number).filter(Boolean);
+  const placeholders=ids.map(()=>'?').join(',')||'NULL';
+  const conflictSecurity=db.prepare(`SELECT e.id,e.staff_id,e.community_id,e.work_date FROM schedule_entries e WHERE e.tenant_id=? AND e.work_date=? AND e.shift_code='off' AND e.category='security' AND e.staff_id<>? AND e.community_id IN (${placeholders}) LIMIT 1`).get(tenantId(req),date,u.id,...ids);
+  if(conflictSecurity)throw new Error('此日期與支援社區的保全休假衝突，請選擇其他日期。');
+  const mobileSelf=db.prepare("SELECT community_id FROM schedule_entries WHERE tenant_id=? AND work_date=? AND shift_code='off' AND source='self-select' AND category='mobile' AND staff_id<>?").all(tenantId(req),date,u.id);
+  if(mobileSelf.some(r=>ids.includes(Number(r.community_id))))throw new Error('此日期已被其他支援相同社區的機動人員先選走，請選擇其他日期。');
+  scheduleUpsertEntry(tenantId(req),{staff_id:u.id,community_id:(p.community_ids||[])[0]||null,work_date:date,category:p.schedule_role,shift_code:'off',source:'self-select',note:'人員自選休假'},u.id);res.json({success:true});
+}catch(e){res.status(400).json({error:e.message||'自選休假失敗'});}});
+
 
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
