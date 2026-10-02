@@ -6,11 +6,14 @@ const COMPANY_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['finance','company-resour
 const SITE_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['todo','work-journal','finance','committee','residents','vendors','handover','schedule'].includes(x[0]));
 const DEFAULT_STAFF_PERMISSIONS=STAFF_PERMISSIONS.map(x=>x[0]);
 async function loadPermissionCatalog(){
+  const fallbackSite=SITE_PERMISSIONS.map(([id,label])=>({id,action:id,label,icon:'•',enabled:true}));
   try{
-    const [companyMenu,siteMenu]=await Promise.all([api('/api/company/menu-config'),api('/api/staff/menu-config')]);
-    return {company:Array.isArray(companyMenu.items)?companyMenu.items:[],site:Array.isArray(siteMenu.items)?siteMenu.items:[]};
+    const companyMenu=await api('/api/company/menu-config');
+    let site=fallbackSite;
+    try{const siteMenu=await api('/api/staff/menu-config');if(Array.isArray(siteMenu.items)&&siteMenu.items.length)site=siteMenu.items;}catch(e){}
+    return {company:Array.isArray(companyMenu.items)?companyMenu.items:[],site};
   }catch(e){
-    return {company:[],site:[]};
+    return {company:[],site:fallbackSite};
   }
 }
 function permissionOptionsHtml(items, selected, attrName){
@@ -55,7 +58,7 @@ async function openMessageAudit(){try{const d=await api('/api/company/message-au
 function renderMessageAuditResults(box,rows){const el=box.querySelector('#auditResults');if(!rows.length){el.innerHTML='<div class="empty">目前沒有符合條件的訊息。</div>';return;}el.innerHTML=`<div class="table-wrap"><table><thead><tr><th>時間</th><th>發送人</th><th>收件人</th><th>訊息</th><th>狀態</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${formatDate(r.created_at)}</td><td>${escapeHtml(r.sender_name)}<br><span class="muted">${escapeHtml(r.sender_employee_id)}</span></td><td>${escapeHtml(r.recipient_name)}<br><span class="muted">${escapeHtml(r.recipient_employee_id)}</span></td><td>${escapeHtml(r.body)}</td><td>${r.read_at?'<span class="tag success">已讀</span>':'<span class="tag">未讀</span>'}</td></tr>`).join('')}</tbody></table></div>`;}
 async function runMessageAuditSearch(btn){const box=btn.closest('.message-audit-modal');try{const q=box.querySelector('#auditQ').value.trim(),from=box.querySelector('#auditFrom').value,to=box.querySelector('#auditTo').value;const d=await api(`/api/company/message-audit/search?q=${encodeURIComponent(q)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);renderMessageAuditResults(box,d.rows||[]);}catch(e){alert(e.message)}}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{const s=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('password').value,tenantCode:$('companyTenantCode')?.value||'',entry:'company'})});if(!['company_admin','staff'].includes(s.user.role))throw new Error('這個帳號無法使用公司內部工作台。');showMain({tenant:{name:s.user.tenant_name,code:s.user.tenant_code,id:s.user.tenant_id},user:{id:s.user.id,admin_level:s.user.admin_level,role:s.user.role,permissions:s.user.permissions||[],company_assignment:s.user.company_assignment||null}});await loadAll()}catch(err){if(err.message?.includes('多家公司')&&$('companyTenantCode')){$('companyTenantCode').closest('.field').style.display='block';$('companyTenantCode').focus();} $('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
-$('logoutBtn').addEventListener('click',async()=>{await api('/api/staff/logout',{method:'POST'});location.reload()});
+$('logoutBtn').addEventListener('click',async()=>{await api('/api/company/logout',{method:'POST'});location.reload()});
 $('staffEntryLink')?.addEventListener('click',async e=>{e.preventDefault();await api('/api/staff/logout',{method:'POST'});location.href='/';});
 
 
