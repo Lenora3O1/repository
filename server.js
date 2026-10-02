@@ -250,11 +250,11 @@ function cleanMenuItems(items){
 const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources'];
 const STAFF_PERMISSION_LABELS={
   'todo':'代辦事項','work-journal':'工作日誌','finance':'財務／會計','committee':'管理委員會','residents':'住戶名冊','vendors':'廠商聯繫','handover':'交接清冊','company-resources':'公司資源',
-  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本','manage-sop':'案場 SOP 管理','sop':'案場 SOP',
+  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本','manage-sop':'案場 SOP 管理','sop':'案場 SOP','schedule':'班表',
   'company-work-journal':'工作日誌管理','company-accounting':'會計','company-general-affairs':'總務管理','company-personnel':'人員','company-finance':'公司財務','company-hr':'人事管理','company-new-record':'新日錄'
 };
 const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record','schedule']);
-const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','sop']);
+const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','sop','schedule']);
 function parsePermissions(u){
   try{const p=JSON.parse(u?.permission_json||'[]');return Array.isArray(p)?p.map(String):[];}catch{return []}
 }
@@ -304,6 +304,8 @@ function syncWorkAssignments(staffId, tenantIdValue, workType, communityIds, job
     if(workType==='internal'||workType==='hybrid') ins.run(staffId,tenantIdValue,'company',null,JSON.stringify(cats),jobLevel||'',JSON.stringify(perms),t,t);
     if(workType==='site'||workType==='hybrid') for(const cid of ids) ins.run(staffId,tenantIdValue,'site',cid,JSON.stringify(cats),jobLevel||'',JSON.stringify(perms),t,t);
   }); tx();
+  // 班表與人員管理資料同步：職務／案場異動後，班表身分與支援社區立即跟著更新。
+  try{ if(typeof scheduleSyncProfileFromStaff==='function') scheduleSyncProfileFromStaff(tenantIdValue,staffId); }catch(e){ console.error('schedule profile sync error:',e); }
 }
 function menuPermissionKey(item,scope='staff'){
   const raw=`${item?.id||''} ${item?.action||''} ${item?.label||''}`.toLowerCase();
@@ -311,7 +313,7 @@ function menuPermissionKey(item,scope='staff'){
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
   const rules=[
-    ['manage-staff',['staff','人員管理','公司人員']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],
+    ['manage-staff',['staff','人員管理','公司人員']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
     ['todo',['todo','代辦事項']],['work-journal',['work-journal','工作日誌']],['finance',['finance','財務','會計']],['committee',['committee','管理委員會']],['residents',['residents','住戶名冊']],['vendors',['vendors','廠商聯繫']],['handover',['handover','交接清冊']],['company-resources',['company-resources','公司資源']]
   ];
   for(const [key,terms] of rules) if(terms.some(t=>raw.includes(String(t).toLowerCase()))) return key;
@@ -400,7 +402,7 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
   }
 });
 // ===== 動態工作目錄 =====
-app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);const items=resolveMenu('staff',tenantId(req),u);const p=scheduleGetProfile(tenantId(req),u.id);if(p&&['security','mobile'].includes(p.schedule_role)&&!items.some(x=>String(x.id)==='staff-schedule'))items.push({id:'staff-schedule',parentId:null,icon:'📅',label:'我的班表',action:'staff-schedule',enabled:true});res.json({scope:'staff',items});});
+app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);const items=resolveMenu('staff',tenantId(req),u);const p=scheduleGetProfile(tenantId(req),u.id);if(p&&['security','mobile'].includes(p.schedule_role)&&(effectivePermissions(u).includes('schedule')||!items.some(x=>String(x.id)==='staff-schedule'))&&!items.some(x=>String(x.id)==='staff-schedule'))items.push({id:'staff-schedule',parentId:null,icon:'📅',label:'我的班表',action:'staff-schedule',enabled:true});res.json({scope:'staff',items});});
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{const items=resolveMenu('company',tenantId(req),getUser(req));const ids=new Set(items.map(x=>String(x.id)));const scheduleItems=[{id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},{id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},{id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},{id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},{id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},{id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},{id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}];if(!ids.has('company-schedule')&&(getUser(req)?.role==='company_admin'||effectivePermissions(getUser(req)).includes('schedule')))items.push(...scheduleItems);res.json({scope:'company',items});});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   const c=readMenuConfig();
@@ -1077,6 +1079,26 @@ function scheduleDefaultRole(u){
   if(jobs.includes('秘書')||jobs.includes('社區管理')||u?.job_level==='經理') return 'admin';
   return '';
 }
+function scheduleSyncProfileFromStaff(tenantIdValue,staffId){
+  const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(Number(staffId),tenantIdValue);
+  if(!u) return null;
+  const role=scheduleDefaultRole(u);
+  const existing=db.prepare('SELECT * FROM schedule_profiles WHERE tenant_id=? AND staff_id=?').get(tenantIdValue,Number(staffId));
+  if(!role){
+    if(existing) db.prepare("UPDATE schedule_profiles SET schedule_role='',community_ids_json='[]',updated_at=? WHERE tenant_id=? AND staff_id=?").run(now(),tenantIdValue,Number(staffId));
+    return null;
+  }
+  const assigned=getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);
+  const defaultShift=existing?.default_shift || (role==='security'?'day':'');
+  const restDays=existing?.rest_days!=null?Number(existing.rest_days):(role==='security'||role==='mobile'?6:8);
+  const selfDays=existing?.self_select_days!=null?Number(existing.self_select_days):Math.min(2,restDays);
+  const notes=existing?.notes||'';
+  db.prepare(`INSERT INTO schedule_profiles (tenant_id,staff_id,schedule_role,default_shift,rest_days,self_select_days,community_ids_json,notes,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(tenant_id,staff_id) DO UPDATE SET schedule_role=excluded.schedule_role,default_shift=excluded.default_shift,community_ids_json=excluded.community_ids_json,updated_at=excluded.updated_at`).run(tenantIdValue,Number(staffId),role,defaultShift,Math.max(0,Math.min(31,restDays)),Math.max(0,Math.min(restDays,selfDays)),JSON.stringify(assigned),notes,now(),now());
+  return scheduleGetProfile(tenantIdValue,Number(staffId));
+}
+
 function scheduleGetProfile(tenantIdValue,staffId){
   let p=db.prepare('SELECT * FROM schedule_profiles WHERE tenant_id=? AND staff_id=?').get(tenantIdValue,staffId);
   if(p) return {...p,community_ids:scheduleArray(p.community_ids_json)};
