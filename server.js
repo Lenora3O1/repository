@@ -211,6 +211,36 @@ function readFormConfig(){
   return config;
 }
 function writeFormConfig(config){fs.writeFileSync(FORM_CONFIG_PATH,JSON.stringify(config,null,2),'utf-8');}
+const PLATFORM_STAFF_SCHEDULE_MENU = [
+  {id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true},
+  {id:'staff-schedule-rules',parentId:'staff-schedule',icon:'↳',label:'排班表',action:'staff-schedule-rules',enabled:true},
+  {id:'staff-schedule-leave',parentId:'staff-schedule',icon:'↳',label:'請假／代班',action:'staff-schedule-leave',enabled:true},
+  {id:'staff-schedule-overtime',parentId:'staff-schedule',icon:'↳',label:'加班',action:'staff-schedule-overtime',enabled:true}
+];
+const PLATFORM_COMPANY_SCHEDULE_MENU = [
+  {id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},
+  {id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},
+  {id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},
+  {id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},
+  {id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},
+  {id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},
+  {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}
+];
+function isScheduleMenuItem(item, scope){
+  const id=String(item?.id||'').trim();
+  const action=String(item?.action||'').trim();
+  const label=String(item?.label||'').trim();
+  if(scope==='company') return id==='shift'||action==='shift'||action==='schedule'||/^company-schedule(?:-|$)/.test(id)||['班表','月班表','人員班表','社區班表','換班紀錄','請假／代班','加班'].includes(label);
+  return id==='shift'||action==='shift'||action==='staff-schedule'||/^staff-schedule(?:-|$)/.test(id)||['班表','排班表','請假／代班','加班'].includes(label);
+}
+function normalizeScheduleMenu(items, scope){
+  const source=Array.isArray(items)?items:[];
+  const first=source.findIndex(x=>isScheduleMenuItem(x,scope));
+  const filtered=source.filter(x=>!isScheduleMenuItem(x,scope));
+  const standard=scope==='company'?PLATFORM_COMPANY_SCHEDULE_MENU:PLATFORM_STAFF_SCHEDULE_MENU;
+  filtered.splice(first<0?filtered.length:first,0,...standard.map(x=>({...x})));
+  return filtered;
+}
 function defaultMenuConfig(){
   const seed=path.join(__dirname,'config','menu-config.json');
   if(fs.existsSync(seed)) return JSON.parse(fs.readFileSync(seed,'utf-8'));
@@ -241,6 +271,20 @@ function readMenuConfig(){
     }
     // 目錄完全由平台總後台／各公司既有目錄配置控制；此處不自動新增或修改任何 SOP 目錄。
     if(changed) writeMenuConfig(c);
+    // 班表平台標準化：目前仍在產品測試期，將既有公司目錄中的舊／重複班表
+    // 統一整理成平台預設；其他自訂目錄完全保留。新公司則直接使用平台預設。
+    if(c._schedulePlatformVersion !== 1){
+      c.staff=normalizeScheduleMenu(c.staff,'staff');
+      c.company=normalizeScheduleMenu(c.company,'company');
+      for(const t of tenantRows){
+        const key=String(t.id);
+        c.tenants[key]=c.tenants[key]||{};
+        c.tenants[key].staff=normalizeScheduleMenu(c.tenants[key].staff||c.staff,'staff');
+        c.tenants[key].company=normalizeScheduleMenu(c.tenants[key].company||c.company,'company');
+      }
+      c._schedulePlatformVersion=1;
+      writeMenuConfig(c);
+    }
   }catch(e){ console.error('menu tenant snapshot migration error',e); }
   return c;
 }
@@ -258,7 +302,7 @@ function cleanMenuItems(items){
   for(const x of clean){if(x.parentId===x.id || (x.parentId && !idSet.has(x.parentId))) x.parentId=null;}
   return clean;
 }
-const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources'];
+const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','schedule'];
 const STAFF_PERMISSION_LABELS={
   'todo':'代辦事項','work-journal':'工作日誌','finance':'財務／會計','committee':'管理委員會','residents':'住戶名冊','vendors':'廠商聯繫','handover':'交接清冊','company-resources':'公司資源',
   'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本','manage-sop':'案場 SOP 管理','sop':'案場 SOP','schedule':'班表',
@@ -346,6 +390,10 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
+    if(scope==='staff'){
+      const role=scheduleDefaultRole(staffUser);
+      if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
+    }
   }
   return items;
 }
@@ -416,23 +464,12 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
 // ===== 動態工作目錄 =====
 app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   const u=getUser(req);
-  const items=resolveMenu('staff',tenantId(req),u);
-  const p=scheduleGetProfile(tenantId(req),u.id);
-  const role=p?.schedule_role||scheduleDefaultRole(u);
-  const hasSchedule=effectivePermissions(u).includes('schedule') || ['admin','security','mobile'].includes(role);
-  const ids=new Set(items.map(x=>String(x.id)));
-  if(hasSchedule&&!ids.has('staff-schedule')) items.push({id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true});
-  if(hasSchedule&&role==='admin'){
-    const children=[
-      {id:'staff-schedule-rules',parentId:'staff-schedule',icon:'↳',label:'排班表',action:'staff-schedule-rules',enabled:true},
-      {id:'staff-schedule-leave',parentId:'staff-schedule',icon:'↳',label:'請假／代班',action:'staff-schedule-leave',enabled:true},
-      {id:'staff-schedule-overtime',parentId:'staff-schedule',icon:'↳',label:'加班',action:'staff-schedule-overtime',enabled:true}
-    ];
-    for(const x of children) if(!ids.has(x.id)) items.push(x);
-  }
+  let items=resolveMenu('staff',tenantId(req),u);
+  const role=scheduleGetProfile(tenantId(req),u.id)?.schedule_role||scheduleDefaultRole(u);
+  if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
   res.json({scope:'staff',items});
 });
-app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{const items=resolveMenu('company',tenantId(req),getUser(req));const ids=new Set(items.map(x=>String(x.id)));const scheduleItems=[{id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},{id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},{id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},{id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},{id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},{id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},{id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}];if(!ids.has('company-schedule')&&(getUser(req)?.role==='company_admin'||effectivePermissions(getUser(req)).includes('schedule')))items.push(...scheduleItems);res.json({scope:'company',items});});
+app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   const c=readMenuConfig();
   const tid=req.query?.tenant_id?Number(req.query.tenant_id):null;
@@ -1010,15 +1047,7 @@ app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const 
 // 三套排班規則完全分離：行政／保全／機動。
 // 班表資料一律以 tenant_id 隔離，不讀取其他公司的排班資料。
 
-const SCHEDULE_MENU_ITEMS = [
-  {id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},
-  {id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},
-  {id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},
-  {id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},
-  {id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},
-  {id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},
-  {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}
-];
+const SCHEDULE_MENU_ITEMS = PLATFORM_COMPANY_SCHEDULE_MENU;
 
 function scheduleEnsureSchema(){
   db.exec(`
