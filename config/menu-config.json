@@ -178,7 +178,7 @@
       "enabled": true
     },
     {
-      "id": "sop",
+      "id": "staff-sop",
       "parentId": null,
       "icon": "📚",
       "label": "案場 SOP",
@@ -186,19 +186,67 @@
       "enabled": true
     },
     {
-      "id": "sop-admin",
-      "parentId": "sop",
+      "id": "staff-sop-admin",
+      "parentId": "staff-sop",
       "icon": "↳",
       "label": "行政 SOP",
       "action": "sop-admin",
       "enabled": true
     },
     {
-      "id": "sop-duty",
-      "parentId": "sop",
+      "id": "staff-sop-duty",
+      "parentId": "staff-sop",
       "icon": "↳",
       "label": "勤務 SOP",
       "action": "sop-duty",
+      "enabled": true
+    },
+    {
+      "id": "staff-sop-company",
+      "parentId": "staff-sop",
+      "icon": "↳",
+      "label": "公司基本 SOP",
+      "action": "sop-company",
+      "enabled": true
+    },
+    {
+      "id": "staff-sop-community",
+      "parentId": "staff-sop",
+      "icon": "↳",
+      "label": "案場注意事項",
+      "action": "sop-community",
+      "enabled": true
+    },
+    {
+      "id": "staff-schedule",
+      "parentId": null,
+      "icon": "📅",
+      "label": "班表",
+      "action": "staff-schedule",
+      "enabled": true
+    },
+    {
+      "id": "staff-schedule-rules",
+      "parentId": "staff-schedule",
+      "icon": "↳",
+      "label": "排班表",
+      "action": "staff-schedule-rules",
+      "enabled": true
+    },
+    {
+      "id": "staff-schedule-leave",
+      "parentId": "staff-schedule",
+      "icon": "↳",
+      "label": "請假／代班",
+      "action": "staff-schedule-leave",
+      "enabled": true
+    },
+    {
+      "id": "staff-schedule-overtime",
+      "parentId": "staff-schedule",
+      "icon": "↳",
+      "label": "加班",
+      "action": "staff-schedule-overtime",
       "enabled": true
     }
   ],
@@ -306,7 +354,64 @@
       "label": "案場 SOP 管理",
       "action": "sop",
       "enabled": true
+    },
+    {
+      "id": "company-schedule",
+      "parentId": null,
+      "icon": "📅",
+      "label": "班表",
+      "action": "schedule",
+      "enabled": true
+    },
+    {
+      "id": "company-schedule-month",
+      "parentId": "company-schedule",
+      "icon": "↳",
+      "label": "月班表",
+      "action": "schedule-month",
+      "enabled": true
+    },
+    {
+      "id": "company-schedule-staff",
+      "parentId": "company-schedule",
+      "icon": "↳",
+      "label": "人員班表",
+      "action": "schedule-staff",
+      "enabled": true
+    },
+    {
+      "id": "company-schedule-community",
+      "parentId": "company-schedule",
+      "icon": "↳",
+      "label": "社區班表",
+      "action": "schedule-community",
+      "enabled": true
+    },
+    {
+      "id": "company-schedule-swap",
+      "parentId": "company-schedule",
+      "icon": "↳",
+      "label": "換班紀錄",
+      "action": "schedule-swap",
+      "enabled": true
+    },
+    {
+      "id": "company-schedule-leave",
+      "parentId": "company-schedule",
+      "icon": "↳",
+      "label": "請假／代班",
+      "action": "schedule-leave",
+      "enabled": true
+    },
+    {
+      "id": "company-schedule-overtime",
+      "parentId": "company-schedule",
+      "icon": "↳",
+      "label": "加班",
+      "action": "schedule-overtime",
+      "enabled": true
     }
   ],
-  "tenants": {}
+  "tenants": {},
+  "_schedulePlatformVersion": 1
 }
