@@ -313,6 +313,11 @@ async function handleWorkspaceMenu(e){
     try{await loadChecklistModule(label||'交接清冊');}catch(err){showWorkspaceError(label||'交接清冊',err);}
     return;
   }
+  if(action==='staff-schedule'){
+    showWorkspaceLoading(label||'我的班表');
+    try{await loadStaffScheduleModule(label||'我的班表');}catch(err){showWorkspaceError(label||'我的班表',err);}
+    return;
+  }
   showWorkspacePlaceholder(label||'工作功能',action);
 }
 document.addEventListener('workspace-menu',e=>{handleWorkspaceMenu(e).catch(err=>showWorkspaceError(e.detail?.label||'工作功能',err));});
@@ -355,3 +360,16 @@ window.newDraft=newDraft;window.continueDraft=continueDraft;window.deleteDraft=d
 window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&draftId&&dirty)saveNow(true)});
 window.addEventListener('beforeunload',()=>{if(!draftId||!dirty)return;savePageAnswers();fetch(`/api/staff/drafts/${draftId}`,{method:'PUT',keepalive:true,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:answers,current_page:currentPage,community_id:draftCommunityId})}).catch(()=>{})});
 boot().catch(e=>showMessage(e.message,'error'));
+
+
+// ===== 智慧班表｜現場人員自選休假 V1 =====
+async function loadStaffScheduleModule(label='我的班表'){
+  const el=$('staffHome'); if(!el)return;
+  const month=new Date(); const ym=`${month.getFullYear()}-${String(month.getMonth()+1).padStart(2,'0')}`;
+  const d=await api(`/api/staff/schedule/month?month=${encodeURIComponent(ym)}`);
+  const p=d.profile||{}; const days=Array.from({length:new Date(month.getFullYear(),month.getMonth()+1,0).getDate()},(_,i)=>i+1); const map=new Map((d.entries||[]).map(x=>[Number(x.work_date.slice(-2)),x]));
+  el.innerHTML=`<div class="panel staff-schedule-panel"><div class="eyebrow">我的班表</div><h1>📅 ${escapeHtml(label)}</h1><p>${p.schedule_role==='mobile'?'機動人員可支援多個社區；自選休假會與支援社區的保全休假及其他機動人員先選日期自動比對。':'保全自選休假會先保留；未選的休假由勤務主管協助安排。'}</p><div class="staff-schedule-summary"><span>班表身分：<strong>${p.schedule_role==='mobile'?'機動':'保全'}</strong></span><span>月休：<strong>${p.rest_days||0} 天</strong></span><span>自選：<strong>${p.self_select_days||0} 天</strong></span></div><div id="staffScheduleCalendar" class="staff-schedule-calendar">${days.map(day=>{const r=map.get(day);const code=r?.shift_code||'work';const cls=code==='off'?'off':code==='night'?'night':'work';return `<button type="button" class="staff-schedule-day ${cls}" data-day="${day}" title="${code==='off'?'休假':'工作'}"><strong>${day}</strong><small>${code==='off'?'休':code==='night'?'夜':'班'}</small></button>`}).join('')}</div><div class="staff-schedule-note">💡 點選可嘗試自選休假。若日期與支援社區的保全休假或其他機動人員已先選的日期衝突，系統會直接拒絕。</div></div>`;
+  el.querySelectorAll('.staff-schedule-day').forEach(btn=>btn.addEventListener('click',async()=>{const day=Number(btn.dataset.day);const date=`${ym}-${String(day).padStart(2,'0')}`;if(btn.classList.contains('off')){alert('這一天目前已排休。若要調整，請由勤務主管處理。');return;}try{await api('/api/staff/schedule/self-select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({month:ym,work_date:date})});alert(`已自選 ${date} 為休假。`);await loadStaffScheduleModule(label);}catch(e){alert(e.message)}}));
+}
+window.loadStaffScheduleModule=loadStaffScheduleModule;
+(function(){if(document.getElementById('staffScheduleStyles'))return;const s=document.createElement('style');s.id='staffScheduleStyles';s.textContent=`.staff-schedule-summary{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.staff-schedule-summary span{padding:8px 12px;border:1px solid #d8e7e0;border-radius:999px;background:#f5faf7}.staff-schedule-calendar{display:grid;grid-template-columns:repeat(7,minmax(70px,1fr));gap:8px;margin-top:16px}.staff-schedule-day{min-height:68px;border:1px solid #d8e4df;border-radius:10px;background:#fff;text-align:left;padding:8px;cursor:pointer}.staff-schedule-day strong{display:block;font-size:18px}.staff-schedule-day small{display:block;margin-top:5px}.staff-schedule-day.work:hover{background:#eef7f2}.staff-schedule-day.off{background:#fff0f0;color:#a63b3b}.staff-schedule-day.night{background:#eef0ff;color:#3f4d91}.staff-schedule-note{margin-top:14px;padding:12px;border-radius:10px;background:#edf7f1}@media(max-width:700px){.staff-schedule-calendar{grid-template-columns:repeat(4,minmax(60px,1fr))}}`;document.head.appendChild(s)})();
