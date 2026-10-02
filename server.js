@@ -19,6 +19,18 @@ const GENERATED_DIR = path.join(DATA_DIR, 'generated');
 const QUESTIONS_PATH = path.join(__dirname, 'config', 'questions.json');
 const FORM_CONFIG_PATH = path.join(DATA_DIR, 'form-config.json');
 const MENU_CONFIG_PATH = path.join(DATA_DIR, 'menu-config.json');
+const STAFF_UI_COPY_PATH = path.join(DATA_DIR, 'staff-ui-copy.json');
+const DEFAULT_STAFF_UI_COPY = {
+  workspaceLoading: '正在讀取您的社區與交接資料，請稍候…',
+  sopIntro: '目前登入職務：{{job}}。{{scope}}只會顯示您目前有權限閱讀的內容。',
+  sopEmpty: '目前還沒有可閱讀的 SOP。公司基本 SOP 與本案場注意事項會依您的職務自動分流。',
+  managerUploadEyebrow: '📤 經理分流上傳',
+  managerUploadTitle: '上傳社區 SOP',
+  managerUploadHint: '只要您的身分是經理即可上傳。不論公司內勤或派駐社區的經理，都可以把 SOP 回傳公司管理；駐點經理只會看到自己的派駐社區，內勤經理可選擇本公司啟用中的社區。',
+  managerUploadButton: '📤 上傳 SOP',
+  managerUploadSubmit: '上傳並回傳公司',
+  managerUploadSuccess: '✅ SOP 已上傳，也已回傳公司管理端。'
+};
 for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
 
 const sopUpload=multer({
@@ -79,6 +91,26 @@ function requireMessageAuditor(req,res,next){
 
 function sanitizeBranding(row){return {tenant_id:row.id,title:row.brand_title||row.name||'物業管理公司',subtitle:row.brand_subtitle||'物業管理公司',loginTitle:row.brand_login_title||'公司管理員登入',loginHint:row.brand_login_hint||'這裡是公司專屬管理後台。登入後可管理人員、社區與公司資料。',intro:row.brand_intro||'這裡只管理您所屬公司的資料。',logoText:row.brand_logo_text||'',accent:row.brand_accent||'#2F6F5E',accentDark:row.brand_accent_dark||'#204F42',bg:row.brand_bg||'#F7F7F4',panel:row.brand_panel||'#FFFFFF'};}
 function validHex(v,fallback){const s=String(v||'').trim();return /^#[0-9a-fA-F]{6}$/.test(s)?s:fallback;}
+function readStaffUiCopy(tenantIdValue){
+  let all={};
+  try{if(fs.existsSync(STAFF_UI_COPY_PATH)) all=JSON.parse(fs.readFileSync(STAFF_UI_COPY_PATH,'utf-8'))||{};}catch(e){console.error('staff ui copy read error:',e);}
+  const saved=all&&typeof all==='object'&&all[String(tenantIdValue)]&&typeof all[String(tenantIdValue)]==='object'?all[String(tenantIdValue)]:{};
+  return {...DEFAULT_STAFF_UI_COPY,...saved};
+}
+function writeStaffUiCopy(tenantIdValue,copy){
+  let all={};
+  try{if(fs.existsSync(STAFF_UI_COPY_PATH)) all=JSON.parse(fs.readFileSync(STAFF_UI_COPY_PATH,'utf-8'))||{};}catch(e){all={};}
+  all[String(tenantIdValue)]={...readStaffUiCopy(tenantIdValue),...copy};
+  fs.writeFileSync(STAFF_UI_COPY_PATH,JSON.stringify(all,null,2),'utf-8');
+}
+function sanitizeStaffUiCopy(body,tenantIdValue){
+  const current=readStaffUiCopy(tenantIdValue), out={};
+  for(const key of Object.keys(DEFAULT_STAFF_UI_COPY)){
+    const v=String(body?.[key]??current[key]??'').trim();
+    out[key]=v.slice(0,1000);
+  }
+  return out;
+}
 function legacyToConfig(){
   const questions = JSON.parse(fs.readFileSync(QUESTIONS_PATH,'utf-8'));
   const sectionNames=[...new Set(questions.map(q=>q.section||'其他'))];
@@ -661,6 +693,8 @@ app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin
 // ===== 公司系統白標／美編 =====
 app.get('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(Number(req.params.id));if(!row)return res.status(404).json({error:'找不到公司'});res.json(sanitizeBranding(row));});
 app.put('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!row)return res.status(404).json({error:'找不到公司'});const b=req.body||{};const v={title:String(b.title||'').trim(),subtitle:String(b.subtitle||'').trim(),loginTitle:String(b.loginTitle||'').trim(),loginHint:String(b.loginHint||'').trim(),intro:String(b.intro||'').trim(),logoText:String(b.logoText||'').trim(),accent:validHex(b.accent,'#2F6F5E'),accentDark:validHex(b.accentDark,'#204F42'),bg:validHex(b.bg,'#F7F7F4'),panel:validHex(b.panel,'#FFFFFF')};if(!v.title)return res.status(400).json({error:'系統名稱不可空白'});db.prepare('UPDATE tenants SET brand_title=?,brand_subtitle=?,brand_login_title=?,brand_login_hint=?,brand_intro=?,brand_logo_text=?,brand_accent=?,brand_accent_dark=?,brand_bg=?,brand_panel=?,updated_at=? WHERE id=?').run(v.title,v.subtitle,v.loginTitle,v.loginHint,v.intro,v.logoText,v.accent,v.accentDark,v.bg,v.panel,now(),id);res.json({success:true,branding:{tenant_id:id,...v}});});
+app.get('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});res.json({tenant_id:id,copy:readStaffUiCopy(id)});});
+app.put('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});const copy=sanitizeStaffUiCopy(req.body||{},id);writeStaffUiCopy(id,copy);res.json({success:true,tenant_id:id,copy});});
 
 app.get('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   const rows=db.prepare(`SELECT t.*, (SELECT COUNT(*) FROM staff_users u WHERE u.tenant_id=t.id AND u.role='staff') staff_count, (SELECT COUNT(*) FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin') admin_count, (SELECT COUNT(*) FROM communities c WHERE c.tenant_id=t.id) community_count, (SELECT u.employee_id FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_employee_id, (SELECT u.name FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_name, (SELECT u.last_login_at FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_last_login_at, (SELECT u.is_active FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_is_active FROM tenants t ORDER BY CASE WHEN t.status='active' THEN 0 ELSE 1 END,t.id DESC`).all();
@@ -711,6 +745,7 @@ app.delete('/api/admin/staff/:id',requireSuperAdmin,(req,res)=>{const id=Number(
 // ===== 公司管理後台 =====
 app.get('/api/company/branding',requireCompanyAdmin,(req,res)=>{const row=getTenant(req);if(!row)return res.status(404).json({error:'找不到公司'});res.json(sanitizeBranding(row));});
 app.get('/api/staff/branding',requireStaffFiller,(req,res)=>{const row=getTenant(req);if(!row)return res.status(404).json({error:'找不到公司'});res.json(sanitizeBranding(row));});
+app.get('/api/staff/ui-copy',requireStaff,(req,res)=>{const row=getTenant(req);if(!row)return res.status(404).json({error:'找不到公司'});res.json({copy:readStaffUiCopy(row.id)});});
 app.get('/api/company/session',requireCompanyAdmin,(req,res)=>{const u=getUser(req);res.json({loggedIn:true,entry:req.session.entry||'company',user:{employee_id:u.employee_id,name:u.name,admin_level:u.admin_level||'staff',role:u.role,work_type:u.work_type||'internal',permissions:effectivePermissions(u),job_categories:getJobCategories(u)},tenant:getTenant(req)});});
 app.get('/api/company/admins',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const rows=db.prepare("SELECT id,employee_id,name,is_active,admin_level,last_login_at,created_at,updated_at FROM staff_users WHERE tenant_id=? AND role='company_admin' ORDER BY admin_level='owner' DESC,id").all(tenantId(req));res.json({admins:rows,current_user_id:getUser(req).id,current_admin_level:getUser(req).admin_level||'admin'});});
 app.post('/api/company/admins',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const me=getUser(req);if((me.admin_level||'admin')!=='owner')return res.status(403).json({error:'只有公司負責人可以新增公司管理員。一般公司管理員仍可開通總務、會計等一般人員帳號。'});const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'company_admin',tenantId(req),'admin');res.json({success:true,id:info.lastInsertRowid});});
