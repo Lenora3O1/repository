@@ -20,8 +20,17 @@ const QUESTIONS_PATH = path.join(__dirname, 'config', 'questions.json');
 const FORM_CONFIG_PATH = path.join(DATA_DIR, 'form-config.json');
 const MENU_CONFIG_PATH = path.join(DATA_DIR, 'menu-config.json');
 const STAFF_UI_COPY_PATH = path.join(DATA_DIR, 'staff-ui-copy.json');
+const PLATFORM_UI_COPY_PATH = path.join(DATA_DIR, 'platform-ui-copy.json');
 const DEFAULT_STAFF_UI_COPY = {
-  workspaceLoading: '正在讀取您的社區與交接資料，請稍候…',
+  workspaceLoading: '正在讀取資料，請稍候…',
+  moduleDefaultDescription: '這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。',
+  moduleDefaultNote: '您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。',
+  todoDescription: '目前需要處理的工作會顯示在這裡；完成後會自動移到「已封存」。',
+  todoEmpty: '目前尚無代辦事項。',
+  archivedDescription: '已完成的代辦事項會保留在這裡，不會被刪除。',
+  archivedEmpty: '查無符合條件的封存紀錄。',
+  handoverDescription: '交接相關工作集中在這裡；完成後不會一直顯示在工作台首頁。',
+  handoverEmpty: '目前沒有未完成的交接紀錄。',
   sopIntro: '目前登入職務：{{job}}。{{scope}}只會顯示您目前有權限閱讀的內容。',
   sopEmpty: '目前還沒有可閱讀的 SOP。公司基本 SOP 與本案場注意事項會依您的職務自動分流。',
   managerUploadEyebrow: '📤 經理分流上傳',
@@ -29,7 +38,31 @@ const DEFAULT_STAFF_UI_COPY = {
   managerUploadHint: '只要您的身分是經理即可上傳。不論公司內勤或派駐社區的經理，都可以把 SOP 回傳公司管理；駐點經理只會看到自己的派駐社區，內勤經理可選擇本公司啟用中的社區。',
   managerUploadButton: '📤 上傳 SOP',
   managerUploadSubmit: '上傳並回傳公司',
-  managerUploadSuccess: '✅ SOP 已上傳，也已回傳公司管理端。'
+  managerUploadSuccess: '✅ SOP 已上傳，也已回傳公司管理端。',
+  moduleDescriptions: {
+    'todo': '目前需要處理的工作會顯示在這裡；完成後會自動移到「已封存」。',
+    'work-journal': '工作日誌會集中記錄日常工作與處理進度，方便日後追蹤與交接。',
+    'finance': '財務相關工作與資料會依目前帳號權限集中顯示在這裡。',
+    'committee': '管理委員會相關資料與工作會集中顯示在這裡。',
+    'residents': '住戶相關資料與工作會依目前帳號權限顯示在這裡。',
+    'vendors': '廠商聯繫與合作資料會集中顯示在這裡，方便查詢與後續處理。',
+    'handover': '交接相關工作集中在這裡；完成後不會一直顯示在工作台首頁。',
+    'company-resources': '公司提供的文件、資源與工作資訊會集中顯示在這裡。',
+    'shift': '班表與勤務相關工作會集中顯示在這裡。',
+    'finance-income': '收入報表相關資料會依目前帳號權限顯示在這裡。',
+    'finance-payable': '支出與應付相關資料會依目前帳號權限顯示在這裡。',
+    'committee-current': '本屆管理委員會相關資料會集中顯示在這裡。',
+    'committee-monthly': '管理委員會月例會相關資料會集中顯示在這裡。',
+    'committee-owners': '區分所有權人會議相關資料會集中顯示在這裡。',
+    'residents-contact': '住戶聯繫相關資料會集中顯示在這裡。',
+    'residents-owners': '區分所有權人相關資料會集中顯示在這裡。',
+    'residents-tenants': '承租人相關資料會集中顯示在這裡。',
+    'vendors-maintenance': '簽約保養廠商相關資料會集中顯示在這裡。',
+    'vendors-general': '一般廠商相關資料會集中顯示在這裡。',
+    'vendors-special': '特約廠商相關資料會集中顯示在這裡。',
+    'handover-manager': '經理交接清冊相關工作會集中顯示在這裡。',
+    'handover-secretary': '秘書交接清冊相關工作會集中顯示在這裡。'
+  }
 };
 for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
 
@@ -91,23 +124,58 @@ function requireMessageAuditor(req,res,next){
 
 function sanitizeBranding(row){return {tenant_id:row.id,title:row.brand_title||row.name||'物業管理公司',subtitle:row.brand_subtitle||'物業管理公司',loginTitle:row.brand_login_title||'公司管理員登入',loginHint:row.brand_login_hint||'這裡是公司專屬管理後台。登入後可管理人員、社區與公司資料。',intro:row.brand_intro||'這裡只管理您所屬公司的資料。',logoText:row.brand_logo_text||'',accent:row.brand_accent||'#2F6F5E',accentDark:row.brand_accent_dark||'#204F42',bg:row.brand_bg||'#F7F7F4',panel:row.brand_panel||'#FFFFFF'};}
 function validHex(v,fallback){const s=String(v||'').trim();return /^#[0-9a-fA-F]{6}$/.test(s)?s:fallback;}
+function readJsonObject(filePath){
+  try{if(fs.existsSync(filePath))return JSON.parse(fs.readFileSync(filePath,'utf-8'))||{};}catch(e){console.error('ui copy read error:',e);}
+  return {};
+}
+function readPlatformUiCopy(){
+  const saved=readJsonObject(PLATFORM_UI_COPY_PATH);
+  return {...DEFAULT_STAFF_UI_COPY,...saved,moduleDescriptions:{...DEFAULT_STAFF_UI_COPY.moduleDescriptions,...(saved.moduleDescriptions||{})}};
+}
+function writePlatformUiCopy(copy){
+  const current=readPlatformUiCopy();
+  const merged={...current,...copy,moduleDescriptions:{...current.moduleDescriptions,...(copy.moduleDescriptions||{})}};
+  fs.writeFileSync(PLATFORM_UI_COPY_PATH,JSON.stringify(merged,null,2),'utf-8');
+  return merged;
+}
 function readStaffUiCopy(tenantIdValue){
-  let all={};
-  try{if(fs.existsSync(STAFF_UI_COPY_PATH)) all=JSON.parse(fs.readFileSync(STAFF_UI_COPY_PATH,'utf-8'))||{};}catch(e){console.error('staff ui copy read error:',e);}
-  const saved=all&&typeof all==='object'&&all[String(tenantIdValue)]&&typeof all[String(tenantIdValue)]==='object'?all[String(tenantIdValue)]:{};
-  return {...DEFAULT_STAFF_UI_COPY,...saved};
+  // 現階段所有公司共用「平台預設前台自述」。保留舊的公司版資料檔，供未來真正啟用客製覆寫時使用。
+  return readPlatformUiCopy();
 }
 function writeStaffUiCopy(tenantIdValue,copy){
-  let all={};
-  try{if(fs.existsSync(STAFF_UI_COPY_PATH)) all=JSON.parse(fs.readFileSync(STAFF_UI_COPY_PATH,'utf-8'))||{};}catch(e){all={};}
-  all[String(tenantIdValue)]={...readStaffUiCopy(tenantIdValue),...copy};
+  let all=readJsonObject(STAFF_UI_COPY_PATH);
+  const current=readStaffUiCopy(tenantIdValue);
+  all[String(tenantIdValue)]={...current,...copy,moduleDescriptions:{...current.moduleDescriptions,...(copy.moduleDescriptions||{})}};
   fs.writeFileSync(STAFF_UI_COPY_PATH,JSON.stringify(all,null,2),'utf-8');
+  return all[String(tenantIdValue)];
 }
 function sanitizeStaffUiCopy(body,tenantIdValue){
   const current=readStaffUiCopy(tenantIdValue), out={};
   for(const key of Object.keys(DEFAULT_STAFF_UI_COPY)){
+    if(key==='moduleDescriptions')continue;
     const v=String(body?.[key]??current[key]??'').trim();
     out[key]=v.slice(0,1000);
+  }
+  out.moduleDescriptions={};
+  const incoming=body?.moduleDescriptions&&typeof body.moduleDescriptions==='object'?body.moduleDescriptions:{};
+  for(const key of Object.keys(DEFAULT_STAFF_UI_COPY.moduleDescriptions)){
+    const v=String(incoming[key]??current.moduleDescriptions?.[key]??DEFAULT_STAFF_UI_COPY.moduleDescriptions[key]??'').trim();
+    out.moduleDescriptions[key]=v.slice(0,1000);
+  }
+  return out;
+}
+function sanitizePlatformUiCopy(body){
+  const current=readPlatformUiCopy(), out={};
+  for(const key of Object.keys(DEFAULT_STAFF_UI_COPY)){
+    if(key==='moduleDescriptions')continue;
+    const v=String(body?.[key]??current[key]??'').trim();
+    out[key]=v.slice(0,1000);
+  }
+  out.moduleDescriptions={};
+  const incoming=body?.moduleDescriptions&&typeof body.moduleDescriptions==='object'?body.moduleDescriptions:{};
+  for(const key of Object.keys(DEFAULT_STAFF_UI_COPY.moduleDescriptions)){
+    const v=String(incoming[key]??current.moduleDescriptions?.[key]??DEFAULT_STAFF_UI_COPY.moduleDescriptions[key]??'').trim();
+    out.moduleDescriptions[key]=v.slice(0,1000);
   }
   return out;
 }
@@ -693,6 +761,8 @@ app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin
 // ===== 公司系統白標／美編 =====
 app.get('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(Number(req.params.id));if(!row)return res.status(404).json({error:'找不到公司'});res.json(sanitizeBranding(row));});
 app.put('/api/admin/tenants/:id/branding',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const row=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!row)return res.status(404).json({error:'找不到公司'});const b=req.body||{};const v={title:String(b.title||'').trim(),subtitle:String(b.subtitle||'').trim(),loginTitle:String(b.loginTitle||'').trim(),loginHint:String(b.loginHint||'').trim(),intro:String(b.intro||'').trim(),logoText:String(b.logoText||'').trim(),accent:validHex(b.accent,'#2F6F5E'),accentDark:validHex(b.accentDark,'#204F42'),bg:validHex(b.bg,'#F7F7F4'),panel:validHex(b.panel,'#FFFFFF')};if(!v.title)return res.status(400).json({error:'系統名稱不可空白'});db.prepare('UPDATE tenants SET brand_title=?,brand_subtitle=?,brand_login_title=?,brand_login_hint=?,brand_intro=?,brand_logo_text=?,brand_accent=?,brand_accent_dark=?,brand_bg=?,brand_panel=?,updated_at=? WHERE id=?').run(v.title,v.subtitle,v.loginTitle,v.loginHint,v.intro,v.logoText,v.accent,v.accentDark,v.bg,v.panel,now(),id);res.json({success:true,branding:{tenant_id:id,...v}});});
+app.get('/api/admin/ui-copy',requireSuperAdmin,(req,res)=>res.json({scope:'platform',copy:readPlatformUiCopy()}));
+app.put('/api/admin/ui-copy',requireSuperAdmin,(req,res)=>{const copy=sanitizePlatformUiCopy(req.body||{});const saved=writePlatformUiCopy(copy);res.json({success:true,scope:'platform',copy:saved});});
 app.get('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});res.json({tenant_id:id,copy:readStaffUiCopy(id)});});
 app.put('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});const copy=sanitizeStaffUiCopy(req.body||{},id);writeStaffUiCopy(id,copy);res.json({success:true,tenant_id:id,copy});});
 
