@@ -99,7 +99,18 @@ function hasSiteAccess(u){ if(!u||!u.tenant_id||u.role==='company_admin') return
 function hasCompanyAccess(u){ return !!u && (u.role==='company_admin' || ['internal','hybrid'].includes(u.work_type||'')); }
 function requireCompanyAdmin(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && hasCompanyAccess(u)) return next(); return res.status(403).json({error:'這個帳號沒有公司內部後台權限'}); }
 function requireCompanyPermission(key){ return (req,res,next)=>{ const u=getUser(req); if(u?.role==='company_admin') return next(); const a=getCompanyAssignment(u); if(effectivePermissions(u).includes(key)) return next(); return res.status(403).json({error:'您目前沒有這項公司內部功能的權限'}); }; }
-function tenantId(req){ return Number(req.session.tenantId); }
+function isCompanyRequest(req){ return String(req.path||'').startsWith('/api/company/'); }
+function isStaffRequest(req){ return String(req.path||'').startsWith('/api/staff/'); }
+function getScopedSessionUserId(req){
+  if(isCompanyRequest(req)) return req.session?.companyUserId || (req.session?.entry==='company'?req.session?.userId:null);
+  if(isStaffRequest(req)) return req.session?.staffUserId || (req.session?.entry==='staff'?req.session?.userId:null);
+  return req.session?.userId || req.session?.companyUserId || req.session?.staffUserId || null;
+}
+function tenantId(req){
+  if(isCompanyRequest(req)) return Number(req.session?.companyTenantId || (req.session?.entry==='company'?req.session?.tenantId:0));
+  if(isStaffRequest(req)) return Number(req.session?.staffTenantId || (req.session?.entry==='staff'?req.session?.tenantId:0));
+  return Number(req.session?.tenantId || req.session?.companyTenantId || req.session?.staffTenantId || 0);
+}
 function requireMessageUser(req,res,next){
   const u=getUser(req);
   const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null;
@@ -344,7 +355,8 @@ function readQuestions(){return readFormConfig().questions;}
 function cleanData(data){ return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {}; }
 function now(){return new Date().toISOString();}
 function getUser(req){
-  if(req.session?.userId) return db.prepare('SELECT * FROM staff_users WHERE id=?').get(Number(req.session.userId));
+  const scopedId=getScopedSessionUserId(req);
+  if(scopedId) return db.prepare('SELECT * FROM staff_users WHERE id=?').get(Number(scopedId));
   if(req.session?.employeeId && req.session?.tenantId) return db.prepare('SELECT * FROM staff_users WHERE employee_id=? AND tenant_id=?').get(req.session.employeeId, Number(req.session.tenantId));
   return null;
 }
@@ -402,7 +414,7 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
   }
 });
 // ===== 動態工作目錄 =====
-app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);const items=resolveMenu('staff',tenantId(req),u);const p=scheduleGetProfile(tenantId(req),u.id);if(p&&['security','mobile'].includes(p.schedule_role)&&(effectivePermissions(u).includes('schedule')||!items.some(x=>String(x.id)==='staff-schedule'))&&!items.some(x=>String(x.id)==='staff-schedule'))items.push({id:'staff-schedule',parentId:null,icon:'📅',label:'我的班表',action:'staff-schedule',enabled:true});res.json({scope:'staff',items});});
+app.get('/api/staff/menu-config',requireStaff,(req,res)=>{const u=getUser(req);const items=resolveMenu('staff',tenantId(req),u);const p=scheduleGetProfile(tenantId(req),u.id);const scheduleRoles=['admin','security','mobile'];if(p&&scheduleRoles.includes(p.schedule_role)&&!items.some(x=>String(x.id)==='staff-schedule'))items.push({id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true});res.json({scope:'staff',items});});
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{const items=resolveMenu('company',tenantId(req),getUser(req));const ids=new Set(items.map(x=>String(x.id)));const scheduleItems=[{id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},{id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},{id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},{id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},{id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},{id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},{id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}];if(!ids.has('company-schedule')&&(getUser(req)?.role==='company_admin'||effectivePermissions(getUser(req)).includes('schedule')))items.push(...scheduleItems);res.json({scope:'company',items});});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   const c=readMenuConfig();
@@ -534,11 +546,27 @@ app.post('/api/staff/login',(req,res)=>{
   const user=auth.user;
   if(entry==='staff' && user.role!=='company_admin' && !(hasSiteAccess(user) || isSiteManager(user))) return res.status(403).json({error:'此帳號目前沒有可用的工作身分。'});
   if(entry==='company' && user.role!=='company_admin' && !hasCompanyAccess(user)) return res.status(403).json({error:'此帳號目前沒有公司內勤權限。'});
+  const loginScope=loginEntry;
+  if(loginScope==='company'){
+    req.session.companyUserId=user.id; req.session.companyEmployeeId=user.employee_id; req.session.companyTenantId=user.tenant_id;
+  }else{
+    req.session.staffUserId=user.id; req.session.staffEmployeeId=user.employee_id; req.session.staffEmployeeName=user.name; req.session.staffTenantId=user.tenant_id;
+  }
+  // 保留舊欄位給尚未分流的舊 API；新的 /api/company/*、/api/staff/* 會優先使用各自登入身分。
   req.session.userId=user.id; req.session.entry=entry||'staff'; req.session.employeeId=user.employee_id; req.session.employeeName=user.name; req.session.tenantId=user.tenant_id; req.session.role=user.role||'staff';
   db.prepare('UPDATE staff_users SET last_login_at=? WHERE id=?').run(now(),user.id);
   res.json({success:true,user:{id:user.id,employee_id:user.employee_id,name:user.name,role:user.role||'staff',admin_level:user.admin_level||'admin',tenant_id:user.tenant_id,tenant_name:user.tenant_name,tenant_code:user.tenant_code,position:user.position||'',work_type:user.work_type||'site',job_category:user.job_category||'',job_level:user.job_level||'',permissions:parsePermissions(user),job_categories:getJobCategories(user),site_assignments:getSiteAssignments(user),company_assignment:getCompanyAssignment(user)}});
 });
-app.post('/api/staff/logout',(req,res)=>{req.session.destroy(()=>res.json({success:true}));});
+app.post('/api/staff/logout',(req,res)=>{
+  delete req.session.staffUserId; delete req.session.staffEmployeeId; delete req.session.staffEmployeeName; delete req.session.staffTenantId;
+  if(req.session.entry==='staff'){req.session.userId=null;req.session.employeeId=null;req.session.employeeName=null;req.session.tenantId=null;req.session.role=null;req.session.entry=req.session.companyUserId?'company':'';}
+  req.session.save(()=>res.json({success:true}));
+});
+app.post('/api/company/logout',(req,res)=>{
+  delete req.session.companyUserId; delete req.session.companyEmployeeId; delete req.session.companyTenantId;
+  if(req.session.entry==='company'){req.session.userId=null;req.session.employeeId=null;req.session.employeeName=null;req.session.tenantId=null;req.session.role=null;req.session.entry=req.session.staffUserId?'staff':'';}
+  req.session.save(()=>res.json({success:true}));
+});
 app.get('/api/staff/session',(req,res)=>{
   const u=getUser(req); if(!u || !u.is_active || !u.tenant_id) return res.json({loggedIn:false});
   const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(u.tenant_id); if(!t || t.status!=='active') return res.json({loggedIn:false});
