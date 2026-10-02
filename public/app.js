@@ -1,7 +1,10 @@
 let formConfig=null, answers={}, currentPage=0, draftId=null, draftCommunityId=null, autosaveTimer=null, saving=false, dirty=false, communities=[];
+const DEFAULT_STAFF_UI_COPY={workspaceLoading:'正在讀取您的社區與交接資料，請稍候…',sopIntro:'目前登入職務：{{job}}。{{scope}}只會顯示您目前有權限閱讀的內容。',sopEmpty:'目前還沒有可閱讀的 SOP。公司基本 SOP 與本案場注意事項會依您的職務自動分流。',managerUploadEyebrow:'📤 經理分流上傳',managerUploadTitle:'上傳社區 SOP',managerUploadHint:'只要您的身分是經理即可上傳。不論公司內勤或派駐社區的經理，都可以把 SOP 回傳公司管理；駐點經理只會看到自己的派駐社區，內勤經理可選擇本公司啟用中的社區。',managerUploadButton:'📤 上傳 SOP',managerUploadSubmit:'上傳並回傳公司',managerUploadSuccess:'✅ SOP 已上傳，也已回傳公司管理端。'};
+window.__staffUiCopy={...DEFAULT_STAFF_UI_COPY};
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);}catch(e){console.warn('Staff branding load skipped',e)}}
+async function loadStaffUiCopy(){try{const d=await api('/api/staff/ui-copy');window.__staffUiCopy={...DEFAULT_STAFF_UI_COPY,...(d.copy||{})};}catch(e){console.warn('Staff ui copy load skipped',e)}}
 async function boot(){
   // 平台名稱與「表單範本標題」分離，避免公司自訂的表單名稱跑到網站／瀏覽器標題。
   // 例如表單可以叫「社區行政事務回報」，但網站仍維持「社區管理工作平台」。
@@ -19,6 +22,7 @@ async function boot(){
     if(s.loggedIn){
       if(s.entry==='company' || s.user.role==='company_admin'){ location.href='company.html'; return; }
       await applyStaffBranding();
+      await loadStaffUiCopy();
       showHome(s.user);
     }else showLogin();
   }catch(err){
@@ -257,7 +261,7 @@ function showWorkspaceLoading(label){
   const el=$('staffHome');
   if(!el)return;
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
-  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>正在讀取您的社區與交接資料，請稍候…</p></div>`;
+  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>${escapeHtml(window.__staffUiCopy?.workspaceLoading||DEFAULT_STAFF_UI_COPY.workspaceLoading)}</p></div>`;
 }
 function showWorkspaceError(label,err){
   const el=$('staffHome');
@@ -267,20 +271,20 @@ function showWorkspaceError(label,err){
 }
 async function loadSopPage(category,label,scope=''){
   const el=$('staffHome'); if(!el)return;
-  const d=await api(`/api/staff/sops?category=${encodeURIComponent(category||'')}&scope=${encodeURIComponent(scope||'')}`); const rows=d.sops||[]; const viewer=d.viewer||{};
+  const d=await api(`/api/staff/sops?category=${encodeURIComponent(category||'')}&scope=${encodeURIComponent(scope||'')}`); const rows=d.sops||[]; const viewer=d.viewer||{}; window.__sopViewer=viewer;
   const user=window.__staffUser||{};
   const scopeText=scope==='company_basic'?'公司基本 SOP':scope==='community'?'本案場 SOP':category||'全部 SOP';
-  const managerButton=viewer.can_upload?`<div class="panel-lite manager-sop-upload"><strong>📤 經理專用</strong><p class="hint">只要您的身分是經理，不論公司內勤或派駐社區，都可以上傳 SOP。駐點經理只能選自己的派駐社區；公司內勤經理可以選擇本公司啟用中的社區。上傳後會直接回到公司 SOP 管理端留存紀錄。</p><button type="button" class="big-action" onclick="openManagerSopUpload()">📤 上傳 SOP</button></div>`:'';
+  const ui=window.__staffUiCopy||DEFAULT_STAFF_UI_COPY; const managerButton=viewer.can_upload?`<div class="panel-lite manager-sop-upload"><strong>📤 經理專用</strong><p class="hint">${escapeHtml(ui.managerUploadHint)}</p><button type="button" class="big-action" onclick="openManagerSopUpload()">${escapeHtml(ui.managerUploadButton)}</button></div>`:'';
   const items=rows.map(x=>{const target=(x.target_jobs||[]).length?(x.target_jobs||[]).join('、'):'全部駐點人員';const source=x.source_type==='manager'?'案場經理回傳':'公司內勤建立';return `<div class="panel"><div class="section-title">📘 ${escapeHtml(x.title)}</div><div class="hint">${escapeHtml(x.category||'SOP')}　｜　版本 ${escapeHtml(x.version||'1.0')}　｜　${escapeHtml(source)}${x.description?`<br>${escapeHtml(x.description)}`:''}<br>適用：${escapeHtml(target)}</div><div class="modal-actions"><button type="button" onclick="window.open('/api/staff/sops/${x.id}/download','_blank','noopener')">開啟／下載 SOP</button></div></div>`}).join('');
-  el.innerHTML=`<div class="panel"><div class="eyebrow">📚 案場 SOP</div><h1>${escapeHtml(label||'案場 SOP')}</h1><p>目前登入職務：${escapeHtml(user.job_level||user.job_category||'駐點人員')}。${escapeHtml(scopeText)}只會顯示您目前有權限閱讀的內容。</p>${managerButton}</div>${items||'<div class="panel empty">目前還沒有可閱讀的 SOP。公司基本 SOP 與本案場注意事項會依您的職務自動分流。</div>'}`;
+  const sopIntro=String(ui.sopIntro||DEFAULT_STAFF_UI_COPY.sopIntro).replaceAll('{{job}}',String(user.job_level||user.job_category||'駐點人員')).replaceAll('{{scope}}',String(scopeText)); el.innerHTML=`<div class="panel"><div class="eyebrow">📚 案場 SOP</div><h1>${escapeHtml(label||'案場 SOP')}</h1><p>${escapeHtml(sopIntro)}</p>${managerButton}</div>${items||`<div class="panel empty">${escapeHtml(ui.sopEmpty)}</div>`}`;
 }
 function openManagerSopUpload(){
-  const user=window.__staffUser||{}; const assignments=Array.isArray(user.site_assignments)?user.site_assignments:[]; const sopCommunities=Array.isArray(user.sop_upload_communities)?user.sop_upload_communities:[];
+  const user=window.__staffUser||{}; const assignments=Array.isArray(user.site_assignments)?user.site_assignments:[]; const viewer=window.__sopViewer||{}; const sopCommunities=Array.isArray(viewer.upload_communities)?viewer.upload_communities:[];
   const old=document.getElementById('managerSopUploadModal'); if(old)old.remove();
   const modal=document.createElement('div'); modal.id='managerSopUploadModal'; modal.className='modal-backdrop';
-  const communityOptions=sopCommunities.length?sopCommunities:assignments; const options=communityOptions.map(a=>`<option value="${escapeAttr(a.community_id||a.id)}">${escapeHtml(a.community_name||a.name||'未命名案場')}</option>`).join('');
-  modal.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><button class="modal-close" type="button">×</button><div class="eyebrow">📤 經理分流上傳</div><h2>上傳社區 SOP</h2><p class="modal-note">只要您的身分是經理即可上傳。不論公司內勤或派駐社區的經理，都可以把 SOP 回傳公司管理；駐點經理只會看到自己的派駐社區，內勤經理可選擇本公司啟用中的社區。</p><form id="managerSopForm"><label>適用社區</label><select id="managerSopCommunity" required>${options}</select><label>SOP 名稱</label><input id="managerSopTitle" placeholder="例如：本社區夜間巡查注意事項" required><label>版本</label><input id="managerSopVersion" value="1.0"><label>檔案</label><input id="managerSopFile" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.txt" required><label>說明</label><textarea id="managerSopDescription" rows="3" placeholder="可補充本案場特殊注意事項"></textarea><div class="panel-lite"><strong>👥 哪些職務可以看到？</strong><div class="check-list"><label class="check-row"><input type="checkbox" data-manager-target value="秘書" checked> 秘書</label><label class="check-row"><input type="checkbox" data-manager-target value="保全" checked> 保全</label></div></div><div class="modal-actions"><button type="button" class="secondary" id="managerSopCancel">取消</button><button type="submit">上傳並回傳公司</button></div></form></div>`;
-  document.body.appendChild(modal); document.body.classList.add('modal-open'); const close=()=>{modal.remove();document.body.classList.remove('modal-open')}; modal.querySelector('.modal-close').onclick=close; modal.querySelector('#managerSopCancel').onclick=close; modal.querySelector('#managerSopForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('community_id',modal.querySelector('#managerSopCommunity').value);fd.append('title',modal.querySelector('#managerSopTitle').value);fd.append('version',modal.querySelector('#managerSopVersion').value);fd.append('description',modal.querySelector('#managerSopDescription').value);fd.append('target_jobs',JSON.stringify([...modal.querySelectorAll('[data-manager-target]:checked')].map(x=>x.value)));fd.append('file',modal.querySelector('#managerSopFile').files[0]);await api('/api/staff/sops/community-upload',{method:'POST',body:fd});close();await loadSopPage('','案場注意事項','community');alert('✅ SOP 已上傳，也已回傳公司管理端。');}catch(err){alert(err.message)}});
+  const communityOptions=sopCommunities.length?sopCommunities:assignments; const options=communityOptions.length?communityOptions.map(a=>`<option value="${escapeAttr(a.community_id||a.id)}">${escapeHtml(a.community_name||a.name||'未命名案場')}</option>`).join(''):'<option value="">目前沒有可選的啟用社區</option>';
+  modal.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><button class="modal-close" type="button">×</button><div class="eyebrow">${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadEyebrow)}</div><h2>${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadTitle)}</h2><p class="modal-note">${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadHint)}</p><form id="managerSopForm"><label>適用社區</label><select id="managerSopCommunity" required>${options}</select><label>SOP 名稱</label><input id="managerSopTitle" placeholder="例如：本社區夜間巡查注意事項" required><label>版本</label><input id="managerSopVersion" value="1.0"><label>檔案</label><input id="managerSopFile" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.txt" required><label>說明</label><textarea id="managerSopDescription" rows="3" placeholder="可補充本案場特殊注意事項"></textarea><div class="panel-lite"><strong>👥 哪些職務可以看到？</strong><div class="check-list"><label class="check-row"><input type="checkbox" data-manager-target value="秘書" checked> 秘書</label><label class="check-row"><input type="checkbox" data-manager-target value="保全" checked> 保全</label></div></div><div class="modal-actions"><button type="button" class="secondary" id="managerSopCancel">取消</button><button type="submit">${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadSubmit)}</button></div></form></div>`;
+  document.body.appendChild(modal); document.body.classList.add('modal-open'); const close=()=>{modal.remove();document.body.classList.remove('modal-open')}; modal.querySelector('.modal-close').onclick=close; modal.querySelector('#managerSopCancel').onclick=close; modal.querySelector('#managerSopForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('community_id',modal.querySelector('#managerSopCommunity').value);fd.append('title',modal.querySelector('#managerSopTitle').value);fd.append('version',modal.querySelector('#managerSopVersion').value);fd.append('description',modal.querySelector('#managerSopDescription').value);fd.append('target_jobs',JSON.stringify([...modal.querySelectorAll('[data-manager-target]:checked')].map(x=>x.value)));fd.append('file',modal.querySelector('#managerSopFile').files[0]);await api('/api/staff/sops/community-upload',{method:'POST',body:fd});close();await loadSopPage('','案場注意事項','community');alert((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadSuccess);}catch(err){alert(err.message)}});
 }
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
@@ -345,6 +349,7 @@ $('staffLogout').addEventListener('click',async()=>{if(dirty&&draftId)await save
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function escapeAttr(str){return escapeHtml(str)}
 window.newDraft=newDraft;window.continueDraft=continueDraft;window.deleteDraft=deleteDraft;window.saveNow=saveNow;window.backHome=backHome;
 window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&draftId&&dirty)saveNow(true)});
 window.addEventListener('beforeunload',()=>{if(!draftId||!dirty)return;savePageAnswers();fetch(`/api/staff/drafts/${draftId}`,{method:'PUT',keepalive:true,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:answers,current_page:currentPage,community_id:draftCommunityId})}).catch(()=>{})});
