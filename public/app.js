@@ -314,8 +314,23 @@ async function handleWorkspaceMenu(e){
     return;
   }
   if(action==='staff-schedule'){
-    showWorkspaceLoading(label||'我的班表');
-    try{await loadStaffScheduleModule(label||'我的班表');}catch(err){showWorkspaceError(label||'我的班表',err);}
+    showWorkspaceLoading(label||'班表');
+    try{await loadStaffScheduleModule(label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
+    return;
+  }
+  if(action==='staff-schedule-rules'){
+    showWorkspaceLoading(label||'排班表');
+    try{await loadStaffScheduleRules(label||'排班表');}catch(err){showWorkspaceError(label||'排班表',err);}
+    return;
+  }
+  if(action==='staff-schedule-leave'){
+    showWorkspaceLoading(label||'請假／代班');
+    try{await loadStaffScheduleRequests(label||'請假／代班');}catch(err){showWorkspaceError(label||'請假／代班',err);}
+    return;
+  }
+  if(action==='staff-schedule-overtime'){
+    showWorkspaceLoading(label||'加班');
+    try{await loadStaffScheduleOvertime(label||'加班');}catch(err){showWorkspaceError(label||'加班',err);}
     return;
   }
   showWorkspacePlaceholder(label||'工作功能',action);
@@ -362,14 +377,40 @@ window.addEventListener('beforeunload',()=>{if(!draftId||!dirty)return;savePageA
 boot().catch(e=>showMessage(e.message,'error'));
 
 
-// ===== 智慧班表｜現場人員自選休假 V1 =====
-async function loadStaffScheduleModule(label='我的班表'){
+// ===== 智慧班表｜現場行政／保全／機動分流 V2 =====
+function scheduleMonthNowStaff(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}
+async function loadStaffScheduleModule(label='班表'){
   const el=$('staffHome'); if(!el)return;
-  const month=new Date(); const ym=`${month.getFullYear()}-${String(month.getMonth()+1).padStart(2,'0')}`;
-  const d=await api(`/api/staff/schedule/month?month=${encodeURIComponent(ym)}`);
-  const p=d.profile||{}; const days=Array.from({length:new Date(month.getFullYear(),month.getMonth()+1,0).getDate()},(_,i)=>i+1); const map=new Map((d.entries||[]).map(x=>[Number(x.work_date.slice(-2)),x]));
-  el.innerHTML=`<div class="panel staff-schedule-panel"><div class="eyebrow">我的班表</div><h1>📅 ${escapeHtml(label)}</h1><p>${p.schedule_role==='mobile'?'機動人員可支援多個社區；自選休假會與支援社區的保全休假及其他機動人員先選日期自動比對。':'保全自選休假會先保留；未選的休假由勤務主管協助安排。'}</p><div class="staff-schedule-summary"><span>班表身分：<strong>${p.schedule_role==='mobile'?'機動':'保全'}</strong></span><span>月休：<strong>${p.rest_days||0} 天</strong></span><span>自選：<strong>${p.self_select_days||0} 天</strong></span></div><div id="staffScheduleCalendar" class="staff-schedule-calendar">${days.map(day=>{const r=map.get(day);const code=r?.shift_code||'work';const cls=code==='off'?'off':code==='night'?'night':'work';return `<button type="button" class="staff-schedule-day ${cls}" data-day="${day}" title="${code==='off'?'休假':'工作'}"><strong>${day}</strong><small>${code==='off'?'休':code==='night'?'夜':'班'}</small></button>`}).join('')}</div><div class="staff-schedule-note">💡 點選可嘗試自選休假。若日期與支援社區的保全休假或其他機動人員已先選的日期衝突，系統會直接拒絕。</div></div>`;
-  el.querySelectorAll('.staff-schedule-day').forEach(btn=>btn.addEventListener('click',async()=>{const day=Number(btn.dataset.day);const date=`${ym}-${String(day).padStart(2,'0')}`;if(btn.classList.contains('off')){alert('這一天目前已排休。若要調整，請由勤務主管處理。');return;}try{await api('/api/staff/schedule/self-select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({month:ym,work_date:date})});alert(`已自選 ${date} 為休假。`);await loadStaffScheduleModule(label);}catch(e){alert(e.message)}}));
+  const month=scheduleMonthNowStaff();
+  const session=await api('/api/staff/session');
+  const role=String(session?.user?.schedule_role||'');
+  if(role==='admin') return loadStaffAdminCommunitySchedule(el,label,month);
+  const d=await api(`/api/staff/schedule/month?month=${encodeURIComponent(month)}`);
+  const p=d.profile||{};
+  const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>i+1);
+  const map=new Map((d.entries||[]).map(x=>[Number(x.work_date.slice(-2)),x]));
+  const roleName=p.schedule_role==='mobile'?'機動':p.schedule_role==='security'?'保全':'班表';
+  const canSelf=['security','mobile'].includes(p.schedule_role);
+  el.innerHTML=`<div class="panel staff-schedule-panel"><div class="eyebrow">我的班表</div><h1>📅 ${escapeHtml(label)}</h1><p>${p.schedule_role==='mobile'?'機動人員可支援多個社區；自選休假會與支援社區的保全休假及其他機動人員先選日期自動比對。':p.schedule_role==='security'?'保全班表由勤務規則產生；您可在允許範圍內自選指定休假。':'這裡顯示系統產生的正式班表。'}</p><div class="staff-schedule-summary"><span>班表身分：<strong>${escapeHtml(roleName)}</strong></span><span>月休：<strong>${p.rest_days||0} 天</strong></span>${canSelf?`<span>自選：<strong>${p.self_select_days||0} 天</strong></span>`:''}</div><div id="staffScheduleCalendar" class="staff-schedule-calendar">${days.map(day=>{const r=map.get(day);const code=r?.shift_code||'work';const cls=code==='off'?'off':code==='night'?'night':code==='leave'?'leave':'work';return `<button type="button" class="staff-schedule-day ${cls}" data-day="${day}" title="${code==='off'?'休假':code==='leave'?'請假':code==='night'?'夜班':'工作'}"><strong>${day}</strong><small>${code==='off'?'休':code==='leave'?'假':code==='night'?'夜':'班'}</small></button>`}).join('')}</div><div class="staff-schedule-note">${canSelf?'💡 您可以在允許的範圍內自選休假；衝突日期會由系統直接拒絕。':'🔒 此班表由公司／勤務規則統整產生，現場不直接修改公司設定的休假規範。'}</div></div>`;
+  if(canSelf) el.querySelectorAll('.staff-schedule-day').forEach(btn=>btn.addEventListener('click',async()=>{const day=Number(btn.dataset.day);const date=`${month}-${String(day).padStart(2,'0')}`;if(btn.classList.contains('off')){alert('這一天目前已排休。若要調整，請由勤務主管處理。');return;}try{await api('/api/staff/schedule/self-select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({month,work_date:date})});alert(`已自選 ${date} 為休假。`);await loadStaffScheduleModule(label);}catch(e){alert(e.message)}}));
 }
-window.loadStaffScheduleModule=loadStaffScheduleModule;
-(function(){if(document.getElementById('staffScheduleStyles'))return;const s=document.createElement('style');s.id='staffScheduleStyles';s.textContent=`.staff-schedule-summary{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.staff-schedule-summary span{padding:8px 12px;border:1px solid #d8e7e0;border-radius:999px;background:#f5faf7}.staff-schedule-calendar{display:grid;grid-template-columns:repeat(7,minmax(70px,1fr));gap:8px;margin-top:16px}.staff-schedule-day{min-height:68px;border:1px solid #d8e4df;border-radius:10px;background:#fff;text-align:left;padding:8px;cursor:pointer}.staff-schedule-day strong{display:block;font-size:18px}.staff-schedule-day small{display:block;margin-top:5px}.staff-schedule-day.work:hover{background:#eef7f2}.staff-schedule-day.off{background:#fff0f0;color:#a63b3b}.staff-schedule-day.night{background:#eef0ff;color:#3f4d91}.staff-schedule-note{margin-top:14px;padding:12px;border-radius:10px;background:#edf7f1}@media(max-width:700px){.staff-schedule-calendar{grid-template-columns:repeat(4,minmax(60px,1fr))}}`;document.head.appendChild(s)})();
+async function loadStaffAdminCommunitySchedule(el,label,month){
+  const d=await api(`/api/staff/schedule/community?month=${encodeURIComponent(month)}`);
+  const communities=d.communities||[];
+  if(!communities.length){el.innerHTML=`<div class="panel"><div class="eyebrow">社區班表</div><h1>📅 ${escapeHtml(label)}</h1><p>目前沒有可查看的派駐社區。</p></div>`;return;}
+  const byCommunity=new Map();for(const c of communities)byCommunity.set(Number(c.id),[]);for(const r of d.entries||[]){if(byCommunity.has(Number(r.community_id)))byCommunity.get(Number(r.community_id)).push(r);}
+  const rulesBy=new Map((d.rules||[]).map(x=>[Number(x.community_id),x.config||{}]));
+  const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>i+1);
+  el.innerHTML=`<div class="panel staff-schedule-panel"><div class="eyebrow">社區現場完整班表</div><h1>📅 ${escapeHtml(label)}</h1><p>這裡顯示您所屬社區的「所有現場同仁」最終班表。行政、保全、機動由各自規則統整後產生；現場經理／秘書只能查看公司鎖定的規則與結果。</p>${communities.map(c=>{const rows=byCommunity.get(Number(c.id))||[];const staffIds=[...new Set(rows.map(r=>r.staff_id))];const rule=rulesBy.get(Number(c.id))||{};const m=rule.manager||{},sec=rule.secretary||{};return `<section class="staff-community-schedule"><div class="section-title">🏠 ${escapeHtml(c.name)}</div><div class="staff-rule-lock">🔒 公司設定：經理 ${escapeHtml(m.mode==='red_holiday'?'見紅休':m.mode==='rotation'?'輪排休':m.mode==='fixed_monthly'?'固定月休':'依公司規範')}｜秘書 ${escapeHtml(sec.mode==='red_holiday'?'見紅休':sec.mode==='rotation'?'輪排休':sec.mode==='fixed_monthly'?'固定月休':'依公司規範')}<br><small>規則由公司管理端設定，現場不可修改。</small></div>${staffIds.length?`<div class="table-wrap schedule-grid-wrap"><table class="schedule-grid"><thead><tr><th>人員</th>${days.map(i=>`<th>${i}</th>`).join('')}</tr></thead><tbody>${staffIds.map(id=>{const rr=rows.filter(r=>Number(r.staff_id)===Number(id));const first=rr[0]||{};const map=new Map(rr.map(r=>[Number(r.work_date.slice(-2)),r]));return `<tr><th>${escapeHtml(first.staff_name||'')}</th>${days.map(day=>{const r=map.get(day);const code=r?.shift_code||'';const cls=code==='off'?'off':code==='leave'?'leave':code==='night'?'night':code?'work':'';return `<td class="${cls}" title="${escapeAttr(r?.community_name||'')}">${code==='off'?'休':code==='leave'?'假':code==='night'?'夜':code?'班':'—'}</td>`}).join('')}</tr>`}).join('')}</tbody></table></div>`:'<div class="empty">目前尚未產生本社區正式班表。</div>'}</section>`}).join('')}</div>`;
+}
+async function loadStaffScheduleRules(label='排班表'){
+  const el=$('staffHome'); if(!el)return; const d=await api('/api/staff/schedule/rules');
+  el.innerHTML=`<div class="panel"><div class="eyebrow">公司鎖定的排班規則</div><h1>📋 ${escapeHtml(label)}</h1><p>以下規則由公司在社區開通／班表設定時建立。現場經理與秘書只能查看，不能修改，以避免自行異動合約休假規範。</p>${(d.rules||[]).map(r=>{const c=r.config||{},m=c.manager||{},s=c.secretary||{};const mode=x=>x==='red_holiday'?'國定假日見紅休':x==='rotation'?'國定假日輪排休':x==='fixed_monthly'?'固定月休':'依公司設定';return `<div class="staff-rule-card"><h2>🏠 ${escapeHtml(r.name)}</h2><div class="rule-columns"><div><strong>經理</strong><p>${mode(m.mode)}</p><p>月休：${Number(m.rest_days||0)} 天</p></div><div><strong>秘書</strong><p>${mode(s.mode)}</p><p>月休：${Number(s.rest_days||0)} 天</p></div></div><div class="staff-rule-lock">🔒 公司設定｜現場不可修改。如合約變更，請由公司管理端調整。</div></div>`}).join('')||'<div class="empty">目前沒有可查看的社區排班規則。</div>'}</div>`;
+}
+async function loadStaffScheduleRequests(label='請假／代班'){const el=$('staffHome');if(!el)return;const d=await api('/api/staff/schedule/requests');el.innerHTML=`<div class="panel"><div class="eyebrow">現場行政紀錄</div><h1>📝 ${escapeHtml(label)}</h1><p>這裡顯示您所屬社區的請假／代班紀錄；正式班表仍由公司規則與核准流程統整。</p>${renderStaffScheduleRequestRows(d.rows||[])}</div>`;}
+function renderStaffScheduleRequestRows(rows){return rows.length?`<div class="table-wrap"><table><thead><tr><th>日期</th><th>人員</th><th>社區</th><th>類型</th><th>代班</th><th>原因</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.work_date)}</td><td>${escapeHtml(r.staff_name)}</td><td>${escapeHtml(r.community_name||'—')}</td><td>${r.request_type==='cover'?'代班':'請假'}</td><td>${escapeHtml(r.target_staff_name||'—')}</td><td>${escapeHtml(r.reason||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有請假／代班紀錄。</div>';}
+async function loadStaffScheduleOvertime(label='加班'){const el=$('staffHome');if(!el)return;const d=await api('/api/staff/schedule/overtime');el.innerHTML=`<div class="panel"><div class="eyebrow">現場行政紀錄</div><h1>➕ ${escapeHtml(label)}</h1><p>這裡顯示您所屬社區的加班紀錄；加班獨立於基本班表，不會把機動人員綁死在固定工作天數。</p>${renderStaffOvertimeRows(d.rows||[])}</div>`;}
+function renderStaffOvertimeRows(rows){return rows.length?`<div class="table-wrap"><table><thead><tr><th>日期</th><th>人員</th><th>社區</th><th>時數</th><th>原因</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.work_date)}</td><td>${escapeHtml(r.staff_name)}</td><td>${escapeHtml(r.community_name||'—')}</td><td>${r.hours}</td><td>${escapeHtml(r.reason||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有加班紀錄。</div>';}
+window.loadStaffScheduleModule=loadStaffScheduleModule;window.loadStaffScheduleRules=loadStaffScheduleRules;window.loadStaffScheduleRequests=loadStaffScheduleRequests;window.loadStaffScheduleOvertime=loadStaffScheduleOvertime;
+(function(){if(document.getElementById('staffScheduleStylesV2'))return;const s=document.createElement('style');s.id='staffScheduleStylesV2';s.textContent=`.staff-schedule-summary{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.staff-schedule-summary span{padding:8px 12px;border:1px solid #d8e7e0;border-radius:999px;background:#f5faf7}.staff-schedule-calendar{display:grid;grid-template-columns:repeat(7,minmax(70px,1fr));gap:8px;margin-top:16px}.staff-schedule-day{min-height:68px;border:1px solid #d8e4df;border-radius:10px;background:#fff;text-align:left;padding:8px;cursor:pointer}.staff-schedule-day strong{display:block;font-size:18px}.staff-schedule-day small{display:block;margin-top:5px}.staff-schedule-day.work:hover{background:#eef7f2}.staff-schedule-day.off{background:#fff0f0;color:#a63b3b}.staff-schedule-day.night{background:#eef0ff;color:#3f4d91}.staff-schedule-day.leave{background:#fff8df;color:#8a6500}.staff-community-schedule{margin-top:18px;padding-top:14px;border-top:1px solid #dbe7e2}.staff-rule-lock,.staff-rule-card{padding:12px 14px;border:1px solid #d8e7e0;border-radius:10px;background:#f7fbf8;margin:10px 0;line-height:1.7}.staff-rule-card h2{margin:0 0 10px}.rule-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rule-columns>div{padding:12px;background:#fff;border:1px solid #e1ebe7;border-radius:9px}@media(max-width:800px){.staff-schedule-calendar{grid-template-columns:repeat(4,minmax(60px,1fr))}.rule-columns{grid-template-columns:1fr}}`;document.head.appendChild(s)})();
+

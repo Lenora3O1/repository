@@ -42,7 +42,7 @@ function suggestedPermissions(jobCategories=[],workType='site'){
   if(jobs.has('人事')) out.add('manage-staff');
   if(jobs.has('勤務')) out.add('manage-staff');
   if(jobs.has('社區管理')) {out.add('manage-communities');out.add('view-submissions');}
-  if(workType!=='internal' && (jobs.has('社區管理')||jobs.has('秘書')||jobs.has('保全'))) {['todo','work-journal','committee','residents','vendors','handover'].forEach(x=>out.add(x));}
+  if(workType!=='internal' && (jobs.has('社區管理')||jobs.has('秘書')||jobs.has('保全')||jobs.has('機動'))) {['todo','work-journal','committee','residents','vendors','handover'].forEach(x=>out.add(x));out.add('schedule');}
   if(!out.size) out.add(workType==='internal'?'company-resources':'todo');
   return [...out];
 }
