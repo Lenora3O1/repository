@@ -62,12 +62,12 @@ $('logoutBtn').addEventListener('click',async()=>{await api('/api/company/logout
 $('staffEntryLink')?.addEventListener('click',async e=>{e.preventDefault();await api('/api/staff/logout',{method:'POST'});location.href='/';});
 
 
-document.addEventListener('workspace-menu',e=>{
+document.addEventListener('workspace-menu',async e=>{
   const a=e.detail?.action;
   const tabs=['overview','staff','communities','submissions','templates'];
   if(tabs.includes(a)){document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));for(const id of tabs){const el=$(`tab-${id}`);if(el)el.style.display=a===id?'block':'none';}return;}
   if(['schedule-month','schedule-staff','schedule-community','schedule-swap','schedule-leave','schedule-overtime'].includes(a)){openScheduleModule(a,e.detail?.label||'班表');return;}
-  if(a && a!=='group') openCompanyModal('🚧 功能模組',`<div class="modal-note">你點選的是「${escapeHtml(e.detail?.label||'此功能')}」。這個模組已經放進公司工作目錄，下一階段可以再接上實際資料與權限。</div><div class="modal-actions"><button onclick="closeCompanyModal(this)">知道了</button></div>`);
+  if(a==='sop'){showWorkspaceLoading(e.detail?.label||'案場 SOP 管理');try{await ensureSopCompanyModule();await window.SOPCompanyModule.render(document.querySelector('#workspace')||document.querySelector('main')||document.body,e.detail?.label||'案場 SOP 管理')}catch(err){showWorkspaceError(e.detail?.label||'案場 SOP 管理',err)}return;} if(a && a!=='group') openCompanyModal('🚧 功能模組',`<div class="modal-note">你點選的是「${escapeHtml(e.detail?.label||'此功能')}」。這個模組尚在建置中。</div><div class="modal-actions"><button onclick="closeCompanyModal(this)">知道了</button></div>`);
 });
 
 for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['overview','staff','communities','submissions','templates'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';});
