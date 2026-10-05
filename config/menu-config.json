@@ -413,5 +413,23 @@
     }
   ],
   "tenants": {},
-  "_schedulePlatformVersion": 1
+  "_schedulePlatformVersion": 1,
+  "admin": [
+    {
+      "id": "platform-rules",
+      "parentId": null,
+      "icon": "⚙️",
+      "label": "平台規則與設定",
+      "action": "platform-rules",
+      "enabled": true
+    },
+    {
+      "id": "platform-rules-schedule",
+      "parentId": "platform-rules",
+      "icon": "↳",
+      "label": "班表與排班規則",
+      "action": "platform-rules-schedule",
+      "enabled": true
+    }
+  ]
 }
