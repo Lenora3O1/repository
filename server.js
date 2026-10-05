@@ -21,6 +21,8 @@ const FORM_CONFIG_PATH = path.join(DATA_DIR, 'form-config.json');
 const MENU_CONFIG_PATH = path.join(DATA_DIR, 'menu-config.json');
 const STAFF_UI_COPY_PATH = path.join(DATA_DIR, 'staff-ui-copy.json');
 const PLATFORM_UI_COPY_PATH = path.join(DATA_DIR, 'platform-ui-copy.json');
+const PLATFORM_RULES_PATH = path.join(DATA_DIR, 'platform-rules.json');
+const PLATFORM_RULES_HISTORY_PATH = path.join(DATA_DIR, 'platform-rules-history.json');
 const DEFAULT_STAFF_UI_COPY = {
   workspaceLoading: '正在讀取資料，請稍候…',
   moduleDefaultDescription: '這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。',
@@ -64,6 +66,58 @@ const DEFAULT_STAFF_UI_COPY = {
     'handover-secretary': '秘書交接清冊相關工作會集中顯示在這裡。'
   }
 };
+const DEFAULT_ADMIN_MENU = [
+  {id:'platform-rules',parentId:null,icon:'⚙️',label:'平台規則與設定',action:'platform-rules',enabled:true},
+  {id:'platform-rules-schedule',parentId:'platform-rules',icon:'↳',label:'班表與排班規則',action:'platform-rules-schedule',enabled:true}
+];
+const DEFAULT_PLATFORM_RULES = {
+  schemaVersion: 1,
+  schedule: {
+    max_consecutive: 6,
+    cross_month_check: true,
+    overflow_action: 'auto_reschedule',
+    holiday_source: 'taiwan_government_calendar',
+    security: {rest_days: 6, self_select_days: 2, max_consecutive: 6, shift: 'day'},
+    mobile: {rest_days: 6, self_select_days: 2, max_consecutive: 6},
+    admin: {
+      manager: {mode: 'red_holiday', rest_days: 8},
+      secretary: {mode: 'rotation', rest_days: 8}
+    }
+  },
+  updated_at: '',
+  updated_by: 'system'
+};
+function cloneJson(x){ return JSON.parse(JSON.stringify(x)); }
+function mergePlatformRules(base, incoming){
+  const out=cloneJson(base);
+  const src=incoming&&typeof incoming==='object'?incoming:{};
+  if(src.schedule&&typeof src.schedule==='object'){
+    for(const k of ['max_consecutive','cross_month_check','overflow_action','holiday_source']) if(src.schedule[k]!==undefined) out.schedule[k]=src.schedule[k];
+    for(const role of ['security','mobile']) if(src.schedule[role]&&typeof src.schedule[role]==='object') out.schedule[role]={...out.schedule[role],...src.schedule[role]};
+    if(src.schedule.admin&&typeof src.schedule.admin==='object') for(const role of ['manager','secretary']) if(src.schedule.admin[role]&&typeof src.schedule.admin[role]==='object') out.schedule.admin[role]={...out.schedule.admin[role],...src.schedule.admin[role]};
+  }
+  out.schemaVersion=1; return out;
+}
+function readPlatformRules(){
+  let saved={};
+  try{if(fs.existsSync(PLATFORM_RULES_PATH)) saved=JSON.parse(fs.readFileSync(PLATFORM_RULES_PATH,'utf-8'));}catch(e){console.error('platform rules read error',e);}
+  const rules=mergePlatformRules(DEFAULT_PLATFORM_RULES,saved);
+  if(!rules.updated_at){rules.updated_at=now();rules.updated_by='system';try{fs.writeFileSync(PLATFORM_RULES_PATH,JSON.stringify(rules,null,2),'utf-8');}catch{}}
+  return rules;
+}
+function writePlatformRules(input, actor='system'){
+  const current=readPlatformRules();
+  const next=mergePlatformRules(current,input);
+  next.updated_at=now(); next.updated_by=String(actor||'super_admin');
+  let history=[];
+  try{if(fs.existsSync(PLATFORM_RULES_HISTORY_PATH)) history=JSON.parse(fs.readFileSync(PLATFORM_RULES_HISTORY_PATH,'utf-8'));}catch{}
+  if(!Array.isArray(history)) history=[];
+  history.unshift({version:history.length+1,updated_at:next.updated_at,updated_by:next.updated_by,rules:cloneJson(next)});
+  history=history.slice(0,50);
+  fs.writeFileSync(PLATFORM_RULES_PATH,JSON.stringify(next,null,2),'utf-8');
+  fs.writeFileSync(PLATFORM_RULES_HISTORY_PATH,JSON.stringify(history,null,2),'utf-8');
+  return next;
+}
 for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
 
 const sopUpload=multer({
@@ -250,6 +304,8 @@ function readMenuConfig(){
   if(!fs.existsSync(MENU_CONFIG_PATH)) fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(defaultMenuConfig(),null,2),'utf-8');
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
+  const seedConfig=defaultMenuConfig();
+  if(!Array.isArray(c.admin)) c.admin=Array.isArray(seedConfig.admin)?seedConfig.admin.map(x=>({...x})):DEFAULT_ADMIN_MENU.map(x=>({...x}));
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
   // V5.9：平台預設與企業目錄必須完全隔離。
   // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
@@ -473,6 +529,7 @@ app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   res.json({scope:'staff',items});
 });
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
+app.get('/admin', (req,res)=>res.sendFile(path.join(__dirname,'public','admin.html')));
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   const c=readMenuConfig();
   const tid=req.query?.tenant_id?Number(req.query.tenant_id):null;
@@ -486,7 +543,7 @@ app.put('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   try{
     const current=readMenuConfig();
     const scope=req.body?.scope;
-    if(!['staff','company'].includes(scope)) return res.status(400).json({error:'目錄類型不正確'});
+    if(!['staff','company','admin'].includes(scope)) return res.status(400).json({error:'目錄類型不正確'});
     const items=cleanMenuItems(req.body?.items); if(!items) return res.status(400).json({error:'目錄格式錯誤'});
     const tid=req.body?.tenant_id?Number(req.body.tenant_id):null;
     if(tid){
@@ -885,6 +942,33 @@ app.post('/api/admin/tenants/:id/admins',requireSuperAdmin,(req,res)=>{const ten
 app.put('/api/admin/company-admins/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND role='company_admin'").get(id);if(!u)return res.status(404).json({error:'找不到公司管理員'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');if(!name)return res.status(400).json({error:'姓名不可空白'});if(u.admin_level==='owner'&&!active)return res.status(400).json({error:'公司負責人不能由這裡停用，請先指定新的負責人'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,updated_at=? WHERE id=?').run(name,active?1:0,p.hash,p.salt,t,id);}else db.prepare('UPDATE staff_users SET name=?,is_active=?,updated_at=? WHERE id=?').run(name,active?1:0,t,id);res.json({success:true});});
 app.post('/api/admin/tenants/:id/admin/reset-password',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const password=String(req.body?.password||'');if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const u=db.prepare("SELECT id FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(id);if(!u)return res.status(404).json({error:'找不到公司負責人'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET password_hash=?,password_salt=?,updated_at=? WHERE id=?').run(p.hash,p.salt,now(),u.id);res.json({success:true});});
 
+app.get('/api/admin/platform-rules',requireSuperAdmin,(req,res)=>{
+  res.json({scope:'platform',rules:readPlatformRules()});
+});
+app.put('/api/admin/platform-rules',requireSuperAdmin,(req,res)=>{
+  try{
+    const body=req.body&&typeof req.body==='object'?req.body:{};
+    const s=body.schedule&&typeof body.schedule==='object'?body.schedule:{};
+    const max=Math.max(1,Math.min(31,Number(s.max_consecutive||6)));
+    const overflow=['auto_reschedule','warn_only','block_generation'].includes(String(s.overflow_action))?String(s.overflow_action):'auto_reschedule';
+    const next={schedule:{
+      max_consecutive:max,
+      cross_month_check:body.schedule?.cross_month_check!==false,
+      overflow_action:overflow,
+      holiday_source:'taiwan_government_calendar',
+      security:{rest_days:Math.max(0,Math.min(31,Number(s.security?.rest_days??6))),self_select_days:Math.max(0,Math.min(31,Number(s.security?.self_select_days??2))),max_consecutive:Math.max(1,Math.min(31,Number(s.security?.max_consecutive??max))),shift:['day','night'].includes(String(s.security?.shift))?String(s.security.shift):'day'},
+      mobile:{rest_days:Math.max(0,Math.min(31,Number(s.mobile?.rest_days??6))),self_select_days:Math.max(0,Math.min(31,Number(s.mobile?.self_select_days??2))),max_consecutive:Math.max(1,Math.min(31,Number(s.mobile?.max_consecutive??max)))},
+      admin:{manager:{mode:['red_holiday','rotation','fixed_monthly'].includes(String(s.admin?.manager?.mode))?String(s.admin.manager.mode):'red_holiday',rest_days:Math.max(0,Math.min(31,Number(s.admin?.manager?.rest_days??8)))},secretary:{mode:['red_holiday','rotation','fixed_monthly'].includes(String(s.admin?.secretary?.mode))?String(s.admin.secretary.mode):'rotation',rest_days:Math.max(0,Math.min(31,Number(s.admin?.secretary?.rest_days??8)))}}
+    }};
+    const saved=writePlatformRules(next,`super_admin:${ADMIN_USER}`);
+    res.json({success:true,rules:saved});
+  }catch(e){res.status(400).json({error:e.message||'平台規則儲存失敗'});}
+});
+app.get('/api/admin/platform-rules/history',requireSuperAdmin,(req,res)=>{
+  let history=[];try{if(fs.existsSync(PLATFORM_RULES_HISTORY_PATH)) history=JSON.parse(fs.readFileSync(PLATFORM_RULES_HISTORY_PATH,'utf-8'));}catch{}
+  res.json({history:Array.isArray(history)?history:[]});
+});
+
 app.get('/api/admin/submissions',requireSuperAdmin,(req,res)=>{
   const rows=db.prepare(`SELECT s.id,s.created_at,s.updated_at,s.employee_id,s.employee_name,s.tenant_id,s.community_id,s.data,t.name tenant_name,c.name community_name FROM submissions s LEFT JOIN tenants t ON t.id=s.tenant_id LEFT JOIN communities c ON c.id=s.community_id ORDER BY s.id DESC`).all();
   res.json({submissions:rows.map(r=>({...r,data:JSON.parse(r.data)})),questions:readQuestions()});
@@ -916,7 +1000,8 @@ app.get('/api/company/personnel-archive',requireCompanyAdmin,requireCompanyPermi
 app.delete('/api/company/staff/:id',requireCompanyAdmin,(req,res)=>res.status(400).json({error:'請使用「停用」、「離職」或「黑名單」處理人員狀態；離職與黑名單會封存人事資料並刪除登入帳號。'}));
 
 app.get('/api/company/communities',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>res.json(db.prepare('SELECT * FROM communities WHERE tenant_id=? ORDER BY status DESC,name').all(tenantId(req))));
-app.post('/api/company/communities',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const name=String(req.body?.name||'').trim();if(!name)return res.status(400).json({error:'社區名稱不可空白'});const t=now();const tx=db.transaction(()=>{const info=db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tenantId(req),name,'active',t,t);const cid=Number(info.lastInsertRowid);const defaults={admin:{manager:{mode:'red_holiday',rest_days:8,red_dates:[]},secretary:{mode:'rotation',rest_days:8,red_dates:[]}},security:{rest_days:6,self_select_days:2,max_consecutive:6,shift:'day'},mobile:{rest_days:6,self_select_days:2,max_consecutive:6}};for(const [category,config] of Object.entries(defaults))db.prepare('INSERT INTO schedule_rules (tenant_id,community_id,category,config_json,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id,category) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at').run(tenantId(req),cid,category,JSON.stringify(config),t,t);return cid;});try{const id=tx();res.json({success:true,id});}catch(e){res.status(500).json({error:'新增社區失敗，請稍後再試。'});}});
+app.post('/api/company/communities',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const name=String(req.body?.name||'').trim();if(!name)return res.status(400).json({error:'社區名稱不可空白'});const t=now();const tx=db.transaction(()=>{const info=db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tenantId(req),name,'active',t,t);const cid=Number(info.lastInsertRowid);const pr=schedulePlatformRules();
+  const defaults={admin:{manager:{mode:pr.admin.manager.mode,rest_days:pr.admin.manager.rest_days,red_dates:[]},secretary:{mode:pr.admin.secretary.mode,rest_days:pr.admin.secretary.rest_days,red_dates:[]}},security:{...pr.security},mobile:{...pr.mobile}};for(const [category,config] of Object.entries(defaults))db.prepare('INSERT INTO schedule_rules (tenant_id,community_id,category,config_json,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id,category) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at').run(tenantId(req),cid,category,JSON.stringify(config),t,t);return cid;});try{const id=tx();res.json({success:true,id});}catch(e){res.status(500).json({error:'新增社區失敗，請稍後再試。'});}});
 app.put('/api/company/communities/:id',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const id=Number(req.params.id);const c=db.prepare('SELECT * FROM communities WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!c)return res.status(404).json({error:'找不到社區'});const name=String(req.body?.name||c.name).trim();const status=req.body?.status===undefined?c.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'社區名稱不可空白'});db.prepare('UPDATE communities SET name=?,status=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,status,now(),id,tenantId(req));res.json({success:true});});
 app.get('/api/company/staff/:id/communities',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT id FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});const rows=db.prepare('SELECT c.id,c.name,c.status,CASE WHEN sc.staff_id IS NULL THEN 0 ELSE 1 END assigned FROM communities c LEFT JOIN staff_communities sc ON sc.community_id=c.id AND sc.staff_id=? WHERE c.tenant_id=? ORDER BY c.name').all(id,tenantId(req));res.json(rows);});
 app.put('/api/company/staff/:id/communities',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND tenant_id=?").get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin')return res.status(400).json({error:'公司管理員不需要設定社區權限'});const ids=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):[];const valid=new Set(db.prepare('SELECT id FROM communities WHERE tenant_id=?').all(tenantId(req)).map(x=>x.id));if(ids.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的社區'});const cats=getJobCategories(u),perms=parsePermissions(u);const tx=db.transaction(()=>{db.prepare('DELETE FROM staff_communities WHERE staff_id=?').run(id);const ins=db.prepare('INSERT INTO staff_communities (staff_id,community_id) VALUES (?,?)');for(const cid of ids)ins.run(id,cid);});tx();syncWorkAssignments(id,tenantId(req),u.work_type==='internal'?'internal':(u.work_type==='hybrid'?'hybrid':'site'),ids,cats,u.job_level||'',perms);res.json({success:true});});
@@ -1052,6 +1137,14 @@ app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const 
 
 const SCHEDULE_MENU_ITEMS = PLATFORM_COMPANY_SCHEDULE_MENU;
 
+function schedulePlatformRules(){ return readPlatformRules().schedule; }
+function scheduleEffectiveRule(tenantIdValue, communityId, category){
+  const platform=schedulePlatformRules();
+  const base=category==='admin'?platform.admin:(platform[category]||{});
+  const local=scheduleGetRule(tenantIdValue,communityId,category).config||{};
+  if(category==='admin') return {manager:{...platform.admin.manager,...(local.manager||{})},secretary:{...platform.admin.secretary,...(local.secretary||{})}};
+  return {...base,...local};
+}
 function scheduleEnsureSchema(){
   db.exec(`
     CREATE TABLE IF NOT EXISTS schedule_profiles (
@@ -1166,9 +1259,10 @@ function scheduleSyncProfileFromStaff(tenantIdValue,staffId){
     return null;
   }
   const assigned=getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);
-  const defaultShift=existing?.default_shift || (role==='security'?'day':'');
-  const restDays=existing?.rest_days!=null?Number(existing.rest_days):(role==='security'||role==='mobile'?6:8);
-  const selfDays=existing?.self_select_days!=null?Number(existing.self_select_days):Math.min(2,restDays);
+  const pr=schedulePlatformRules();
+  const defaultShift=existing?.default_shift || (role==='security'?(pr.security.shift||'day'):'');
+  const restDays=existing?.rest_days!=null?Number(existing.rest_days):(role==='security'?Number(pr.security.rest_days||6):role==='mobile'?Number(pr.mobile.rest_days||6):Number(pr.admin.manager.rest_days||8));
+  const selfDays=existing?.self_select_days!=null?Number(existing.self_select_days):Math.min(role==='security'?Number(pr.security.self_select_days||2):role==='mobile'?Number(pr.mobile.self_select_days||2):0,restDays);
   const notes=existing?.notes||'';
   db.prepare(`INSERT INTO schedule_profiles (tenant_id,staff_id,schedule_role,default_shift,rest_days,self_select_days,community_ids_json,notes,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -1182,9 +1276,11 @@ function scheduleGetProfile(tenantIdValue,staffId){
   const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1').get(staffId,tenantIdValue);
   if(!u) return null;
   const role=scheduleDefaultRole(u);
-  const defaultShift=role==='security'?'day':'';
-  const restDays=role==='security'||role==='mobile'?6:8;
-  return {tenant_id:tenantIdValue,staff_id:staffId,schedule_role:role,default_shift:defaultShift,rest_days:restDays,self_select_days:2,community_ids:getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean),notes:''};
+  const pr=schedulePlatformRules();
+  const defaultShift=role==='security'?(pr.security.shift||'day'):'';
+  const restDays=role==='security'?Number(pr.security.rest_days||6):role==='mobile'?Number(pr.mobile.rest_days||6):Number(pr.admin.manager.rest_days||8);
+  const selfDays=role==='security'?Number(pr.security.self_select_days||2):role==='mobile'?Number(pr.mobile.self_select_days||2):0;
+  return {tenant_id:tenantIdValue,staff_id:staffId,schedule_role:role,default_shift:defaultShift,rest_days:restDays,self_select_days:selfDays,community_ids:getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean),notes:''};
 }
 function scheduleUpsertProfile(tenantIdValue,staffId,payload){
   const u=db.prepare('SELECT id,is_active FROM staff_users WHERE id=? AND tenant_id=?').get(staffId,tenantIdValue); if(!u)return null;
@@ -1201,11 +1297,32 @@ function scheduleUpsertProfile(tenantIdValue,staffId,payload){
     .run(tenantIdValue,staffId,role,shift,rest,self,JSON.stringify(cids),String(payload.notes||'').slice(0,500),t,t);
   return scheduleGetProfile(tenantIdValue,staffId);
 }
+function scheduleLegacyDefault(category){
+  if(category==='security') return {rest_days:6,self_select_days:2,max_consecutive:6,shift:'day'};
+  if(category==='mobile') return {rest_days:6,self_select_days:2,max_consecutive:6};
+  return {manager:{mode:'red_holiday',rest_days:8,red_dates:[]},secretary:{mode:'rotation',rest_days:8,red_dates:[]}};
+}
+function scheduleRuleUsesPlatform(category,config){
+  if(!config || config.use_platform_defaults!==undefined) return config?.use_platform_defaults!==false;
+  const legacy=scheduleLegacyDefault(category);
+  return JSON.stringify(config)===JSON.stringify(legacy);
+}
 function scheduleGetRule(tenantIdValue,communityId,category){
+  const platform=schedulePlatformRules();
   const r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS ? AND category=?').get(tenantIdValue,communityId??null,category);
-  if(r)return {...r,config:scheduleJson(r.config_json,{})};
-  const defaults=category==='security'?{rest_days:6,self_select_days:2,max_consecutive:6,shift:'day'}:category==='mobile'?{rest_days:6,self_select_days:2,max_consecutive:6}: {manager:{mode:'red_holiday',rest_days:8,red_dates:[]},secretary:{mode:'rotation',rest_days:8,red_dates:[]}};
-  return {tenant_id:tenantIdValue,community_id:communityId??null,category,config:defaults};
+  if(!r){
+    const config=category==='security'?{...platform.security,use_platform_defaults:true}:category==='mobile'?{...platform.mobile,use_platform_defaults:true}:{manager:{...platform.admin.manager,red_dates:[]},secretary:{...platform.admin.secretary,red_dates:[]},use_platform_defaults:true};
+    return {tenant_id:tenantIdValue,community_id:communityId??null,category,config};
+  }
+  let local=scheduleJson(r.config_json,{});
+  let uses=scheduleRuleUsesPlatform(category,local);
+  if(local.use_platform_defaults===undefined){
+    local={...local,use_platform_defaults:uses};
+    try{db.prepare('UPDATE schedule_rules SET config_json=?,updated_at=? WHERE id=?').run(JSON.stringify(local),now(),r.id);}catch{}
+  }
+  if(!uses) return {...r,config:local};
+  if(category==='admin') return {...r,config:{manager:{...platform.admin.manager,...(local.manager||{}),red_dates:(local.manager?.red_dates||[])},secretary:{...platform.admin.secretary,...(local.secretary||{}),red_dates:(local.secretary?.red_dates||[])},use_platform_defaults:true}};
+  return {...r,config:{...platform[category],...local,use_platform_defaults:true}};
 }
 function scheduleSetRule(tenantIdValue,communityId,category,config){
   if(!['admin','security','mobile'].includes(category))throw new Error('班表類別不正確');
@@ -1218,12 +1335,24 @@ function scheduleListStaff(tenantIdValue){
   return rows.map(u=>{const p=scheduleGetProfile(tenantIdValue,u.id);return {...u,job_categories:getJobCategories(u),schedule_profile:p,site_assignments:getSiteAssignments(u)};});
 }
 function scheduleValidateEntries(tenantIdValue,month){
-  const rows=db.prepare('SELECT * FROM schedule_entries WHERE tenant_id=? AND month=? ORDER BY work_date,staff_id').all(tenantIdValue,month);
-  const byStaff={};for(const r of rows)(byStaff[r.staff_id]??=[]).push(r);
-  const problems=[];
+  const m=scheduleMonth(month); const rows=db.prepare('SELECT * FROM schedule_entries WHERE tenant_id=? AND month=? ORDER BY work_date,staff_id').all(tenantIdValue,m);
+  const byStaff={}; for(const r of rows)(byStaff[r.staff_id]??=[]).push(r);
+  const problems=[]; const pr=schedulePlatformRules();
   for(const [sid,list] of Object.entries(byStaff)){
+    const first=list[0]; const communityId=first?.community_id??null; const category=first?.category||'security';
+    const rule=category==='admin'?pr:{...pr[category]};
+    const max=Math.max(1,Number(rule.max_consecutive||pr.max_consecutive||6));
     const work=new Set(list.filter(x=>x.shift_code!=='off'&&x.shift_code!=='leave').map(x=>x.work_date));
-    let streak=0;for(const d of scheduleWorkdays(month)){if(work.has(d)){streak++;if(streak>6)problems.push({type:'max-consecutive',staff_id:Number(sid),date:d,message:'連續工作超過 6 天'});}else streak=0;}
+    let streak=0;
+    if(pr.cross_month_check){
+      const prev=new Date(`${m}-01T00:00:00Z`); prev.setUTCDate(prev.getUTCDate()-1); const prevMonth=prev.toISOString().slice(0,7);
+      const prior=db.prepare("SELECT work_date,shift_code FROM schedule_entries WHERE tenant_id=? AND staff_id=? AND month=? AND work_date>=? ORDER BY work_date DESC").all(tenantIdValue,Number(sid),prevMonth,`${prevMonth}-${String(Math.max(1,31-max)).padStart(2,'0')}`);
+      for(const r of prior){if(r.shift_code==='off'||r.shift_code==='leave')break; streak++; if(streak>=max) break;}
+    }
+    for(const d of scheduleWorkdays(m)){
+      if(work.has(d)){streak++;if(streak>max)problems.push({type:'max-consecutive',staff_id:Number(sid),date:d,community_id:communityId,category,message:`連續工作超過 ${max} 天`});}
+      else streak=0;
+    }
   }
   return problems;
 }
@@ -1280,17 +1409,17 @@ async function scheduleGenerate(tenantIdValue,month,category,communityId,created
   for(const person of profiles){
     const p=person.schedule_profile,jobs=person.job_categories||[],cids=(p.community_ids||[]).filter(Boolean);
     if(category==='mobile'&&!cids.length)continue;
-    const targetCommunity=category==='mobile'?null:(communityId||cids[0]||null);const rule=scheduleGetRule(tenantIdValue,targetCommunity,category).config||{};
+    const targetCommunity=category==='mobile'?null:(communityId||cids[0]||null);const rule=scheduleEffectiveRule(tenantIdValue,targetCommunity,category);
     let totalRest=Number(p.rest_days||rule.rest_days||6),selfDays=Math.min(Number(p.self_select_days||rule.self_select_days||2),totalRest),mode='rotation';
     if(category==='admin'){const isManager=jobs.includes('社區管理')||person.job_level==='經理';const sub=isManager?(rule.manager||{}):(rule.secretary||{});mode=sub.mode||'rotation';totalRest=Number(sub.rest_days||p.rest_days||8);selfDays=0;}
     const existingSelf=db.prepare("SELECT work_date FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").all(tenantIdValue,month,person.id).map(x=>x.work_date);
     const preferred=new Set(existingSelf.slice(0,selfDays));
     if(category==='admin'){if(mode==='red_holiday')holidayDates.forEach(d=>preferred.add(d));else if(mode==='rotation')for(const d of (rotationAssignments.get(person.id)||[]))preferred.add(d);}
-    const off=schedulePickRestDays(days,totalRest,preferred,Number(rule.max_consecutive||6));
+    const off=schedulePickRestDays(days,totalRest,preferred,Number(rule.max_consecutive||schedulePlatformRules().max_consecutive||6));
     let ci=0;
     for(const d of days){const isOff=off.has(d);let cid=targetCommunity;if(category==='mobile'&&!isOff){cid=cids[ci%cids.length];ci++;}if(category==='mobile'&&isOff)cid=cids.length?cids[Math.max(0,(ci-1)%cids.length)]:null;const shift=category==='security'?(p.default_shift||rule.shift||'day'):'work';scheduleUpsertEntry(tenantIdValue,{staff_id:person.id,community_id:cid,work_date:d,category,shift_code:isOff?'off':shift,source:'auto'},createdBy);created++;}
   }
-  return {created,problems:scheduleValidateEntries(tenantIdValue,month),holiday_dates:holidayDates,holiday_source:'台灣政府辦公日曆資料；若資料服務暫時不可用則使用內建年度備援'};
+  return {created,problems:scheduleValidateEntries(tenantIdValue,month),holiday_dates:holidayDates,holiday_source:'台灣政府辦公日曆資料；若資料服務暫時不可用則使用內建年度備援',platform_rules:schedulePlatformRules()};
 }
 
 const _scheduleOriginalCompanyMenuConfig = app._scheduleOriginalCompanyMenuConfig;
