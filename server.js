@@ -529,7 +529,8 @@ app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   res.json({scope:'staff',items});
 });
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
-app.get('/admin', (req,res)=>res.sendFile(path.join(__dirname,'public','admin.html')));
+app.get('/admin', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
+app.get('/admin.html', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
   const c=readMenuConfig();
   const tid=req.query?.tenant_id?Number(req.query.tenant_id):null;
