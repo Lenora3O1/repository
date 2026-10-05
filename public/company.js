@@ -47,6 +47,27 @@ function suggestedPermissions(jobCategories=[],workType='site'){
   return [...out];
 }
 const $=id=>document.getElementById(id);
+let __sopCompanyModulePromise=null;
+async function ensureSopCompanyModule(){
+  if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return window.SOPCompanyModule;
+  if(__sopCompanyModulePromise) return __sopCompanyModulePromise;
+  __sopCompanyModulePromise=new Promise((resolve,reject)=>{
+    const existing=document.querySelector('script[data-sop-company-module]');
+    if(existing){
+      existing.addEventListener('load',()=>resolve(window.SOPCompanyModule));
+      existing.addEventListener('error',()=>reject(new Error('SOP 模組載入失敗')));
+      return;
+    }
+    const script=document.createElement('script');
+    script.src='/modules/sop-company.js?v=12';
+    script.async=true;
+    script.dataset.sopCompanyModule='1';
+    script.onload=()=>window.SOPCompanyModule?resolve(window.SOPCompanyModule):reject(new Error('SOP 模組載入後沒有初始化'));
+    script.onerror=()=>reject(new Error('SOP 模組檔案無法載入，請確認 /modules/sop-company.js 已部署'));
+    document.head.appendChild(script);
+  });
+  try{return await __sopCompanyModulePromise;}finally{__sopCompanyModulePromise=null;}
+}
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function applyCompanyBranding(){try{const b=await api('/api/company/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);if(b.logoText)$('companyBrand').textContent=b.logoText;else if(b.title)$('companyBrand').textContent=b.title;if(b.subtitle)$('tenantName').textContent=b.subtitle;if(b.loginTitle)$('companyLoginTitle').textContent='🔐 '+b.loginTitle;if(b.loginHint)$('companyLoginHint').textContent=b.loginHint;if(b.intro)$('companyIntro').textContent=b.intro;}catch(e){console.warn('Company branding load failed',e)}}
 
