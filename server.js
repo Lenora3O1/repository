@@ -9,6 +9,15 @@ const { generateDocx } = require('./generate');
 const { analyzeTemplate } = require('./template-analyzer');
 
 const app = express();
+
+// SOP 模組資料欄位升級：保留『來源負責人』與『實際上傳者』兩個概念。
+try {
+  const sopCols = db.prepare("PRAGMA table_info(sops)").all().map(x=>String(x.name));
+  if (sopCols.length) {
+    if (!sopCols.includes('source_manager_staff_id')) db.prepare('ALTER TABLE sops ADD COLUMN source_manager_staff_id INTEGER').run();
+    if (!sopCols.includes('source_manager_name')) db.prepare('ALTER TABLE sops ADD COLUMN source_manager_name TEXT').run();
+  }
+} catch (e) { console.warn('[SOP] 欄位升級略過：', e.message); }
 const PORT = process.env.PORT || 3000;
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
@@ -148,7 +157,7 @@ app.use(session({
 function requireSuperAdmin(req,res,next){ if(req.session?.isAdmin) return next(); return res.status(401).json({error:'尚未登入總後臺或登入已過期'}); }
 function requireStaff(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active') return next(); return res.status(401).json({error:'帳號已停用、公司已停用或尚未登入'}); }
 function requireStaffFiller(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='company_admin' && hasSiteAccess(u)) return next(); return res.status(403).json({error:'此帳號沒有啟用中的駐點案場，請使用公司內部後台或先設定駐點案場'}); }
-function requireStaffSopUser(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='company_admin' && (hasSiteAccess(u)||isSiteManager(u))) return next(); return res.status(403).json({error:'只有有效的公司人員經理或駐點人員可以使用案場 SOP'}); }
+function requireStaffSopUser(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='company_admin' && (hasSiteAccess(u)||isSiteManager(u))) return next(); return res.status(403).json({error:'只有有效的公司人員或駐點人員可以使用案場 SOP'}); }
 function hasSiteAccess(u){ if(!u||!u.tenant_id||u.role==='company_admin') return false; return db.prepare("SELECT 1 FROM staff_communities sc JOIN communities c ON c.id=sc.community_id WHERE sc.staff_id=? AND c.tenant_id=? AND c.status='active' LIMIT 1").get(u.id,u.tenant_id) || db.prepare("SELECT 1 FROM staff_work_assignments a JOIN communities c ON c.id=a.community_id WHERE a.staff_id=? AND a.tenant_id=? AND a.scope_type='site' AND c.status='active' LIMIT 1").get(u.id,u.tenant_id); }
 function hasCompanyAccess(u){ return !!u && (u.role==='company_admin' || ['internal','hybrid'].includes(u.work_type||'')); }
 function requireCompanyAdmin(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && hasCompanyAccess(u)) return next(); return res.status(403).json({error:'這個帳號沒有公司內部後台權限'}); }
@@ -1061,6 +1070,13 @@ function validateSopCommunityIds(ids,tid){
 }
 function auditSop(u,action,id,detail){db.prepare('INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(u.tenant_id,u.employee_id,u.name,action,'sop','sop',String(id),JSON.stringify(detail||{}),now());}
 
+app.get('/api/company/sops/upload-context',requireCompanyAdmin,requireCompanyPermission('manage-sop'),(req,res)=>{
+  const tid=tenantId(req);
+  const communities=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tid);
+  const staff=db.prepare("SELECT id,employee_id,name,job_level,job_category,job_categories_json,work_type,is_active FROM staff_users WHERE tenant_id=? AND is_active=1 ORDER BY name,employee_id").all(tid);
+  const managers=staff.filter(u=>{let cats=[];try{cats=JSON.parse(u.job_categories_json||'[]')}catch{};const vals=[u.job_level,u.job_category,...cats].map(x=>String(x||''));return vals.some(v=>v.includes('經理'));}).map(u=>({id:u.id,employee_id:u.employee_id,name:u.name,job_level:u.job_level,job_category:u.job_category,work_type:u.work_type}));
+  res.json({communities,managers,current_uploader_id:getUser(req).id,current_uploader_name:getUser(req).name||''});
+});
 app.get('/api/company/sops',requireCompanyAdmin,requireCompanyPermission('manage-sop'),(req,res)=>res.json({sops:sopRowsForTenant(tenantId(req))}));
 app.post('/api/company/sops',requireCompanyAdmin,requireCompanyPermission('manage-sop'),sopUpload.single('file'),(req,res)=>{
   if(!req.file)return res.status(400).json({error:'請選擇 SOP 檔案'});
@@ -1070,8 +1086,8 @@ app.post('/api/company/sops',requireCompanyAdmin,requireCompanyPermission('manag
   if(!title){cleanupUploadedFile(req.file);return res.status(400).json({error:'SOP 名稱不可空白'});}
   if(scopeType==='community'&&!ids.length){cleanupUploadedFile(req.file);return res.status(400).json({error:'案場 SOP 至少要指定一個派駐案場'});}
   if(!validateSopCommunityIds(ids,tenantId(req))){cleanupUploadedFile(req.file);return res.status(400).json({error:'包含不屬於本公司的啟用案場'});}
-  const t=now(),u=getUser(req);const info=db.prepare('INSERT INTO sops (tenant_id,title,category,description,version,filename,original_filename,is_active,created_at,updated_at,updated_by,scope_type,target_jobs_json,source_type,uploader_staff_id,uploader_name,review_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),title,category,description,version,req.file.filename,req.file.originalname,1,t,t,u.name||u.employee_id||'',scopeType,JSON.stringify(targets),'company',u.id,u.name||'', 'published');
-  const ins=db.prepare('INSERT INTO sop_communities (sop_id,community_id) VALUES (?,?)');for(const id of ids)ins.run(info.lastInsertRowid,id);auditSop(u,'create',info.lastInsertRowid,{title,category,scope_type:scopeType,version,community_ids:ids,target_jobs:targets,source_type:'company'});res.json({success:true,id:Number(info.lastInsertRowid)});
+  const t=now(),u=getUser(req);let sourceManagerId=Number(req.body?.source_manager_staff_id||0)||null;let sourceManagerName=String(req.body?.source_manager_name||'').trim();if(sourceManagerId){const sm=db.prepare("SELECT id,name,job_level,job_category,job_categories_json FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1").get(sourceManagerId,tenantId(req));if(!sm){cleanupUploadedFile(req.file);return res.status(400).json({error:'來源駐點經理不存在或已停用'});}let cats=[];try{cats=JSON.parse(sm.job_categories_json||'[]')}catch{};if(![sm.job_level,sm.job_category,...cats].some(v=>String(v||'').includes('經理'))){cleanupUploadedFile(req.file);return res.status(400).json({error:'來源負責人必須是經理身分'});}sourceManagerName=sm.name||sourceManagerName;}const info=db.prepare('INSERT INTO sops (tenant_id,title,category,description,version,filename,original_filename,is_active,created_at,updated_at,updated_by,scope_type,target_jobs_json,source_type,uploader_staff_id,uploader_name,review_status,source_manager_staff_id,source_manager_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),title,category,description,version,req.file.filename,req.file.originalname,1,t,t,u.name||u.employee_id||'',scopeType,JSON.stringify(targets),sourceManagerId?'manager-assisted':'company',u.id,u.name||'', 'published',sourceManagerId,sourceManagerName||null);
+  const ins=db.prepare('INSERT INTO sop_communities (sop_id,community_id) VALUES (?,?)');for(const id of ids)ins.run(info.lastInsertRowid,id);auditSop(u,'create',info.lastInsertRowid,{title,category,scope_type:scopeType,version,community_ids:ids,target_jobs:targets,source_type:sourceManagerId?'manager-assisted':'company',source_manager_staff_id:sourceManagerId,source_manager_name:sourceManagerName});res.json({success:true,id:Number(info.lastInsertRowid)});
 });
 
 // 案場經理上傳「派駐社區注意事項」：資料直接回到同一家公司 SOP 中，內勤不必代為整理上傳。
@@ -1087,7 +1103,7 @@ app.post('/api/staff/sops/community-upload',requireStaffSopUser,sopUpload.single
   if(!title){cleanupUploadedFile(req.file);return res.status(400).json({error:'SOP 名稱不可空白'});}
   if(!cid||!uploadCommunities.includes(cid)||!validateSopCommunityIds([cid],tenantId(req))){cleanupUploadedFile(req.file);return res.status(400).json({error:assigned.length?'請選擇您目前派駐的有效案場':'請選擇本公司有效的案場'});}
   if(!targets.length)targets=['秘書','保全'];
-  const t=now();const info=db.prepare('INSERT INTO sops (tenant_id,title,category,description,version,filename,original_filename,is_active,created_at,updated_at,updated_by,scope_type,target_jobs_json,source_type,uploader_staff_id,uploader_name,review_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),title,'案場注意事項',description,version,req.file.filename,req.file.originalname,1,t,t,u.name||u.employee_id||'','community',JSON.stringify(targets),'manager',u.id,u.name||'','published');
+  const t=now();const info=db.prepare('INSERT INTO sops (tenant_id,title,category,description,version,filename,original_filename,is_active,created_at,updated_at,updated_by,scope_type,target_jobs_json,source_type,uploader_staff_id,uploader_name,review_status,source_manager_staff_id,source_manager_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),title,'案場注意事項',description,version,req.file.filename,req.file.originalname,1,t,t,u.name||u.employee_id||'','community',JSON.stringify(targets),'manager',u.id,u.name||'','published',u.id,u.name||'');
   db.prepare('INSERT INTO sop_communities (sop_id,community_id) VALUES (?,?)').run(info.lastInsertRowid,cid);auditSop(u,'manager-upload',info.lastInsertRowid,{title,version,community_id:cid,target_jobs:targets,source_type:'manager'});res.json({success:true,id:Number(info.lastInsertRowid),message:'已上傳，這份 SOP 已回傳公司並可由公司內勤統一管理。'});
 });
 
