@@ -52,16 +52,14 @@ async function ensureSopCompanyModule(){
   if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return window.SOPCompanyModule;
   if(__sopCompanyModulePromise) return __sopCompanyModulePromise;
   __sopCompanyModulePromise=new Promise((resolve,reject)=>{
-    const existing=document.querySelector('script[data-sop-company-module]');
+    const existing=document.querySelector('script[data-sop-company-module]') || document.querySelector('script[src*="/modules/sop-company.js"]');
     if(existing){
-      existing.addEventListener('load',()=>resolve(window.SOPCompanyModule));
-      existing.addEventListener('error',()=>reject(new Error('SOP 模組載入失敗')));
+      if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return resolve(window.SOPCompanyModule);
+      existing.addEventListener('load',()=>window.SOPCompanyModule?resolve(window.SOPCompanyModule):reject(new Error('SOP 模組載入後沒有初始化')),{once:true});
+      existing.addEventListener('error',()=>reject(new Error('SOP 模組載入失敗')),{once:true});
       return;
     }
-    const script=document.createElement('script');
-    script.src='/modules/sop-company.js?v=12';
-    script.async=true;
-    script.dataset.sopCompanyModule='1';
+    const script=document.createElement('script'); script.src='/modules/sop-company.js?v=13'; script.async=true; script.dataset.sopCompanyModule='1';
     script.onload=()=>window.SOPCompanyModule?resolve(window.SOPCompanyModule):reject(new Error('SOP 模組載入後沒有初始化'));
     script.onerror=()=>reject(new Error('SOP 模組檔案無法載入，請確認 /modules/sop-company.js 已部署'));
     document.head.appendChild(script);
