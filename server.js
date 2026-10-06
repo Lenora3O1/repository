@@ -1217,14 +1217,69 @@ function residentNormalizeRow(row,map){
   const known=new Set(Object.values(map));const extra=Object.entries(row).filter(([k,v])=>v!==undefined&&v!==null&&String(v).trim()!==''&&!known.has(k)).map(([k,v])=>`${k}：${String(v).trim()}`).join('；');
   return {building,unit,floor,name,phone,address,extra,relation,raw:row};
 }
+function residentLooksLikeMatrixUnit(v){
+  return /^\s*\d+-\d+-\d{4}(?:\([^)]*\))?\s*$/.test(String(v??''));
+}
+function residentMatrixSheet(ws){
+  const vals=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});
+  const unitRows=[];
+  for(let ri=0;ri<vals.length;ri++){
+    const hits=[];
+    for(let ci=0;ci<(vals[ri]||[]).length;ci++) if(residentLooksLikeMatrixUnit(vals[ri][ci])) hits.push([ci,String(vals[ri][ci]).trim()]);
+    if(hits.length) unitRows.push({ri,hits});
+  }
+  if(unitRows.length<2)return null;
+  const title=String(vals[0]?.[0]||ws.name||'').trim();
+  const rows=[];
+  for(let i=0;i<unitRows.length;i++){
+    const {ri,hits}=unitRows[i];
+    const nextRi=i+1<unitRows.length?unitRows[i+1].ri:vals.length;
+    const floorFromRow=String(vals[ri]?.[0]??'').trim();
+    for(const [ci,unitRaw] of hits){
+      const unit=String(unitRaw).replace(/\s+/g,'');
+      let floor=floorFromRow;
+      if(!floor){const m=unit.match(/-(\d{4})(?:\(|$)/);if(m)floor=String(parseInt(m[1].slice(0,2),10));}
+      const nameRow=vals[ri+1]||[], phoneRow=vals[ri+2]||[];
+      const name1=String(nameRow[ci]??'').trim();
+      const name2=String(nameRow[ci+1]??'').trim();
+      const phone1=String(phoneRow[ci]??'').trim();
+      const phone2=String(phoneRow[ci+1]??'').trim();
+      const extras=[];
+      for(let rr=ri+3;rr<Math.min(nextRi,ri+8);rr++){
+        for(const cc of [ci,ci+1]){const v=String(vals[rr]?.[cc]??'').trim();if(v)extras.push(v);}
+      }
+      const extraParts=[];
+      if(name2)extraParts.push(`其他聯絡人：${name2}`);
+      const phones=[phone1,phone2].filter(Boolean);
+      if(extras.length)extraParts.push(...extras);
+      if(!name1&&!name2&&!phones.length&&!extraParts.length)continue;
+      rows.push({building:title,unit,floor,name:name1||name2,phone:phones.join('；'),address:'',extra:extraParts.join('；'),relation:unit.includes('(租')?'承租相關標記':'',raw:{sheet:ws.name,unit_col:ci+1,secondary_name:name2}});
+    }
+  }
+  return rows.length?{rows,detected:['棟別','戶號','樓層','主要聯絡人','其他聯絡人','電話','原始備註'],mode:'matrix',sheet:ws.name}:null;
+}
 function residentParseFile(filePath){
   const wb=XLSX.readFile(filePath,{cellDates:false,raw:false});
-  const sheetName=wb.SheetNames[0]; if(!sheetName)throw new Error('檔案沒有可讀取的工作表');
+  if(!wb.SheetNames.length)throw new Error('檔案沒有可讀取的工作表');
+  // 先辨識「住戶聯繫表」常見的橫向矩陣格式：一戶佔兩欄，樓層/戶號/姓名/電話/車位逐列排列。
+  const matrix=[];
+  for(const sheetName of wb.SheetNames){
+    const hit=residentMatrixSheet(wb.Sheets[sheetName]);
+    if(hit)matrix.push(hit);
+  }
+  if(matrix.length){
+    const rows=matrix.flatMap(x=>x.rows);
+    return {rows,detected:[...new Set(matrix.flatMap(x=>x.detected))],headers:[],mode:'matrix',sheets:matrix.map(x=>x.sheet)};
+  }
+  // 一般直向 Excel/CSV 則沿用欄名智慧辨識。
+  const sheetName=wb.SheetNames[0];
   const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:false});
   if(!rows.length)throw new Error('檔案沒有資料列');
-  const headers=Object.keys(rows[0]); const map=residentHeaderMap(headers); const parsed=rows.map(r=>residentNormalizeRow(r,map)).filter(r=>Object.values(r).some(v=>String(v||'').trim()!==''));
+  const headers=Object.keys(rows[0]);
+  const map=residentHeaderMap(headers);
+  const parsed=rows.map(r=>residentNormalizeRow(r,map)).filter(r=>Object.values(r).some(v=>String(v||'').trim()!==''));
   if(!parsed.length)throw new Error('檔案沒有可匯入的住戶資料');
-  return {rows:parsed,detected:Object.keys(map),headers};
+  return {rows:parsed,detected:Object.keys(map),headers,mode:'table',sheets:[sheetName]};
 }
 function residentCategory(req){const c=String(req.query?.category||req.body?.category||'');if(!RESIDENT_CATEGORIES.has(c))throw new Error('住戶名冊分類無效');return c;}
 function residentAccessibleCommunity(req,cid){return !!cid&&!!getAccessibleCommunity(req,Number(cid));}
