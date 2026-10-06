@@ -75,6 +75,34 @@ addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
 addColumnIfMissing('drafts', 'community_id', "INTEGER");
 addColumnIfMissing('templates', 'tenant_id', "INTEGER");
 
+  // 平台公版文件／公司資源（與交接 Word 範本分離，支援一般文書檔案）
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT DEFAULT '',
+    extension TEXT DEFAULT '',
+    category TEXT DEFAULT '一般平台公版',
+    description TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS company_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    platform_resource_id INTEGER,
+    name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT DEFAULT '',
+    extension TEXT DEFAULT '',
+    category TEXT DEFAULT '公司資源',
+    description TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL
+  )`);
+
 // V4.6：員編改為「公司內唯一」，不同公司可以使用相同員編（例如 A001）。
 // 舊版曾在 employee_id 上建立全系統 UNIQUE，這裡安全地重建 staff_users / staff_communities 後改用複合唯一索引。
 function migrateEmployeeIdUniqueness() {
@@ -348,46 +376,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboard_pins (
 )`);
 
 // V5.1：現場人員代辦事項。每位人員獨立保存，完成後不刪除，改為封存並保留時間。
-
-// V5.12：社區所屬行政區，供「公家單位公版」依區域自動分流。
-addColumnIfMissing('communities', 'region', "TEXT DEFAULT ''");
-
-// V5.13：公司資源公版。company = 全公司公版；government = 依社區行政區分流的公家單位公版。
-db.exec(`CREATE TABLE IF NOT EXISTS company_resources (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tenant_id INTEGER NOT NULL,
-  title TEXT NOT NULL,
-  resource_type TEXT NOT NULL DEFAULT 'company',
-  region TEXT DEFAULT '',
-  description TEXT DEFAULT '',
-  filename TEXT NOT NULL,
-  original_filename TEXT NOT NULL DEFAULT '',
-  is_active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  updated_by TEXT DEFAULT '',
-  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_company_resources_tenant_type_region ON company_resources(tenant_id, resource_type, region, is_active, updated_at);`);
-
-// V6：智慧住戶名冊。每次匯入保留版本，前台只顯示該案場／分類最新啟用版本。
-db.exec(`CREATE TABLE IF NOT EXISTS resident_imports (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL,
-  category TEXT NOT NULL, original_filename TEXT NOT NULL DEFAULT '', imported_at TEXT NOT NULL, imported_by INTEGER,
-  imported_by_name TEXT DEFAULT '', row_count INTEGER NOT NULL DEFAULT 0, detected_fields_json TEXT DEFAULT '[]', is_active INTEGER NOT NULL DEFAULT 1,
-  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE, FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_resident_imports_current ON resident_imports(tenant_id,community_id,category,is_active,imported_at);
-CREATE TABLE IF NOT EXISTS resident_records (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, category TEXT NOT NULL,
-  building TEXT DEFAULT '', unit TEXT DEFAULT '', floor TEXT DEFAULT '', name TEXT DEFAULT '', phone TEXT DEFAULT '', address TEXT DEFAULT '', extra TEXT DEFAULT '', raw_json TEXT DEFAULT '{}',
-  FOREIGN KEY (import_id) REFERENCES resident_imports(id) ON DELETE CASCADE, FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE, FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_resident_records_current ON resident_records(tenant_id,community_id,category,import_id);
-CREATE TABLE IF NOT EXISTS resident_sort_preferences (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, category TEXT NOT NULL, sort_key TEXT NOT NULL DEFAULT 'building', updated_at TEXT NOT NULL,
-  UNIQUE(staff_id,community_id,category), FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE, FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE, FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
-);`);
 
 // V5.10：案場 SOP。SOP 屬於公司，可指定全部案場或特定案場；檔案實體存放於 DATA_DIR/uploads/sops。
 db.exec(`CREATE TABLE IF NOT EXISTS sops (

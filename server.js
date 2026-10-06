@@ -1,10 +1,10 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const XLSX = require('xlsx');
 const db = require('./db');
 const { generateDocx } = require('./generate');
 const { analyzeTemplate } = require('./template-analyzer');
@@ -19,29 +19,14 @@ try {
     if (!sopCols.includes('source_manager_name')) db.prepare('ALTER TABLE sops ADD COLUMN source_manager_name TEXT').run();
   }
 } catch (e) { console.warn('[SOP] 欄位升級略過：', e.message); }
-
-// 公司資源／公版模組的資料結構升級；不影響既有 SOP、班表與範本資料。
-try {
-  const communityCols = db.prepare("PRAGMA table_info(communities)").all().map(x=>String(x.name));
-  if (communityCols.length && !communityCols.includes('region')) db.prepare("ALTER TABLE communities ADD COLUMN region TEXT DEFAULT ''").run();
-  db.exec(`CREATE TABLE IF NOT EXISTS company_resources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, title TEXT NOT NULL,
-    resource_type TEXT NOT NULL DEFAULT 'company', region TEXT DEFAULT '', description TEXT DEFAULT '',
-    filename TEXT NOT NULL, original_filename TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT DEFAULT '',
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_company_resources_tenant_type_region ON company_resources(tenant_id, resource_type, region, is_active, updated_at);`);
-} catch (e) { console.warn('[Company Resources] schema upgrade skipped:', e.message); }
 const PORT = process.env.PORT || 3000;
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const TEMPLATES_DIR = path.join(DATA_DIR, 'uploads', 'templates');
+const PLATFORM_RESOURCES_DIR = path.join(DATA_DIR, 'uploads', 'platform-resources');
+fs.mkdirSync(PLATFORM_RESOURCES_DIR, { recursive: true });
 const SOPS_DIR = path.join(DATA_DIR, 'uploads', 'sops');
-const COMPANY_RESOURCES_DIR = path.join(DATA_DIR, 'uploads', 'company-resources');
-const RESIDENT_IMPORTS_DIR = path.join(DATA_DIR, 'uploads', 'resident-imports');
-const TAIWAN_REGIONS = ['基隆市','臺北市','新北市','桃園市','新竹市','新竹縣','苗栗縣','臺中市','彰化縣','南投縣','雲林縣','嘉義市','嘉義縣','臺南市','高雄市','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'];
 const GENERATED_DIR = path.join(DATA_DIR, 'generated');
 const QUESTIONS_PATH = path.join(__dirname, 'config', 'questions.json');
 const FORM_CONFIG_PATH = path.join(DATA_DIR, 'form-config.json');
@@ -145,17 +130,8 @@ function writePlatformRules(input, actor='system'){
   fs.writeFileSync(PLATFORM_RULES_HISTORY_PATH,JSON.stringify(history,null,2),'utf-8');
   return next;
 }
-for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR, COMPANY_RESOURCES_DIR, RESIDENT_IMPORTS_DIR]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
 
-const companyResourceUpload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,COMPANY_RESOURCES_DIR),filename:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();const base=path.basename(file.originalname||'resource',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'resource';cb(null,Date.now()+'-'+base+ext)}}),fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.pdf','.doc','.docx','.xls','.xlsx','.xlsm','.txt','.ppt','.pptx'].includes(ext)?null:new Error('公版文件僅允許 PDF、Word、Excel、PowerPoint 或 TXT'),true)}});
-const residentUpload=multer({
-  storage:multer.diskStorage({
-    destination:(req,file,cb)=>cb(null,RESIDENT_IMPORTS_DIR),
-    filename:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();const base=path.basename(file.originalname||'resident',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'resident';cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`)}
-  }),
-  limits:{fileSize:20*1024*1024},
-  fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.xlsx','.xls','.csv','.txt'].includes(ext)?null:new Error('住戶名冊只允許 Excel（xlsx/xls）、CSV 或 TXT'),true);}
-});
 const sopUpload=multer({
   storage:multer.diskStorage({
     destination:(req,file,cb)=>cb(null,SOPS_DIR),
@@ -1037,10 +1013,9 @@ app.get('/api/company/personnel-archive',requireCompanyAdmin,requireCompanyPermi
 app.delete('/api/company/staff/:id',requireCompanyAdmin,(req,res)=>res.status(400).json({error:'請使用「停用」、「離職」或「黑名單」處理人員狀態；離職與黑名單會封存人事資料並刪除登入帳號。'}));
 
 app.get('/api/company/communities',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>res.json(db.prepare('SELECT * FROM communities WHERE tenant_id=? ORDER BY status DESC,name').all(tenantId(req))));
-app.get('/api/company/resources/regions',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({regions:TAIWAN_REGIONS}));
-app.post('/api/company/communities',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const name=String(req.body?.name||'').trim();const region=String(req.body?.region||'').trim();if(!name)return res.status(400).json({error:'社區名稱不可空白'});if(region&&!TAIWAN_REGIONS.includes(region))return res.status(400).json({error:'社區行政區不在台灣地區清單內'});const t=now();const tx=db.transaction(()=>{const info=db.prepare('INSERT INTO communities (tenant_id,name,status,region,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(tenantId(req),name,'active',region,t,t);const cid=Number(info.lastInsertRowid);const pr=schedulePlatformRules();
+app.post('/api/company/communities',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const name=String(req.body?.name||'').trim();if(!name)return res.status(400).json({error:'社區名稱不可空白'});const t=now();const tx=db.transaction(()=>{const info=db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tenantId(req),name,'active',t,t);const cid=Number(info.lastInsertRowid);const pr=schedulePlatformRules();
   const defaults={admin:{manager:{mode:pr.admin.manager.mode,rest_days:pr.admin.manager.rest_days,red_dates:[]},secretary:{mode:pr.admin.secretary.mode,rest_days:pr.admin.secretary.rest_days,red_dates:[]}},security:{...pr.security},mobile:{...pr.mobile}};for(const [category,config] of Object.entries(defaults))db.prepare('INSERT INTO schedule_rules (tenant_id,community_id,category,config_json,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id,category) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at').run(tenantId(req),cid,category,JSON.stringify(config),t,t);return cid;});try{const id=tx();res.json({success:true,id});}catch(e){res.status(500).json({error:'新增社區失敗，請稍後再試。'});}});
-app.put('/api/company/communities/:id',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const id=Number(req.params.id);const c=db.prepare('SELECT * FROM communities WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!c)return res.status(404).json({error:'找不到社區'});const name=String(req.body?.name||c.name).trim();const region=String(req.body?.region??c.region??'').trim();const status=req.body?.status===undefined?c.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'社區名稱不可空白'});if(region&&!TAIWAN_REGIONS.includes(region))return res.status(400).json({error:'社區行政區不在台灣地區清單內'});db.prepare('UPDATE communities SET name=?,status=?,region=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,status,region,now(),id,tenantId(req));res.json({success:true});});
+app.put('/api/company/communities/:id',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const id=Number(req.params.id);const c=db.prepare('SELECT * FROM communities WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!c)return res.status(404).json({error:'找不到社區'});const name=String(req.body?.name||c.name).trim();const status=req.body?.status===undefined?c.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'社區名稱不可空白'});db.prepare('UPDATE communities SET name=?,status=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,status,now(),id,tenantId(req));res.json({success:true});});
 app.get('/api/company/staff/:id/communities',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT id FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});const rows=db.prepare('SELECT c.id,c.name,c.status,CASE WHEN sc.staff_id IS NULL THEN 0 ELSE 1 END assigned FROM communities c LEFT JOIN staff_communities sc ON sc.community_id=c.id AND sc.staff_id=? WHERE c.tenant_id=? ORDER BY c.name').all(id,tenantId(req));res.json(rows);});
 app.put('/api/company/staff/:id/communities',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND tenant_id=?").get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin')return res.status(400).json({error:'公司管理員不需要設定社區權限'});const ids=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):[];const valid=new Set(db.prepare('SELECT id FROM communities WHERE tenant_id=?').all(tenantId(req)).map(x=>x.id));if(ids.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的社區'});const cats=getJobCategories(u),perms=parsePermissions(u);const tx=db.transaction(()=>{db.prepare('DELETE FROM staff_communities WHERE staff_id=?').run(id);const ins=db.prepare('INSERT INTO staff_communities (staff_id,community_id) VALUES (?,?)');for(const cid of ids)ins.run(id,cid);});tx();syncWorkAssignments(id,tenantId(req),u.work_type==='internal'?'internal':(u.work_type==='hybrid'?'hybrid':'site'),ids,cats,u.job_level||'',perms);res.json({success:true});});
 app.get('/api/company/submissions',requireCompanyAdmin,requireCompanyPermission('view-submissions'),(req,res)=>{const rows=db.prepare(`SELECT s.id,s.created_at,s.updated_at,s.employee_id,s.employee_name,s.community_id,s.data,c.name community_name FROM submissions s LEFT JOIN communities c ON c.id=s.community_id WHERE s.tenant_id=? ORDER BY s.id DESC`).all(tenantId(req));res.json({submissions:rows.map(r=>({...r,data:JSON.parse(r.data)})),questions:readQuestions()});});
@@ -1148,152 +1123,63 @@ app.get('/api/company/sops/:id/download',requireCompanyAdmin,requireCompanyPermi
 app.get('/api/staff/sops',requireStaffSopUser,(req,res)=>{const u=getUser(req);const category=['行政','勤務','應變','案場注意事項'].includes(String(req.query?.category||''))?String(req.query.category):'';const scope=String(req.query?.scope||'').trim();const rows=sopRowsForTenant(tenantId(req),category).filter(x=>x.is_active&&x.review_status!=='draft'&&(!scope||String(x.scope_type||'company_basic')===scope)&&canStaffAccessSop(req,x));const manager=isSiteManager(u);const canUpload=canManagerUploadSop(u);const assigned=getUserSiteCommunityIds(u);const uploadCommunities=assigned.length ? db.prepare("SELECT id,name FROM communities WHERE id IN ("+assigned.map(()=>'?').join(',')+") AND tenant_id=? AND status='active' ORDER BY name").all(...assigned,tenantId(req)) : db.prepare("SELECT id,name FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tenantId(req));res.json({sops:rows,viewer:{job_level:u.job_level||'',position:u.position||'',job_category:u.job_category||'',job_categories:getJobCategories(u),manager,can_upload:canUpload,upload_communities:canUpload?uploadCommunities:[],upload_scope:assigned.length?'assigned':'company',upload_reason:manager&&!canUpload?'目前公司尚未開通「案場 SOP」模組':''}});});
 app.get('/api/staff/sops/:id/download',requireStaffSopUser,(req,res)=>{const sop=db.prepare('SELECT * FROM sops WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));if(!sop||sop.review_status==='draft'||!canStaffAccessSop(req,sop))return res.status(404).json({error:'找不到您目前可以閱讀的 SOP'});const p=path.join(SOPS_DIR,sop.filename);if(!fs.existsSync(p))return res.status(404).json({error:'SOP 檔案不存在，請通知公司重新上傳'});res.download(p,sopDownloadName(sop));});
 
-// ===== 公司公版／公家單位公版 =====
-function cleanResourceType(v){return String(v||'')==='government'?'government':'company';}
-function resourceRowsForTenant(tid){
-  return db.prepare(`SELECT * FROM company_resources WHERE tenant_id=? ORDER BY CASE resource_type WHEN 'company' THEN 0 ELSE 1 END, region, is_active DESC, updated_at DESC, id DESC`).all(tid);
-}
-function resourceDownloadName(r){return String(r.original_filename||r.title||'文件').replace(/[\r\n]/g,'_');}
-function cleanupResourceFile(file){if(file?.filename)try{fs.unlinkSync(path.join(COMPANY_RESOURCES_DIR,file.filename))}catch{}}
-app.get('/api/company/resources/context',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
-  const communities=db.prepare("SELECT id,name,status,COALESCE(region,'') region FROM communities WHERE tenant_id=? ORDER BY name").all(tenantId(req));
-  res.json({regions:TAIWAN_REGIONS,communities});
+// 平台公版文件：與交接 Word 範本分離，支援一般文書檔案。
+const PLATFORM_RESOURCE_EXTS = new Set(['.pdf','.doc','.docx','.xls','.xlsx','.xlsm','.ppt','.pptx','.txt','.csv']);
+const platformResourceUpload = multer({
+  storage: multer.diskStorage({
+    destination:(req,file,cb)=>cb(null,PLATFORM_RESOURCES_DIR),
+    filename:(req,file,cb)=>cb(null,Date.now()+'-'+crypto.randomBytes(5).toString('hex')+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))
+  }),
+  fileFilter:(req,file,cb)=>PLATFORM_RESOURCE_EXTS.has(path.extname(file.originalname).toLowerCase())?cb(null,true):cb(new Error('平台公版僅允許 PDF、Word、Excel、PowerPoint、TXT 或 CSV 檔案'))
 });
-app.get('/api/company/resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({resources:resourceRowsForTenant(tenantId(req))}));
-app.post('/api/company/resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),companyResourceUpload.single('file'),(req,res)=>{
-  if(!req.file)return res.status(400).json({error:'請選擇要上傳的公版文件'});
-  const title=String(req.body?.title||'').trim(); const type=cleanResourceType(req.body?.resource_type); const region=String(req.body?.region||'').trim(); const description=String(req.body?.description||'').trim();
-  if(!title){cleanupResourceFile(req.file);return res.status(400).json({error:'文件名稱不可空白'});}
-  if(type==='government' && !TAIWAN_REGIONS.includes(region)){cleanupResourceFile(req.file);return res.status(400).json({error:'公家單位公版必須選擇所屬縣市'});}
-  const u=getUser(req),t=now(); const info=db.prepare('INSERT INTO company_resources (tenant_id,title,resource_type,region,description,filename,original_filename,is_active,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),title,type,type==='government'?region:'',description,req.file.filename,req.file.originalname,1,t,t,u.name||u.employee_id||'');
-  res.json({success:true,id:Number(info.lastInsertRowid)});
+app.get('/api/admin/platform-resources',requireSuperAdmin,(req,res)=>res.json(db.prepare('SELECT id,name,original_name,filename,mime_type,extension,category,description,is_active,created_at FROM platform_resources ORDER BY id DESC').all()));
+app.post('/api/admin/platform-resources',requireSuperAdmin,platformResourceUpload.single('file'),(req,res)=>{
+  if(!req.file)return res.status(400).json({error:'未收到檔案'});
+  const ext=path.extname(req.file.originalname).toLowerCase();
+  const name=String(req.body?.name||req.file.originalname).trim();
+  const category=String(req.body?.category||'一般平台公版').trim()||'一般平台公版';
+  const description=String(req.body?.description||'').trim();
+  db.prepare('INSERT INTO platform_resources (name,original_name,filename,mime_type,extension,category,description,is_active,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(name,req.file.originalname,req.file.filename,req.file.mimetype||'',ext,category,description,1,now());
+  res.json({success:true});
 });
-app.put('/api/company/resources/:id',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
-  const id=Number(req.params.id),r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=?').get(id,tenantId(req)); if(!r)return res.status(404).json({error:'找不到公版文件'});
-  const title=String(req.body?.title??r.title).trim(),type=cleanResourceType(req.body?.resource_type??r.resource_type),region=String(req.body?.region??r.region??'').trim(),description=String(req.body?.description??r.description??'').trim(),active=req.body?.is_active===undefined?!!r.is_active:!!req.body.is_active;
-  if(!title)return res.status(400).json({error:'文件名稱不可空白'}); if(type==='government'&&!TAIWAN_REGIONS.includes(region))return res.status(400).json({error:'公家單位公版必須選擇所屬縣市'});
-  db.prepare('UPDATE company_resources SET title=?,resource_type=?,region=?,description=?,is_active=?,updated_at=?,updated_by=? WHERE id=? AND tenant_id=?').run(title,type,type==='government'?region:'',description,active?1:0,now(),getUser(req).name||getUser(req).employee_id||'',id,tenantId(req)); res.json({success:true});
+app.get('/api/admin/platform-resources/:id/download',requireSuperAdmin,(req,res)=>{
+  const r=db.prepare('SELECT * FROM platform_resources WHERE id=? AND is_active=1').get(Number(req.params.id));
+  if(!r)return res.status(404).json({error:'找不到平台公版文件'});
+  const p=path.join(PLATFORM_RESOURCES_DIR,r.filename); if(!fs.existsSync(p))return res.status(404).json({error:'檔案不存在'});
+  res.download(p,r.original_name);
 });
-app.post('/api/company/resources/:id/replace',requireCompanyAdmin,requireCompanyPermission('manage-templates'),companyResourceUpload.single('file'),(req,res)=>{const id=Number(req.params.id),r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!r){cleanupResourceFile(req.file);return res.status(404).json({error:'找不到公版文件'});}if(!req.file)return res.status(400).json({error:'請選擇新檔案'});const old=path.join(COMPANY_RESOURCES_DIR,r.filename);if(fs.existsSync(old))try{fs.unlinkSync(old)}catch{};db.prepare('UPDATE company_resources SET filename=?,original_filename=?,updated_at=?,updated_by=? WHERE id=? AND tenant_id=?').run(req.file.filename,req.file.originalname,now(),getUser(req).name||getUser(req).employee_id||'',id,tenantId(req));res.json({success:true});});
-app.delete('/api/company/resources/:id',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=?').get(Number(req.params.id),tenantId(req));if(r){const p=path.join(COMPANY_RESOURCES_DIR,r.filename);if(fs.existsSync(p))try{fs.unlinkSync(p)}catch{};db.prepare('DELETE FROM company_resources WHERE id=? AND tenant_id=?').run(r.id,tenantId(req));}res.json({success:true});});
-app.get('/api/company/resources/:id/download',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));if(!r)return res.status(404).json({error:'找不到公版文件'});const p=path.join(COMPANY_RESOURCES_DIR,r.filename);if(!fs.existsSync(p))return res.status(404).json({error:'文件不存在，請重新上傳'});res.download(p,resourceDownloadName(r));});
-function requireStaffResourceUser(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u&&u.is_active&&u.tenant_id&&t?.status==='active') return next(); return res.status(403).json({error:'只有有效的公司人員可以使用公司資源'}); }
-app.get('/api/staff/company-resources',requireStaffResourceUser,(req,res)=>{
-  const u=getUser(req), tid=tenantId(req), assigned=getUserSiteCommunityIds(u);
-  const regions=[...new Set(db.prepare("SELECT region FROM communities WHERE tenant_id=? AND status='active' AND region<>'' AND id IN ("+(assigned.length?assigned.map(()=>'?').join(','):'0')+")").all(tid,...assigned).map(x=>String(x.region||'').trim()).filter(Boolean))];
-  const rows=db.prepare('SELECT * FROM company_resources WHERE tenant_id=? AND is_active=1 ORDER BY CASE resource_type WHEN \'company\' THEN 0 ELSE 1 END, region, updated_at DESC,id DESC').all(tid).filter(r=>r.resource_type==='company'||!assigned.length||regions.includes(String(r.region||''))||u.role==='company_admin');
-  res.json({resources:rows.map(r=>({...r,available_reason:r.resource_type==='company'?'全公司公版':`適用區域：${r.region}`})),regions});
+app.delete('/api/admin/platform-resources/:id',requireSuperAdmin,(req,res)=>{
+  const r=db.prepare('SELECT * FROM platform_resources WHERE id=?').get(Number(req.params.id));
+  if(r){const p=path.join(PLATFORM_RESOURCES_DIR,r.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM platform_resources WHERE id=?').run(r.id);}
+  res.json({success:true});
 });
-app.get('/api/staff/company-resources/:id/download',requireStaffResourceUser,(req,res)=>{const u=getUser(req),r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));if(!r)return res.status(404).json({error:'找不到公版文件'});if(r.resource_type==='government'){const assigned=getUserSiteCommunityIds(u);const regions=new Set(db.prepare("SELECT region FROM communities WHERE tenant_id=? AND status='active' AND id IN ("+(assigned.length?assigned.map(()=>'?').join(','):'0')+")").all(tenantId(req),...assigned).map(x=>String(x.region||'')));if(!regions.has(String(r.region||'')))return res.status(403).json({error:'這份公家單位公版不屬於您目前派駐案場的區域'});}const p=path.join(COMPANY_RESOURCES_DIR,r.filename);if(!fs.existsSync(p))return res.status(404).json({error:'文件不存在，請通知公司內勤重新上傳'});res.download(p,resourceDownloadName(r));});
-
-
-// ===== 智慧住戶名冊 =====
-const RESIDENT_CATEGORIES=new Set(['residents-contact','residents-owners','residents-tenants']);
-const RESIDENT_HEADER_ALIASES={
-  building:['棟','棟別','棟號','大樓','大樓別','building','building_no','block'],
-  unit:['戶號','戶別','戶號碼','門牌號','房號','unit','unit_no','house_no'],
-  floor:['樓層','樓','層','floor','floor_no'],
-  name:['姓名','住戶姓名','所有權人','承租人','戶長','name','owner','tenant'],
-  phone:['電話','聯絡電話','手機','手機號碼','聯絡手機','phone','mobile','tel'],
-  address:['地址','門牌','住址','完整地址','address'],
-  relation:['身分','身份','關係','住戶身分','relation','role']
-};
-function residentCleanHeader(v){return String(v??'').trim().toLowerCase().replace(/[\s_\-（）()]/g,'');}
-function residentHeaderMap(headers){
-  const out={};
-  const normalized=headers.map(h=>({raw:String(h??'').trim(),key:residentCleanHeader(h)}));
-  for(const [field,aliases] of Object.entries(RESIDENT_HEADER_ALIASES)){
-    const hit=normalized.find(x=>aliases.some(a=>residentCleanHeader(a)===x.key));
-    if(hit)out[field]=hit.raw;
-  }
-  return out;
-}
-function residentCell(row,key){const v=row[key];return v===undefined||v===null?'':String(v).trim();}
-function residentNormalizeRow(row,map){
-  let building=residentCell(row,map.building),unit=residentCell(row,map.unit),floor=residentCell(row,map.floor),name=residentCell(row,map.name),phone=residentCell(row,map.phone),address=residentCell(row,map.address),relation=residentCell(row,map.relation);
-  if(!unit&&address){const m=address.match(/([A-Za-z一二三四五六七八九十百千\u4e00-\u9fff]?[\-]?[0-9]{1,5}號?)/);if(m)unit=m[1];}
-  if(!floor){const m=String(unit||address).match(/(?:[BbFf]|地下|地上)?\s*(\d{1,3})\s*(?:樓|F|f)/);if(m)floor=m[1];}
-  if(!building){const m=String(unit||address).match(/^([A-Za-zＡ-Ｚａ-ｚ一二三四五六七八九十百千]+)[\s\-]*/);if(m)building=m[1];}
-  const known=new Set(Object.values(map));const extra=Object.entries(row).filter(([k,v])=>v!==undefined&&v!==null&&String(v).trim()!==''&&!known.has(k)).map(([k,v])=>`${k}：${String(v).trim()}`).join('；');
-  return {building,unit,floor,name,phone,address,extra,relation,raw:row};
-}
-function residentLooksLikeMatrixUnit(v){
-  return /^\s*\d+-\d+-\d{4}(?:\([^)]*\))?\s*$/.test(String(v??''));
-}
-function residentMatrixSheet(ws){
-  const vals=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});
-  const unitRows=[];
-  for(let ri=0;ri<vals.length;ri++){
-    const hits=[];
-    for(let ci=0;ci<(vals[ri]||[]).length;ci++) if(residentLooksLikeMatrixUnit(vals[ri][ci])) hits.push([ci,String(vals[ri][ci]).trim()]);
-    if(hits.length) unitRows.push({ri,hits});
-  }
-  if(unitRows.length<2)return null;
-  const title=String(vals[0]?.[0]||ws.name||'').trim();
-  const rows=[];
-  for(let i=0;i<unitRows.length;i++){
-    const {ri,hits}=unitRows[i];
-    const nextRi=i+1<unitRows.length?unitRows[i+1].ri:vals.length;
-    const floorFromRow=String(vals[ri]?.[0]??'').trim();
-    for(const [ci,unitRaw] of hits){
-      const unit=String(unitRaw).replace(/\s+/g,'');
-      let floor=floorFromRow;
-      if(!floor){const m=unit.match(/-(\d{4})(?:\(|$)/);if(m)floor=String(parseInt(m[1].slice(0,2),10));}
-      const nameRow=vals[ri+1]||[], phoneRow=vals[ri+2]||[];
-      const name1=String(nameRow[ci]??'').trim();
-      const name2=String(nameRow[ci+1]??'').trim();
-      const phone1=String(phoneRow[ci]??'').trim();
-      const phone2=String(phoneRow[ci+1]??'').trim();
-      const extras=[];
-      for(let rr=ri+3;rr<Math.min(nextRi,ri+8);rr++){
-        for(const cc of [ci,ci+1]){const v=String(vals[rr]?.[cc]??'').trim();if(v)extras.push(v);}
-      }
-      const extraParts=[];
-      if(name2)extraParts.push(`其他聯絡人：${name2}`);
-      const phones=[phone1,phone2].filter(Boolean);
-      if(extras.length)extraParts.push(...extras);
-      if(!name1&&!name2&&!phones.length&&!extraParts.length)continue;
-      rows.push({building:title,unit,floor,name:name1||name2,phone:phones.join('；'),address:'',extra:extraParts.join('；'),relation:unit.includes('(租')?'承租相關標記':'',raw:{sheet:ws.name,unit_col:ci+1,secondary_name:name2}});
-    }
-  }
-  return rows.length?{rows,detected:['棟別','戶號','樓層','主要聯絡人','其他聯絡人','電話','原始備註'],mode:'matrix',sheet:ws.name}:null;
-}
-function residentParseFile(filePath){
-  const wb=XLSX.readFile(filePath,{cellDates:false,raw:false});
-  if(!wb.SheetNames.length)throw new Error('檔案沒有可讀取的工作表');
-  // 先辨識「住戶聯繫表」常見的橫向矩陣格式：一戶佔兩欄，樓層/戶號/姓名/電話/車位逐列排列。
-  const matrix=[];
-  for(const sheetName of wb.SheetNames){
-    const hit=residentMatrixSheet(wb.Sheets[sheetName]);
-    if(hit)matrix.push(hit);
-  }
-  if(matrix.length){
-    const rows=matrix.flatMap(x=>x.rows);
-    return {rows,detected:[...new Set(matrix.flatMap(x=>x.detected))],headers:[],mode:'matrix',sheets:matrix.map(x=>x.sheet)};
-  }
-  // 一般直向 Excel/CSV 則沿用欄名智慧辨識。
-  const sheetName=wb.SheetNames[0];
-  const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:false});
-  if(!rows.length)throw new Error('檔案沒有資料列');
-  const headers=Object.keys(rows[0]);
-  const map=residentHeaderMap(headers);
-  const parsed=rows.map(r=>residentNormalizeRow(r,map)).filter(r=>Object.values(r).some(v=>String(v||'').trim()!==''));
-  if(!parsed.length)throw new Error('檔案沒有可匯入的住戶資料');
-  return {rows:parsed,detected:Object.keys(map),headers,mode:'table',sheets:[sheetName]};
-}
-function residentCategory(req){const c=String(req.query?.category||req.body?.category||'');if(!RESIDENT_CATEGORIES.has(c))throw new Error('住戶名冊分類無效');return c;}
-function residentAccessibleCommunity(req,cid){return !!cid&&!!getAccessibleCommunity(req,Number(cid));}
-function residentCanUpload(u){if(!u||u.role==='company_admin')return false;const vals=[u.job_level,u.job_category,u.position,...getJobCategories(u)];return vals.some(v=>String(v||'').includes('經理'))||vals.some(v=>String(v||'').includes('社區管理'));}
-function residentActiveCommunity(req){const cid=Number(req.session?.activeCommunityId||0);if(cid&&residentAccessibleCommunity(req,cid))return db.prepare('SELECT id,name,region FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(cid,tenantId(req));const ids=getUserSiteCommunityIds(getUser(req));if(ids.length===1)return db.prepare('SELECT id,name,region FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(ids[0],tenantId(req));return null;}
-app.get('/api/staff/residents',requireStaffFiller,(req,res)=>{
-  try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req);if(!c)return res.status(400).json({error:'請先選擇目前要操作的案場'});const imp=db.prepare('SELECT * FROM resident_imports WHERE tenant_id=? AND community_id=? AND category=? AND is_active=1 ORDER BY id DESC LIMIT 1').get(tenantId(req),c.id,category);const rows=imp?db.prepare('SELECT building,unit,floor,name,phone,address,extra FROM resident_records WHERE import_id=? ORDER BY id').all(imp.id):[];const pref=db.prepare('SELECT sort_key FROM resident_sort_preferences WHERE staff_id=? AND tenant_id=? AND community_id=? AND category=?').get(u.id,tenantId(req),c.id,category);res.json({community:c,category,records:rows,preference:{sort:pref?.sort_key||'building'},last_import:imp||null,viewer:{can_upload:residentCanUpload(u)}});}catch(e){res.status(400).json({error:e.message||'無法載入住戶資料'});}
+app.get('/api/company/platform-resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({platformResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM platform_resources WHERE is_active=1 ORDER BY category,name,id DESC').all(),companyResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM company_resources WHERE tenant_id=? AND is_active=1 ORDER BY category,name,id DESC').all(tenantId(req))}));
+app.get('/api/company/platform-resources/:id/download',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
+  const r=db.prepare('SELECT * FROM platform_resources WHERE id=? AND is_active=1').get(Number(req.params.id));
+  if(!r)return res.status(404).json({error:'找不到平台公版文件'});
+  const p=path.join(PLATFORM_RESOURCES_DIR,r.filename); if(!fs.existsSync(p))return res.status(404).json({error:'檔案不存在'});
+  res.download(p,r.original_name);
 });
-app.put('/api/staff/residents/preference',requireStaffFiller,(req,res)=>{try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req),sort=['building','unit','floor'].includes(String(req.body?.sort||''))?String(req.body.sort):'building';if(!c)return res.status(400).json({error:'請先選擇案場'});db.prepare(`INSERT INTO resident_sort_preferences(staff_id,tenant_id,community_id,category,sort_key,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(staff_id,community_id,category) DO UPDATE SET sort_key=excluded.sort_key,updated_at=excluded.updated_at`).run(u.id,tenantId(req),c.id,category,sort,now());res.json({success:true,sort});}catch(e){res.status(400).json({error:e.message||'排序設定失敗'});}});
-app.post('/api/staff/residents/import',requireStaffFiller,residentUpload.single('file'),(req,res)=>{
-  if(!req.file)return res.status(400).json({error:'請選擇 Excel／CSV 檔案'});
-  try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req);if(!c)throw new Error('請先選擇目前要操作的案場');if(!residentCanUpload(u))throw new Error('目前帳號只有主管／社區管理人員可以上傳住戶名冊');const parsed=residentParseFile(path.join(RESIDENT_IMPORTS_DIR,req.file.filename));const t=now();const info=db.prepare('INSERT INTO resident_imports(tenant_id,community_id,category,original_filename,imported_at,imported_by,imported_by_name,row_count,detected_fields_json,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)').run(tenantId(req),c.id,category,req.file.originalname,t,u.id,u.name||u.employee_id||'',parsed.rows.length,JSON.stringify(parsed.detected));db.prepare('UPDATE resident_imports SET is_active=0 WHERE tenant_id=? AND community_id=? AND category=? AND id<>?').run(tenantId(req),c.id,category,info.lastInsertRowid);const ins=db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');const tx=db.transaction(rows=>{for(const r of rows)ins.run(info.lastInsertRowid,tenantId(req),c.id,category,r.building,r.unit,r.floor,r.name,r.phone,r.address,[r.relation,r.extra].filter(Boolean).join('；'),JSON.stringify(r.raw));});tx(parsed.rows);res.json({success:true,imported:parsed.rows.length,detected_fields:parsed.detected,message:`已匯入 ${parsed.rows.length} 筆，並成為目前這個案場的最新${category==='residents-contact'?'住戶聯繫表':category==='residents-owners'?'區分所有權人':'承租人'}。`});}catch(e){res.status(400).json({error:e.message||'匯入失敗'});}finally{ /* 保留原始匯入檔，方便日後追溯 */ }
+app.post('/api/company/platform-resources/:id/adopt',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
+  const source=db.prepare('SELECT * FROM platform_resources WHERE id=? AND is_active=1').get(Number(req.params.id));
+  if(!source)return res.status(404).json({error:'找不到平台公版文件'});
+  const safe=source.original_name.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_');
+  const filename=`${Date.now()}-${tenantId(req)}-${crypto.randomBytes(4).toString('hex')}-${safe}`;
+  fs.copyFileSync(path.join(PLATFORM_RESOURCES_DIR,source.filename),path.join(PLATFORM_RESOURCES_DIR,filename));
+  db.prepare('INSERT INTO company_resources (tenant_id,platform_resource_id,name,original_name,filename,mime_type,extension,category,description,is_active,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),source.id,source.name,source.original_name,filename,source.mime_type,source.extension,source.category,source.description,1,now());
+  res.json({success:true});
 });
-
+app.get('/api/company/resources/:id/download',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
+  const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));
+  if(!r)return res.status(404).json({error:'找不到公司公版文件'});
+  const p=path.join(PLATFORM_RESOURCES_DIR,r.filename); if(!fs.existsSync(p))return res.status(404).json({error:'檔案不存在'});
+  res.download(p,r.original_name);
+});
+app.delete('/api/company/resources/:id',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
+  const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=?').get(Number(req.params.id),tenantId(req));
+  if(r){const p=path.join(PLATFORM_RESOURCES_DIR,r.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM company_resources WHERE id=? AND tenant_id=?').run(r.id,tenantId(req));}
+  res.json({success:true});
+});
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
 const upload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,Date.now()+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>file.originalname.toLowerCase().endsWith('.docx')?cb(null,true):cb(new Error('只允許上傳 .docx 檔案'))});
 const analyzerUpload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,'__analysis__'+Date.now()+'-'+file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>['.docx','.xlsx','.xlsm'].includes(path.extname(file.originalname).toLowerCase())?cb(null,true):cb(new Error('只允許上傳 .docx、.xlsx、.xlsm 檔案'))});
