@@ -291,6 +291,7 @@ async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
   if(action==='company-resources'||/文件公版|公家單位公版|公司公版/.test(String(label||''))){const mode=/公家單位公版/.test(String(label||''))?'government':/文件公版|公司公版/.test(String(label||''))?'company':'all';showWorkspaceLoading(label||'公司資源');try{await window.CompanyResourcesModule.render(mode,label||'公司資源')}catch(err){showWorkspaceError(label||'公司資源',err)}return;}
+  if(['residents','residents-contact','residents-owners','residents-tenants'].includes(action)){showWorkspaceLoading(label||'住戶名冊');try{await window.ResidentRosterModule.render(action,label||'住戶名冊')}catch(err){showWorkspaceError(label||'住戶名冊',err)}return;}
   if(action==='todo'){
     await loadTodoPage();
     return;
