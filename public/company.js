@@ -71,7 +71,29 @@ document.addEventListener('workspace-menu',async e=>{
   const tabs=['overview','staff','communities','submissions','templates'];
   if(tabs.includes(a)){document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));for(const id of tabs){const el=$(`tab-${id}`);if(el)el.style.display=a===id?'block':'none';}return;}
   if(['schedule-month','schedule-staff','schedule-community','schedule-swap','schedule-leave','schedule-overtime'].includes(a)){openScheduleModule(a,e.detail?.label||'班表');return;}
-  if(a==='sop'){showWorkspaceLoading(e.detail?.label||'案場 SOP 管理');try{await ensureSopCompanyModule();await window.SOPCompanyModule.render(document.querySelector('#workspace')||document.querySelector('main')||document.body,e.detail?.label||'案場 SOP 管理')}catch(err){showWorkspaceError(e.detail?.label||'案場 SOP 管理',err)}return;} if(a && a!=='group') openCompanyModal('🚧 功能模組',`<div class="modal-note">你點選的是「${escapeHtml(e.detail?.label||'此功能')}」。這個模組尚在建置中。</div><div class="modal-actions"><button onclick="closeCompanyModal(this)">知道了</button></div>`);
+  if(a==='sop'){
+    const label=e.detail?.label||'案場 SOP 管理';
+    document.querySelectorAll('[id^="tab-"]').forEach(el=>el.style.display='none');
+    let workspace=document.querySelector('#companyWorkspace');
+    if(!workspace){
+      workspace=document.createElement('div');
+      workspace.id='companyWorkspace';
+      workspace.className='panel';
+      const main=$('mainView');
+      if(main) main.appendChild(workspace); else document.body.appendChild(workspace);
+    }
+    workspace.style.display='block';
+    workspace.innerHTML='<div class="section-title">📚 '+escapeHtml(label)+'</div><div class="hint">正在載入 SOP…</div>';
+    try{
+      const mod=await ensureSopCompanyModule();
+      await mod.render(workspace,label);
+    }catch(err){
+      workspace.innerHTML='<div class="section-title">📚 '+escapeHtml(label)+'</div><div class="msg error">'+escapeHtml(err?.message||'SOP 模組載入失敗')+'</div>';
+      console.error('Company SOP module failed',err);
+    }
+    return;
+  }
+  if(a && a!=='group') openCompanyModal('🚧 功能模組',`<div class="modal-note">你點選的是「${escapeHtml(e.detail?.label||'此功能')}」。這個模組尚在建置中。</div><div class="modal-actions"><button onclick="closeCompanyModal(this)">知道了</button></div>`);
 });
 
 for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['overview','staff','communities','submissions','templates'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';});
