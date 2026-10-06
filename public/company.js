@@ -1,8 +1,8 @@
-let state={tenant:null,staff:[],admins:[],currentUserId:null,currentAdminLevel:'admin',currentRole:'staff',companyPermissions:[],communities:[],submissions:[],templates:[],globalTemplates:[],companyResources:[],resourceContext:{regions:[],communities:[]}};
+let state={tenant:null,staff:[],admins:[],currentUserId:null,currentAdminLevel:'admin',currentRole:'staff',companyPermissions:[],communities:[],submissions:[],templates:[],globalTemplates:[],platformResources:[],companyResources:[]};
 const JOB_CATEGORIES=['社區管理','會計','總務','人事','勤務','秘書','保全','機動','財務','其他'];
 const JOB_LEVELS=['經理','副理','助理','一般'];
 const STAFF_PERMISSIONS=[['todo','代辦事項'],['work-journal','工作日誌'],['finance','財務／會計'],['committee','管理委員會'],['residents','住戶名冊'],['vendors','廠商聯繫'],['handover','交接清冊'],['company-resources','公司資源'],['manage-staff','公司人員管理'],['manage-communities','社區管理'],['view-submissions','交接紀錄'],['manage-templates','公司文件／範本'],['schedule','班表']];
-const COMPANY_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','schedule'].includes(x[0]));
+const COMPANY_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','schedule'].includes(x[0]));
 const SITE_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['todo','work-journal','finance','committee','residents','vendors','handover','schedule'].includes(x[0]));
 const DEFAULT_STAFF_PERMISSIONS=STAFF_PERMISSIONS.map(x=>x[0]);
 async function loadPermissionCatalog(){
@@ -47,9 +47,26 @@ function suggestedPermissions(jobCategories=[],workType='site'){
   return [...out];
 }
 const $=id=>document.getElementById(id);
-function ensureSopCompanyModule(){
-  if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return Promise.resolve(window.SOPCompanyModule);
-  return Promise.reject(new Error('SOP 模組尚未載入，請重新整理公司後台頁面'));
+let __sopCompanyModulePromise=null;
+async function ensureSopCompanyModule(){
+  if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return window.SOPCompanyModule;
+  if(__sopCompanyModulePromise) return __sopCompanyModulePromise;
+  __sopCompanyModulePromise=new Promise((resolve,reject)=>{
+    const existing=document.querySelector('script[data-sop-company-module]');
+    if(existing){
+      existing.addEventListener('load',()=>resolve(window.SOPCompanyModule));
+      existing.addEventListener('error',()=>reject(new Error('SOP 模組載入失敗')));
+      return;
+    }
+    const script=document.createElement('script');
+    script.src='/modules/sop-company.js?v=12';
+    script.async=true;
+    script.dataset.sopCompanyModule='1';
+    script.onload=()=>window.SOPCompanyModule?resolve(window.SOPCompanyModule):reject(new Error('SOP 模組載入後沒有初始化'));
+    script.onerror=()=>reject(new Error('SOP 模組檔案無法載入，請確認 /modules/sop-company.js 已部署'));
+    document.head.appendChild(script);
+  });
+  try{return await __sopCompanyModulePromise;}finally{__sopCompanyModulePromise=null;}
 }
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function applyCompanyBranding(){try{const b=await api('/api/company/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);if(b.logoText)$('companyBrand').textContent=b.logoText;else if(b.title)$('companyBrand').textContent=b.title;if(b.subtitle)$('tenantName').textContent=b.subtitle;if(b.loginTitle)$('companyLoginTitle').textContent='🔐 '+b.loginTitle;if(b.loginHint)$('companyLoginHint').textContent=b.loginHint;if(b.intro)$('companyIntro').textContent=b.intro;}catch(e){console.warn('Company branding load failed',e)}}
@@ -71,33 +88,11 @@ document.addEventListener('workspace-menu',async e=>{
   const tabs=['overview','staff','communities','submissions','templates'];
   if(tabs.includes(a)){document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));for(const id of tabs){const el=$(`tab-${id}`);if(el)el.style.display=a===id?'block':'none';}return;}
   if(['schedule-month','schedule-staff','schedule-community','schedule-swap','schedule-leave','schedule-overtime'].includes(a)){openScheduleModule(a,e.detail?.label||'班表');return;}
-  if(a==='sop'){
-    const label=e.detail?.label||'案場 SOP 管理';
-    document.querySelectorAll('[id^="tab-"]').forEach(el=>el.style.display='none');
-    let workspace=document.querySelector('#companyWorkspace');
-    if(!workspace){
-      workspace=document.createElement('div');
-      workspace.id='companyWorkspace';
-      workspace.className='panel';
-      const main=$('mainView');
-      if(main) main.appendChild(workspace); else document.body.appendChild(workspace);
-    }
-    workspace.style.display='block';
-    workspace.innerHTML='<div class="section-title">📚 '+escapeHtml(label)+'</div><div class="hint">正在載入 SOP…</div>';
-    try{
-      const mod=await ensureSopCompanyModule();
-      await mod.render(workspace,label);
-    }catch(err){
-      workspace.innerHTML='<div class="section-title">📚 '+escapeHtml(label)+'</div><div class="msg error">'+escapeHtml(err?.message||'SOP 模組載入失敗')+'</div>';
-      console.error('Company SOP module failed',err);
-    }
-    return;
-  }
-  if(a && a!=='group') openCompanyModal('🚧 功能模組',`<div class="modal-note">你點選的是「${escapeHtml(e.detail?.label||'此功能')}」。這個模組尚在建置中。</div><div class="modal-actions"><button onclick="closeCompanyModal(this)">知道了</button></div>`);
+  if(a==='sop'){showWorkspaceLoading(e.detail?.label||'案場 SOP 管理');try{await ensureSopCompanyModule();await window.SOPCompanyModule.render(document.querySelector('#workspace')||document.querySelector('main')||document.body,e.detail?.label||'案場 SOP 管理')}catch(err){showWorkspaceError(e.detail?.label||'案場 SOP 管理',err)}return;} if(a && a!=='group') openCompanyModal('🚧 功能模組',`<div class="modal-note">你點選的是「${escapeHtml(e.detail?.label||'此功能')}」。這個模組尚在建置中。</div><div class="modal-actions"><button onclick="closeCompanyModal(this)">知道了</button></div>`);
 });
 
 for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['overview','staff','communities','submissions','templates'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';});
-async function loadAll(){const isOwner=state.currentAdminLevel==='owner';const isAdmin=state.currentRole==='company_admin';const jobs=[(isAdmin||state.companyPermissions.includes('manage-staff'))?api('/api/company/admins').catch(()=>({admins:[],current_user_id:null,current_admin_level:state.currentAdminLevel})):Promise.resolve({admins:[],current_user_id:state.currentUserId,current_admin_level:state.currentAdminLevel}),state.companyPermissions.includes('manage-staff')||isAdmin?api('/api/company/staff').catch(()=>[]):Promise.resolve([]),state.companyPermissions.includes('manage-communities')||isAdmin?api('/api/company/communities').catch(()=>[]):Promise.resolve([]),state.companyPermissions.includes('view-submissions')||isAdmin?api('/api/company/submissions').then(x=>x.submissions).catch(()=>[]):Promise.resolve([]),state.companyPermissions.includes('manage-templates')||isAdmin?api('/api/company/templates').catch(()=>({})):Promise.resolve({})];const [adminData,staff,communities,submissions,templateData]=await Promise.all(jobs);state.admins=adminData.admins||[];state.currentUserId=adminData.current_user_id||state.currentUserId;state.currentAdminLevel=adminData.current_admin_level||state.currentAdminLevel;state.staff=staff;state.communities=communities;state.submissions=submissions;state.templates=templateData.companyTemplates||[];state.globalTemplates=templateData.globalTemplates||[];try{const rd=await api('/api/company/resources');state.companyResources=rd.resources||[];state.resourceContext=await api('/api/company/resources/context')}catch(e){state.companyResources=[]}renderAll()}
+async function loadAll(){const isOwner=state.currentAdminLevel==='owner';const isAdmin=state.currentRole==='company_admin';const jobs=[(isAdmin||state.companyPermissions.includes('manage-staff'))?api('/api/company/admins').catch(()=>({admins:[],current_user_id:null,current_admin_level:state.currentAdminLevel})):Promise.resolve({admins:[],current_user_id:state.currentUserId,current_admin_level:state.currentAdminLevel}),state.companyPermissions.includes('manage-staff')||isAdmin?api('/api/company/staff').catch(()=>[]):Promise.resolve([]),state.companyPermissions.includes('manage-communities')||isAdmin?api('/api/company/communities').catch(()=>[]):Promise.resolve([]),state.companyPermissions.includes('view-submissions')||isAdmin?api('/api/company/submissions').then(x=>x.submissions).catch(()=>[]):Promise.resolve([]),state.companyPermissions.includes('manage-templates')||isAdmin?api('/api/company/templates').catch(()=>({})):Promise.resolve({})];const [adminData,staff,communities,submissions,templateData]=await Promise.all(jobs);state.admins=adminData.admins||[];state.currentUserId=adminData.current_user_id||state.currentUserId;state.currentAdminLevel=adminData.current_admin_level||state.currentAdminLevel;state.staff=staff;state.communities=communities;state.submissions=submissions;state.templates=templateData.companyTemplates||[];state.globalTemplates=templateData.globalTemplates||[];const resources=await api('/api/company/platform-resources').catch(()=>({platformResources:[],companyResources:[]}));state.platformResources=resources.platformResources||[];state.companyResources=resources.companyResources||[];renderAll()}
 function renderAll(){renderOverview();renderStaff();renderCommunities();renderSubmissions();renderTemplates()}
 function renderOverview(){
   const el=$('tab-overview');
@@ -151,14 +146,9 @@ async function openStaffSettings(id){
 }
 async function saveStaffSettings(id,btn){const box=btn.closest('.modal');const communityIds=[...box.querySelectorAll('input[data-edit-cid]:checked')].map(x=>Number(x.dataset.editCid));const jobs=[...box.querySelectorAll('input[data-edit-job]:checked')].map(x=>x.dataset.editJob);const permissions=[...box.querySelectorAll('input[data-edit-perm]:checked')].map(x=>x.dataset.editPerm);try{await api(`/api/company/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({work_type:box.querySelector('#editWorkType').value,job_categories:jobs,job_level:box.querySelector('#editJobLevel').value,permissions,community_ids:communityIds})});closeCompanyModal(btn);await loadAll();alert('職務、案場與工作台權限已更新。')}catch(err){alert(err.message)}}
 
-function renderCommunities(){const el=$('tab-communities');el.innerHTML=`<div class="panel"><div class="section-title">🏠 社區管理</div><p class="hint">新增社區會在目前畫面中央開啟設定視窗。</p><button onclick="openAddCommunityModal()">＋ 新增社區</button></div><div class="panel"><div class="section-title">本公司社區（${state.communities.length} 個）</div><div class="table-wrap"><table><thead><tr><th>社區名稱</th><th>所屬縣市</th><th>狀態</th><th>操作</th></tr></thead><tbody>${state.communities.map(c=>`<tr><td><input id="community-name-${c.id}" value="${escapeAttr(c.name)}"></td><td><select id="community-region-${c.id}"><option value="">未設定</option>${['基隆市','臺北市','新北市','桃園市','新竹市','新竹縣','苗栗縣','臺中市','彰化縣','南投縣','雲林縣','嘉義市','嘉義縣','臺南市','高雄市','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'].map(r=>`<option value="${escapeAttr(r)}" ${c.region===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}</select></td><td><select id="community-status-${c.id}"><option value="active" ${c.status==='active'?'selected':''}>啟用</option><option value="inactive" ${c.status!=='active'?'selected':''}>停用</option></select></td><td><button class="secondary" onclick="saveCommunity(${c.id})">儲存</button></td></tr>`).join('')}</tbody></table></div></div>`}
-function openAddCommunityModal(){
-  const regions=['基隆市','臺北市','新北市','桃園市','新竹市','新竹縣','苗栗縣','臺中市','彰化縣','南投縣','雲林縣','嘉義市','嘉義縣','臺南市','高雄市','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'];
-  const box=openCompanyModal('🏠 新增社區',`<form id="addCommunityForm"><div class="editor-grid"><div><label>社區名稱</label><input id="newCommunityName" required placeholder="例如：綠景莊園"></div><div><label>所屬縣市</label><select id="newCommunityRegion"><option value="">請選擇（之後也可在社區管理修改）</option>${regions.map(r=>`<option value="${escapeAttr(r)}">${escapeHtml(r)}</option>`).join('')}</select></div></div><div class="modal-actions"><button type="button" class="secondary" onclick="closeCompanyModal(this)">取消</button><button type="submit">新增社區</button></div></form>`,false);
-  box.querySelector('#addCommunityForm').addEventListener('submit',addCommunity);
-}
-async function addCommunity(e){e.preventDefault();try{await api('/api/company/communities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('newCommunityName').value,region:$('newCommunityRegion')?.value||''})});closeCompanyModal(e.target.closest('.modal-backdrop'));await loadAll();alert('已新增社區。')}catch(err){alert(err.message)}}
-async function saveCommunity(id){try{await api(`/api/company/communities/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$(`community-name-${id}`).value,region:$(`community-region-${id}`).value,status:$(`community-status-${id}`).value==='active'})});await loadAll()}catch(err){alert(err.message)}}
+function renderCommunities(){const el=$('tab-communities');el.innerHTML=`<div class="panel"><div class="section-title">🏠 社區管理</div><p class="hint">新增社區會在目前畫面中央開啟設定視窗。</p><button onclick="openAddCommunityModal()">＋ 新增社區</button></div><div class="panel"><div class="section-title">本公司社區（${state.communities.length} 個）</div><div class="table-wrap"><table><thead><tr><th>社區名稱</th><th>狀態</th><th>操作</th></tr></thead><tbody>${state.communities.map(c=>`<tr><td><input id="community-name-${c.id}" value="${escapeAttr(c.name)}"></td><td><select id="community-status-${c.id}"><option value="active" ${c.status==='active'?'selected':''}>啟用</option><option value="inactive" ${c.status!=='active'?'selected':''}>停用</option></select></td><td><button class="secondary" onclick="saveCommunity(${c.id})">儲存</button></td></tr>`).join('')}</tbody></table></div></div>`}
+async function addCommunity(e){e.preventDefault();try{await api('/api/company/communities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('newCommunityName').value})});closeCompanyModal(e.target.closest('.modal-backdrop'));await loadAll();alert('已新增社區。')}catch(err){alert(err.message)}}
+async function saveCommunity(id){try{await api(`/api/company/communities/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$(`community-name-${id}`).value,status:$(`community-status-${id}`).value==='active'})});await loadAll()}catch(err){alert(err.message)}}
 function renderSubmissions(){const el=$('tab-submissions');if(!state.submissions.length){el.innerHTML='<div class="panel empty">目前還沒有正式送出的交接紀錄。</div>';return}el.innerHTML=`<div class="panel"><div class="section-title">📋 本公司正式交接紀錄（${state.submissions.length} 筆）</div><div class="table-wrap"><table><thead><tr><th>編號</th><th>送出時間</th><th>填寫人員</th><th>社區</th><th>交接人員</th><th>操作</th></tr></thead><tbody>${state.submissions.map(s=>`<tr><td>${s.id}</td><td>${formatDate(s.created_at)}</td><td>${escapeHtml(s.employee_name||'')}<br><span class="muted">${escapeHtml(s.employee_id||'')}</span></td><td>${escapeHtml(s.community_name||s.data.community_name||'')}</td><td>${escapeHtml(s.data.outgoing_manager||'')} → ${escapeHtml(s.data.incoming_manager||'')}</td><td><button class="secondary" onclick="downloadDocx(${s.id})" ${state.templates.length?'':'disabled'}>產生 Word</button> <button class="danger" onclick="deleteSubmission(${s.id})">刪除</button></td></tr>`).join('')}</tbody></table></div></div>`}
 function renderTemplates(){
   const el=$('tab-templates');
@@ -168,6 +158,8 @@ function renderTemplates(){
   <div class="panel"><div class="section-title">📄 公司制式文件／Word 範本</div>
     <p class="hint">公司可以直接採用平台提供的標準範本，也可以上傳自己的版本。平台範本不會被公司修改；按「使用這份範本」後會複製成公司的版本，之後即可自行改名、更新檔案、設為預設或刪除。</p>
   </div>
+  <div class="panel"><div class="section-title">📚 平台公版文件（${state.platformResources.length} 份）</div><p class="hint">這裡是一般工作文件，不限於交接 Word 範本，例如住戶名冊 Excel、PDF、Word、PowerPoint、TXT、CSV。公司可以先下載確認，也可以直接建立成公司的資源副本。</p>${state.platformResources.length?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>分類</th><th>格式</th><th>說明</th><th>操作</th></tr></thead><tbody>${state.platformResources.map(r=>`<tr><td><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.category||'')}</td><td>${escapeHtml(r.extension||'')}</td><td>${escapeHtml(r.description||'')}</td><td><button class="secondary" onclick="downloadPlatformResource(${r.id})">下載</button> <button class="secondary" onclick="adoptPlatformResource(${r.id})">＋ 採用到公司資源</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前平台尚未提供一般公版文件。</div>'}</div>
+  <div class="panel"><div class="section-title">🏢 本公司已採用的平台公版（${state.companyResources.length} 份）</div>${state.companyResources.length?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>分類</th><th>格式</th><th>建立時間</th><th>操作</th></tr></thead><tbody>${state.companyResources.map(r=>`<tr><td><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.category||'')}</td><td>${escapeHtml(r.extension||'')}</td><td>${formatDate(r.created_at)}</td><td><button class="secondary" onclick="downloadCompanyResource(${r.id})">下載</button> <button class="danger" onclick="deleteCompanyResource(${r.id})">刪除</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">尚未採用平台公版文件。</div>'}</div>
   <div class="panel"><div class="section-title">🏛 平台提供的制式範本（${state.globalTemplates.length} 份）</div>
     ${state.globalTemplates.length?`<div class="table-wrap"><table><thead><tr><th>範本名稱</th><th>建立時間</th><th>狀態</th><th>操作</th></tr></thead><tbody>${globalRows}</tbody></table></div>`:'<div class="empty">目前平台尚未提供制式範本。</div>'}
   </div>
@@ -175,7 +167,6 @@ function renderTemplates(){
     <form id="uploadForm"><div class="row"><input type="text" id="tplName" placeholder="例如：○○物業公司交接清冊標準版" required><input type="file" id="tplFile" accept=".docx" required></div><button type="submit">＋ 上傳公司 Word 範本</button></form>
     ${state.templates.length?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>狀態</th><th>建立時間</th><th>操作</th></tr></thead><tbody>${companyRows}</tbody></table></div>`:'<div class="empty">尚未建立公司範本。您可以從上方平台範本直接「使用」，或自行上傳。</div>'}
   </div>`;
-  renderCompanyResourceManager(el);
   $('uploadForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('name',$('tplName').value);fd.append('template',$('tplFile').files[0]);await api('/api/company/templates',{method:'POST',body:fd});await loadAll();alert('公司範本已上傳。')}catch(err){alert(err.message)}})
 }
 async function adoptTemplate(id){if(!confirm('要把這份平台制式範本複製成您公司的版本嗎？複製後即可自行修改、更新或刪除。'))return;try{await api(`/api/company/templates/${id}/adopt`,{method:'POST'});await loadAll();alert('已建立公司版本，您現在可以自行管理。')}catch(err){alert(err.message)}}
@@ -183,18 +174,6 @@ async function activateTemplate(id){try{await api(`/api/company/templates/${id}/
 async function renameTemplate(id,current){const name=prompt('請輸入新的公司範本名稱：',current);if(name===null)return;if(!name.trim()){alert('名稱不可空白');return}try{await api(`/api/company/templates/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})});await loadAll()}catch(err){alert(err.message)}}
 async function replaceTemplate(id){const input=document.createElement('input');input.type='file';input.accept='.docx';input.onchange=async()=>{if(!input.files[0])return;try{const fd=new FormData();fd.append('template',input.files[0]);await api(`/api/company/templates/${id}/replace`,{method:'POST',body:fd});await loadAll();alert('公司範本檔案已更新。')}catch(err){alert(err.message)}};input.click()}
 async function deleteTemplate(id){if(!confirm('確定刪除這份公司範本嗎？平台原始範本不會受影響。'))return;try{await api(`/api/company/templates/${id}`,{method:'DELETE'});await loadAll()}catch(err){alert(err.message)}}
-async function renderCompanyResourceManager(el){
-  const rows=state.companyResources||[], regions=state.resourceContext?.regions||[];
-  const governmentRows=rows.filter(r=>r.resource_type==='government').map(r=>`<tr><td><strong>${escapeHtml(r.title)}</strong></td><td>${escapeHtml(r.region||'—')}</td><td>${r.is_active?'<span class="tag gold">上架中</span>':'停用'}</td><td>${escapeHtml(r.original_filename||'')}</td><td><button class="secondary" onclick="downloadCompanyResource(${r.id})">下載</button> <button class="danger" onclick="deleteCompanyResource(${r.id})">刪除</button></td></tr>`).join('');
-  const companyRows=rows.filter(r=>r.resource_type==='company').map(r=>`<tr><td><strong>${escapeHtml(r.title)}</strong></td><td>${r.is_active?'<span class="tag gold">全公司可見</span>':'停用'}</td><td>${escapeHtml(r.original_filename||'')}</td><td><button class="secondary" onclick="downloadCompanyResource(${r.id})">下載</button> <button class="danger" onclick="deleteCompanyResource(${r.id})">刪除</button></td></tr>`).join('');
-  const wrap=document.createElement('div');wrap.innerHTML=`<div class="panel resource-admin-panel"><div class="section-title">📣 公司公版｜全公司人員可收到</div><p class="hint">公司內勤上傳後，現場人員在「公司資源／文件公版」即可看到；不受現場目錄名稱影響，系統以模組權限與 action 分流。</p><form id="companyResourceUploadForm"><div class="row"><input id="resourceCompanyTitle" required placeholder="例如：公司電話禮儀公版"><input id="resourceCompanyFile" type="file" required accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ppt,.pptx,.txt"></div><textarea id="resourceCompanyDesc" rows="2" placeholder="文件說明（可選）"></textarea><button type="submit">＋ 上傳公司公版</button></form>${companyRows?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>狀態</th><th>檔案</th><th>操作</th></tr></thead><tbody>${companyRows}</tbody></table></div>`:'<div class="empty">目前尚未上傳公司公版。</div>'}</div><div class="panel resource-admin-panel"><div class="section-title">🏛 公家單位公版｜依社區所屬區域分流</div><p class="hint">例如：臺中市公家單位公版只會提供給目前派駐臺中市社區的現場人員；外縣市分開管理。</p><form id="governmentResourceUploadForm"><div class="row"><input id="resourceGovTitle" required placeholder="例如：臺中市政府垃圾清運規範"><select id="resourceGovRegion" required><option value="">選擇適用縣市</option>${regions.map(r=>`<option value="${escapeAttr(r)}">${escapeHtml(r)}</option>`).join('')}</select><input id="resourceGovFile" type="file" required accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ppt,.pptx,.txt"></div><textarea id="resourceGovDesc" rows="2" placeholder="文件說明（可選）"></textarea><button type="submit">＋ 上傳公家單位公版</button></form>${governmentRows?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>適用區域</th><th>狀態</th><th>檔案</th><th>操作</th></tr></thead><tbody>${governmentRows}</tbody></table></div>`:'<div class="empty">目前尚未上傳公家單位公版。</div>'}</div>`;
-  el.appendChild(wrap);
-  wrap.querySelector('#companyResourceUploadForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('title',wrap.querySelector('#resourceCompanyTitle').value);fd.append('description',wrap.querySelector('#resourceCompanyDesc').value);fd.append('resource_type','company');fd.append('file',wrap.querySelector('#resourceCompanyFile').files[0]);await api('/api/company/resources',{method:'POST',body:fd});await loadAll();alert('公司公版已上傳，現場人員可在公司資源中收到。')}catch(err){alert(err.message)}});
-  wrap.querySelector('#governmentResourceUploadForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('title',wrap.querySelector('#resourceGovTitle').value);fd.append('description',wrap.querySelector('#resourceGovDesc').value);fd.append('resource_type','government');fd.append('region',wrap.querySelector('#resourceGovRegion').value);fd.append('file',wrap.querySelector('#resourceGovFile').files[0]);await api('/api/company/resources',{method:'POST',body:fd});await loadAll();alert('公家單位公版已上傳，系統會依社區區域分流。')}catch(err){alert(err.message)}});
-}
-async function downloadCompanyResource(id){window.open(`/api/company/resources/${id}/download`,'_blank');}
-async function deleteCompanyResource(id){if(!confirm('確定刪除這份公版文件嗎？刪除後現場人員將無法再看到。'))return;try{await api(`/api/company/resources/${id}`,{method:'DELETE'});await loadAll()}catch(e){alert(e.message)}}
-
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function escapeAttr(s){return escapeHtml(s)}
 boot();
@@ -282,3 +261,8 @@ window.openScheduleModule=openScheduleModule;window.openScheduleStaffEditor=open
 (function(){if(document.getElementById('scheduleRoleColorsV7'))return;const s=document.createElement('style');s.id='scheduleRoleColorsV7';s.textContent=`.schedule-rule-tabs button{font-weight:700;min-width:110px}.schedule-rule-tabs .schedule-tab-admin{color:#17624b;background:#e6f5ee;border-color:#9fd3bd}.schedule-rule-tabs .schedule-tab-security{color:#174f78;background:#e7f1fb;border-color:#9dc5e5}.schedule-rule-tabs .schedule-tab-mobile{color:#7a4b12;background:#fff2d8;border-color:#e4c17d}.schedule-holiday-note{background:#fff8e7;border:1px solid #efd79b;padding:10px 12px;border-radius:9px}`;document.head.appendChild(s)})();
 
 (function(){if(document.getElementById('schedulePlatformRuleV8'))return;const s=document.createElement('style');s.id='schedulePlatformRuleV8';s.textContent=`.schedule-platform-toggle{display:flex;align-items:center;gap:8px;margin:0 0 14px;padding:10px 12px;border:1px solid #b9d8cb;background:#f0f8f4;border-radius:10px;font-weight:700;color:#245b4a}.schedule-platform-toggle input{width:18px;height:18px}`;document.head.appendChild(s)})();
+
+async function downloadPlatformResource(id){window.open(`/api/company/platform-resources/${id}/download`,'_blank')}
+async function adoptPlatformResource(id){if(!confirm('要把這份平台公版文件複製到本公司資源嗎？'))return;try{await api(`/api/company/platform-resources/${id}/adopt`,{method:'POST'});await loadAll();alert('已採用這份平台公版文件。')}catch(e){alert(e.message)}}
+async function downloadCompanyResource(id){window.open(`/api/company/resources/${id}/download`,'_blank')}
+async function deleteCompanyResource(id){if(!confirm('確定刪除本公司的這份資源嗎？平台原始公版不會受影響。'))return;try{await api(`/api/company/resources/${id}`,{method:'DELETE'});await loadAll();alert('已刪除公司資源。')}catch(e){alert(e.message)}}

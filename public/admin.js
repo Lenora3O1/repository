@@ -1,4 +1,4 @@
-let state={submissions:[],templates:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{mode:'platform',tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]},platformRules:null,platformRuleHistory:[]};
+let state={submissions:[],templates:[],platformResources:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{mode:'platform',tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]},platformRules:null,platformRuleHistory:[]};
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
@@ -18,7 +18,7 @@ async function loadAll(){
 }
 async function loadTenants(){state.tenants=await api('/api/admin/tenants')}
 async function loadSubmissions(){const r=await api('/api/admin/submissions');state.submissions=r.submissions}
-async function loadTemplates(){state.templates=await api('/api/admin/templates')}
+async function loadTemplates(){state.templates=await api('/api/admin/templates');state.platformResources=await api('/api/admin/platform-resources')}
 async function loadStaff(){state.staff=await api('/api/admin/staff')}
 async function loadConfig(){state.config=await api('/api/admin/form-config');if(!state.config||!Array.isArray(state.config.pages)||!Array.isArray(state.config.questions)){throw new Error('中央表單設定格式不完整，請檢查 /data/form-config.json。')}}
 function renderTenants(){
@@ -65,8 +65,12 @@ function renderTemplates(){
   <div class="panel"><div class="section-title">🏛 平台制式範本</div><p class="hint">這裡由系統總管理員提供「雛型」。各公司管理員可以自行選擇使用，系統會複製成該公司的版本；公司後續可以自行修改、更新或刪除，不會影響平台原始範本。</p>
   <form id="uploadGlobalTemplate"><div class="row"><input type="text" id="globalTplName" placeholder="例如：平台標準交接清冊 2026" required><input type="file" id="globalTplFile" accept=".docx" required></div><button type="submit">＋ 上傳平台制式範本</button></form></div>
   <div class="panel"><div class="section-title">📄 平台範本清單（${global.length} 份）</div>${global.length?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>狀態</th><th>建立時間</th><th>操作</th></tr></thead><tbody>${globalRows}</tbody></table></div>`:'<div class="empty">目前沒有平台制式範本。你可以從這裡上傳第一份雛型。</div>'}</div>
+  <div class="panel"><div class="section-title">📚 平台公版文件（一般文書）</div><p class="hint">這裡不是交接 Word 範本。平台公版可放住戶名冊 Excel、PDF、一般 Word、PowerPoint、TXT、CSV 等公司／現場工作會使用的文件。公司可以看到並自行採用；不會改動原本的交接 Word 產生功能。</p>
+  <form id="uploadPlatformResource"><div class="row"><input type="text" id="platformResourceName" placeholder="例如：住戶名冊平台公版 V2" required><input type="text" id="platformResourceCategory" value="住戶名冊" placeholder="分類，例如：住戶名冊／公司工作文件"></div><div class="row"><input type="file" id="platformResourceFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ppt,.pptx,.txt,.csv" required><input type="text" id="platformResourceDescription" placeholder="用途說明（可留白）"></div><button type="submit">＋ 上傳平台公版文件</button></form></div>
+  <div class="panel"><div class="section-title">📚 平台公版文件清單（${state.platformResources.length} 份）</div>${state.platformResources.length?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>分類</th><th>格式</th><th>說明</th><th>建立時間</th><th>操作</th></tr></thead><tbody>${state.platformResources.map(r=>`<tr><td><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.category||'')}</td><td>${escapeHtml(r.extension||'')}</td><td>${escapeHtml(r.description||'')}</td><td>${formatDate(r.created_at)}</td><td><button class="secondary" onclick="downloadPlatformResource(${r.id})">下載</button> <button class="danger" onclick="deletePlatformResource(${r.id})">刪除</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有平台公版文件。</div>'}</div>
   <div class="panel"><div class="section-title">🏢 各公司已建立的範本（${company.length} 份）</div><p class="hint">這些是公司管理員從平台範本建立或自行上傳的版本。總後臺可以查看，但內容與管理權仍屬各公司。</p>${company.length?`<div class="table-wrap"><table><thead><tr><th>名稱</th><th>公司</th><th>狀態</th><th>建立時間</th></tr></thead><tbody>${companyRows}</tbody></table></div>`:'<div class="empty">目前還沒有公司自己的範本。</div>'}</div>`;
   $('uploadGlobalTemplate').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('name',$('globalTplName').value);fd.append('template',$('globalTplFile').files[0]);await api('/api/admin/templates',{method:'POST',body:fd});await loadTemplates();renderTemplates();alert('平台制式範本已上傳。')}catch(err){alert(err.message)}})
+  $('uploadPlatformResource').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('name',$('platformResourceName').value);fd.append('category',$('platformResourceCategory').value);fd.append('description',$('platformResourceDescription').value);fd.append('file',$('platformResourceFile').files[0]);await api('/api/admin/platform-resources',{method:'POST',body:fd});await loadTemplates();renderTemplates();alert('平台公版文件已上傳。')}catch(err){alert(err.message)}})
 }
 async function activateTemplate(id){try{await api(`/api/admin/templates/${id}/activate`,{method:'POST'});await loadTemplates();renderTemplates()}catch(err){alert(err.message)}}
 async function deleteTemplate(id){if(!confirm('確定刪除這份平台制式範本嗎？已經複製到各公司的版本不會受影響。'))return;try{await api(`/api/admin/templates/${id}`,{method:'DELETE'});await loadTemplates();renderTemplates()}catch(err){alert(err.message)}}
@@ -504,3 +508,6 @@ function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&am
 checkSession();
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCustomMenuEditor()});
+
+async function downloadPlatformResource(id){window.open(`/api/admin/platform-resources/${id}/download`,'_blank')}
+async function deletePlatformResource(id){if(!confirm('確定刪除這份平台公版文件嗎？已經被公司採用的複本不會受影響。'))return;try{await api(`/api/admin/platform-resources/${id}`,{method:'DELETE'});await loadTemplates();renderTemplates()}catch(e){alert(e.message)}}
