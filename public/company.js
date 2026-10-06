@@ -2,7 +2,7 @@ let state={tenant:null,staff:[],admins:[],currentUserId:null,currentAdminLevel:'
 const JOB_CATEGORIES=['社區管理','會計','總務','人事','勤務','秘書','保全','機動','財務','其他'];
 const JOB_LEVELS=['經理','副理','助理','一般'];
 const STAFF_PERMISSIONS=[['todo','代辦事項'],['work-journal','工作日誌'],['finance','財務／會計'],['committee','管理委員會'],['residents','住戶名冊'],['vendors','廠商聯繫'],['handover','交接清冊'],['company-resources','公司資源'],['manage-staff','公司人員管理'],['manage-communities','社區管理'],['view-submissions','交接紀錄'],['manage-templates','公司文件／範本'],['schedule','班表']];
-const COMPANY_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','schedule'].includes(x[0]));
+const COMPANY_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','schedule'].includes(x[0]));
 const SITE_PERMISSIONS=STAFF_PERMISSIONS.filter(x=>['todo','work-journal','finance','committee','residents','vendors','handover','schedule'].includes(x[0]));
 const DEFAULT_STAFF_PERMISSIONS=STAFF_PERMISSIONS.map(x=>x[0]);
 async function loadPermissionCatalog(){
@@ -47,24 +47,9 @@ function suggestedPermissions(jobCategories=[],workType='site'){
   return [...out];
 }
 const $=id=>document.getElementById(id);
-let __sopCompanyModulePromise=null;
-async function ensureSopCompanyModule(){
-  if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return window.SOPCompanyModule;
-  if(__sopCompanyModulePromise) return __sopCompanyModulePromise;
-  __sopCompanyModulePromise=new Promise((resolve,reject)=>{
-    const existing=document.querySelector('script[data-sop-company-module]') || document.querySelector('script[src*="/modules/sop-company.js"]');
-    if(existing){
-      if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return resolve(window.SOPCompanyModule);
-      existing.addEventListener('load',()=>window.SOPCompanyModule?resolve(window.SOPCompanyModule):reject(new Error('SOP 模組載入後沒有初始化')),{once:true});
-      existing.addEventListener('error',()=>reject(new Error('SOP 模組載入失敗')),{once:true});
-      return;
-    }
-    const script=document.createElement('script'); script.src='/modules/sop-company.js?v=13'; script.async=true; script.dataset.sopCompanyModule='1';
-    script.onload=()=>window.SOPCompanyModule?resolve(window.SOPCompanyModule):reject(new Error('SOP 模組載入後沒有初始化'));
-    script.onerror=()=>reject(new Error('SOP 模組檔案無法載入，請確認 /modules/sop-company.js 已部署'));
-    document.head.appendChild(script);
-  });
-  try{return await __sopCompanyModulePromise;}finally{__sopCompanyModulePromise=null;}
+function ensureSopCompanyModule(){
+  if(window.SOPCompanyModule&&typeof window.SOPCompanyModule.render==='function') return Promise.resolve(window.SOPCompanyModule);
+  return Promise.reject(new Error('SOP 模組尚未載入，請重新整理公司後台頁面'));
 }
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function applyCompanyBranding(){try{const b=await api('/api/company/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);if(b.logoText)$('companyBrand').textContent=b.logoText;else if(b.title)$('companyBrand').textContent=b.title;if(b.subtitle)$('tenantName').textContent=b.subtitle;if(b.loginTitle)$('companyLoginTitle').textContent='🔐 '+b.loginTitle;if(b.loginHint)$('companyLoginHint').textContent=b.loginHint;if(b.intro)$('companyIntro').textContent=b.intro;}catch(e){console.warn('Company branding load failed',e)}}
