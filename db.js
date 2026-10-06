@@ -349,6 +349,27 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboard_pins (
 
 // V5.1：現場人員代辦事項。每位人員獨立保存，完成後不刪除，改為封存並保留時間。
 
+// V5.12：社區所屬行政區，供「公家單位公版」依區域自動分流。
+addColumnIfMissing('communities', 'region', "TEXT DEFAULT ''");
+
+// V5.13：公司資源公版。company = 全公司公版；government = 依社區行政區分流的公家單位公版。
+db.exec(`CREATE TABLE IF NOT EXISTS company_resources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  resource_type TEXT NOT NULL DEFAULT 'company',
+  region TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  filename TEXT NOT NULL,
+  original_filename TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT DEFAULT '',
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_company_resources_tenant_type_region ON company_resources(tenant_id, resource_type, region, is_active, updated_at);`);
+
 // V5.10：案場 SOP。SOP 屬於公司，可指定全部案場或特定案場；檔案實體存放於 DATA_DIR/uploads/sops。
 db.exec(`CREATE TABLE IF NOT EXISTS sops (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
