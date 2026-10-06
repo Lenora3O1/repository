@@ -161,7 +161,7 @@ function requireStaffSopUser(req,res,next){ const u=getUser(req); const t=u?.ten
 function hasSiteAccess(u){ if(!u||!u.tenant_id||u.role==='company_admin') return false; return db.prepare("SELECT 1 FROM staff_communities sc JOIN communities c ON c.id=sc.community_id WHERE sc.staff_id=? AND c.tenant_id=? AND c.status='active' LIMIT 1").get(u.id,u.tenant_id) || db.prepare("SELECT 1 FROM staff_work_assignments a JOIN communities c ON c.id=a.community_id WHERE a.staff_id=? AND a.tenant_id=? AND a.scope_type='site' AND c.status='active' LIMIT 1").get(u.id,u.tenant_id); }
 function hasCompanyAccess(u){ return !!u && (u.role==='company_admin' || ['internal','hybrid'].includes(u.work_type||'')); }
 function requireCompanyAdmin(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && hasCompanyAccess(u)) return next(); return res.status(403).json({error:'這個帳號沒有公司內部後台權限'}); }
-function requireCompanyPermission(key){ return (req,res,next)=>{ const u=getUser(req); if(u?.role==='company_admin') return next(); if(key==='manage-sop' && u && ['internal','hybrid'].includes(u.work_type||'')) return next(); const a=getCompanyAssignment(u); if(effectivePermissions(u).includes(key)) return next(); return res.status(403).json({error:'您目前沒有這項公司內部功能的權限'}); }; }
+function requireCompanyPermission(key){ return (req,res,next)=>{ const u=getUser(req); if(u?.role==='company_admin') return next(); const a=getCompanyAssignment(u); if(effectivePermissions(u).includes(key)) return next(); return res.status(403).json({error:'您目前沒有這項公司內部功能的權限'}); }; }
 function isCompanyRequest(req){ return String(req.path||'').startsWith('/api/company/'); }
 function isStaffRequest(req){ return String(req.path||'').startsWith('/api/staff/'); }
 function getScopedSessionUserId(req){
@@ -388,7 +388,6 @@ function suggestedPermissionsForUser(u){
   if(has('人事')) out.add('manage-staff');
   if(has('勤務')) out.add('manage-staff');
   if(has('社區管理')) {out.add('manage-communities');out.add('view-submissions');}
-  if(['internal','hybrid'].includes(u?.work_type||'')) out.add('manage-sop');
   if(['internal','hybrid'].includes(u?.work_type||'')) out.add('schedule');
   if((u?.work_type||'site')!=='internal' && (has('社區管理')||has('秘書')||has('保全')||has('機動'))) {['todo','work-journal','committee','residents','vendors','handover'].forEach(x=>out.add(x));out.add('schedule');}
   if(!out.size) out.add((u?.work_type||'site')==='internal'?'company-resources':'todo');
