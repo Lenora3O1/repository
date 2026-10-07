@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const XLSX = require('xlsx');
 const db = require('./db');
 const { generateDocx } = require('./generate');
 const { analyzeTemplate } = require('./template-analyzer');
@@ -25,6 +26,7 @@ const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const TEMPLATES_DIR = path.join(DATA_DIR, 'uploads', 'templates');
 const PLATFORM_RESOURCES_DIR = path.join(DATA_DIR, 'uploads', 'platform-resources');
+const RESIDENT_IMPORTS_DIR = path.join(DATA_DIR, 'uploads', 'resident-imports');
 fs.mkdirSync(PLATFORM_RESOURCES_DIR, { recursive: true });
 const SOPS_DIR = path.join(DATA_DIR, 'uploads', 'sops');
 const GENERATED_DIR = path.join(DATA_DIR, 'generated');
@@ -130,7 +132,7 @@ function writePlatformRules(input, actor='system'){
   fs.writeFileSync(PLATFORM_RULES_HISTORY_PATH,JSON.stringify(history,null,2),'utf-8');
   return next;
 }
-for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [TEMPLATES_DIR, SOPS_DIR, GENERATED_DIR, RESIDENT_IMPORTS_DIR]) fs.mkdirSync(dir, { recursive: true });
 
 const sopUpload=multer({
   storage:multer.diskStorage({
@@ -1153,6 +1155,23 @@ app.delete('/api/admin/platform-resources/:id',requireSuperAdmin,(req,res)=>{
   if(r){const p=path.join(PLATFORM_RESOURCES_DIR,r.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM platform_resources WHERE id=?').run(r.id);}
   res.json({success:true});
 });
+
+// 住戶名冊公版：現場人員可直接取得總後台提供的最新住戶名冊範本。
+app.get('/api/staff/platform-resources', requireStaffFiller, (req,res)=>{
+  const category=String(req.query?.category||'').trim();
+  const rows=db.prepare(
+    "SELECT id,name,original_name,extension,category,description,created_at FROM platform_resources WHERE is_active=1 AND (?='' OR category=? OR category LIKE ?) ORDER BY id DESC"
+  ).all(category,category,category+'／%');
+  res.json({platformResources:rows});
+});
+app.get('/api/staff/platform-resources/:id/download', requireStaffFiller, (req,res)=>{
+  const r=db.prepare('SELECT * FROM platform_resources WHERE id=? AND is_active=1').get(Number(req.params.id));
+  if(!r)return res.status(404).json({error:'找不到平台公版文件'});
+  const p=path.join(PLATFORM_RESOURCES_DIR,r.filename);
+  if(!fs.existsSync(p))return res.status(404).json({error:'檔案不存在'});
+  res.download(p,r.original_name);
+});
+
 app.get('/api/company/platform-resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({platformResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM platform_resources WHERE is_active=1 ORDER BY category,name,id DESC').all(),companyResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM company_resources WHERE tenant_id=? AND is_active=1 ORDER BY category,name,id DESC').all(tenantId(req))}));
 app.get('/api/company/platform-resources/:id/download',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
   const r=db.prepare('SELECT * FROM platform_resources WHERE id=? AND is_active=1').get(Number(req.params.id));
@@ -1180,8 +1199,123 @@ app.delete('/api/company/resources/:id',requireCompanyAdmin,requireCompanyPermis
   if(r){const p=path.join(PLATFORM_RESOURCES_DIR,r.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM company_resources WHERE id=? AND tenant_id=?').run(r.id,tenantId(req));}
   res.json({success:true});
 });
+// ===== 智慧住戶名冊 =====
+const RESIDENT_CATEGORIES=new Set(['residents-contact','residents-owners','residents-tenants']);
+const RESIDENT_HEADER_ALIASES={
+  building:['棟','棟別','棟號','大樓','大樓別','building','building_no','block'],
+  unit:['戶號','戶別','戶號碼','門牌號','房號','unit','unit_no','house_no'],
+  floor:['樓層','樓','層','floor','floor_no'],
+  name:['姓名','住戶姓名','所有權人','承租人','戶長','name','owner','tenant'],
+  phone:['電話','聯絡電話','手機','手機號碼','聯絡手機','phone','mobile','tel'],
+  address:['地址','門牌','住址','完整地址','address'],
+  relation:['身分','身份','關係','住戶身分','relation','role']
+};
+function residentCleanHeader(v){return String(v??'').trim().toLowerCase().replace(/[\s_\-（）()]/g,'');}
+function residentHeaderMap(headers){
+  const out={};
+  const normalized=headers.map(h=>({raw:String(h??'').trim(),key:residentCleanHeader(h)}));
+  for(const [field,aliases] of Object.entries(RESIDENT_HEADER_ALIASES)){
+    const hit=normalized.find(x=>aliases.some(a=>residentCleanHeader(a)===x.key));
+    if(hit)out[field]=hit.raw;
+  }
+  return out;
+}
+function residentCell(row,key){const v=row[key];return v===undefined||v===null?'':String(v).trim();}
+function residentNormalizeRow(row,map){
+  let building=residentCell(row,map.building),unit=residentCell(row,map.unit),floor=residentCell(row,map.floor),name=residentCell(row,map.name),phone=residentCell(row,map.phone),address=residentCell(row,map.address),relation=residentCell(row,map.relation);
+  if(!unit&&address){const m=address.match(/([A-Za-z一二三四五六七八九十百千\u4e00-\u9fff]?[\-]?[0-9]{1,5}號?)/);if(m)unit=m[1];}
+  if(!floor){const m=String(unit||address).match(/(?:[BbFf]|地下|地上)?\s*(\d{1,3})\s*(?:樓|F|f)/);if(m)floor=m[1];}
+  if(!building){const m=String(unit||address).match(/^([A-Za-zＡ-Ｚａ-ｚ一二三四五六七八九十百千]+)[\s\-]*/);if(m)building=m[1];}
+  const known=new Set(Object.values(map));const extra=Object.entries(row).filter(([k,v])=>v!==undefined&&v!==null&&String(v).trim()!==''&&!known.has(k)).map(([k,v])=>`${k}：${String(v).trim()}`).join('；');
+  return {building,unit,floor,name,phone,address,extra,relation,raw:row};
+}
+function residentLooksLikeMatrixUnit(v){
+  return /^\s*\d+-\d+-\d{4}(?:\([^)]*\))?\s*$/.test(String(v??''));
+}
+function residentMatrixSheet(ws){
+  const vals=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});
+  const unitRows=[];
+  for(let ri=0;ri<vals.length;ri++){
+    const hits=[];
+    for(let ci=0;ci<(vals[ri]||[]).length;ci++) if(residentLooksLikeMatrixUnit(vals[ri][ci])) hits.push([ci,String(vals[ri][ci]).trim()]);
+    if(hits.length) unitRows.push({ri,hits});
+  }
+  if(unitRows.length<2)return null;
+  const title=String(vals[0]?.[0]||ws.name||'').trim();
+  const rows=[];
+  for(let i=0;i<unitRows.length;i++){
+    const {ri,hits}=unitRows[i];
+    const nextRi=i+1<unitRows.length?unitRows[i+1].ri:vals.length;
+    const floorFromRow=String(vals[ri]?.[0]??'').trim();
+    for(const [ci,unitRaw] of hits){
+      const unit=String(unitRaw).replace(/\s+/g,'');
+      let floor=floorFromRow;
+      if(!floor){const m=unit.match(/-(\d{4})(?:\(|$)/);if(m)floor=String(parseInt(m[1].slice(0,2),10));}
+      const nameRow=vals[ri+1]||[], phoneRow=vals[ri+2]||[];
+      const name1=String(nameRow[ci]??'').trim();
+      const name2=String(nameRow[ci+1]??'').trim();
+      const phone1=String(phoneRow[ci]??'').trim();
+      const phone2=String(phoneRow[ci+1]??'').trim();
+      const extras=[];
+      for(let rr=ri+3;rr<Math.min(nextRi,ri+8);rr++){
+        for(const cc of [ci,ci+1]){const v=String(vals[rr]?.[cc]??'').trim();if(v)extras.push(v);}
+      }
+      const extraParts=[];
+      if(name2)extraParts.push(`其他聯絡人：${name2}`);
+      const phones=[phone1,phone2].filter(Boolean);
+      if(extras.length)extraParts.push(...extras);
+      if(!name1&&!name2&&!phones.length&&!extraParts.length)continue;
+      rows.push({building:title,unit,floor,name:name1||name2,phone:phones.join('；'),address:'',extra:extraParts.join('；'),relation:unit.includes('(租')?'承租相關標記':'',raw:{sheet:ws.name,unit_col:ci+1,secondary_name:name2}});
+    }
+  }
+  return rows.length?{rows,detected:['棟別','戶號','樓層','主要聯絡人','其他聯絡人','電話','原始備註'],mode:'matrix',sheet:ws.name}:null;
+}
+function residentParseFile(filePath){
+  const wb=XLSX.readFile(filePath,{cellDates:false,raw:false});
+  if(!wb.SheetNames.length)throw new Error('檔案沒有可讀取的工作表');
+  // 先辨識「住戶聯繫表」常見的橫向矩陣格式：一戶佔兩欄，樓層/戶號/姓名/電話/車位逐列排列。
+  const matrix=[];
+  for(const sheetName of wb.SheetNames){
+    const hit=residentMatrixSheet(wb.Sheets[sheetName]);
+    if(hit)matrix.push(hit);
+  }
+  if(matrix.length){
+    const rows=matrix.flatMap(x=>x.rows);
+    return {rows,detected:[...new Set(matrix.flatMap(x=>x.detected))],headers:[],mode:'matrix',sheets:matrix.map(x=>x.sheet)};
+  }
+  // 一般直向 Excel/CSV 則沿用欄名智慧辨識。
+  const sheetName=wb.SheetNames[0];
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:false});
+  if(!rows.length)throw new Error('檔案沒有資料列');
+  const headers=Object.keys(rows[0]);
+  const map=residentHeaderMap(headers);
+  const parsed=rows.map(r=>residentNormalizeRow(r,map)).filter(r=>Object.values(r).some(v=>String(v||'').trim()!==''));
+  if(!parsed.length)throw new Error('檔案沒有可匯入的住戶資料');
+  return {rows:parsed,detected:Object.keys(map),headers,mode:'table',sheets:[sheetName]};
+}
+function residentCategory(req){const c=String(req.query?.category||req.body?.category||'');if(!RESIDENT_CATEGORIES.has(c))throw new Error('住戶名冊分類無效');return c;}
+function residentAccessibleCommunity(req,cid){return !!cid&&!!getAccessibleCommunity(req,Number(cid));}
+function residentCanUpload(u){if(!u||u.role==='company_admin')return false;const vals=[u.job_level,u.job_category,u.position,...getJobCategories(u)];return vals.some(v=>String(v||'').includes('經理'))||vals.some(v=>String(v||'').includes('社區管理'));}
+function residentActiveCommunity(req){const cid=Number(req.session?.activeCommunityId||0);if(cid&&residentAccessibleCommunity(req,cid))return db.prepare('SELECT id,name,region FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(cid,tenantId(req));const ids=getUserSiteCommunityIds(getUser(req));if(ids.length===1)return db.prepare('SELECT id,name,region FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(ids[0],tenantId(req));return null;}
+app.get('/api/staff/residents',requireStaffFiller,(req,res)=>{
+  try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req);if(!c)return res.status(400).json({error:'請先選擇目前要操作的案場'});const imp=db.prepare('SELECT * FROM resident_imports WHERE tenant_id=? AND community_id=? AND category=? AND is_active=1 ORDER BY id DESC LIMIT 1').get(tenantId(req),c.id,category);const rows=imp?db.prepare('SELECT building,unit,floor,name,phone,address,extra FROM resident_records WHERE import_id=? ORDER BY id').all(imp.id):[];const pref=db.prepare('SELECT sort_key FROM resident_sort_preferences WHERE staff_id=? AND tenant_id=? AND community_id=? AND category=?').get(u.id,tenantId(req),c.id,category);res.json({community:c,category,records:rows,preference:{sort:pref?.sort_key||'building'},last_import:imp||null,viewer:{can_upload:residentCanUpload(u)}});}catch(e){res.status(400).json({error:e.message||'無法載入住戶資料'});}
+});
+app.put('/api/staff/residents/preference',requireStaffFiller,(req,res)=>{try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req),sort=['building','unit','floor'].includes(String(req.body?.sort||''))?String(req.body.sort):'building';if(!c)return res.status(400).json({error:'請先選擇案場'});db.prepare(`INSERT INTO resident_sort_preferences(staff_id,tenant_id,community_id,category,sort_key,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(staff_id,community_id,category) DO UPDATE SET sort_key=excluded.sort_key,updated_at=excluded.updated_at`).run(u.id,tenantId(req),c.id,category,sort,now());res.json({success:true,sort});}catch(e){res.status(400).json({error:e.message||'排序設定失敗'});}});
+app.post('/api/staff/residents/import',requireStaffFiller,residentUpload.single('file'),(req,res)=>{
+  if(!req.file)return res.status(400).json({error:'請選擇 Excel／CSV 檔案'});
+  try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req);if(!c)throw new Error('請先選擇目前要操作的案場');if(!residentCanUpload(u))throw new Error('目前帳號只有主管／社區管理人員可以上傳住戶名冊');const parsed=residentParseFile(path.join(RESIDENT_IMPORTS_DIR,req.file.filename));const t=now();const info=db.prepare('INSERT INTO resident_imports(tenant_id,community_id,category,original_filename,imported_at,imported_by,imported_by_name,row_count,detected_fields_json,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)').run(tenantId(req),c.id,category,req.file.originalname,t,u.id,u.name||u.employee_id||'',parsed.rows.length,JSON.stringify(parsed.detected));db.prepare('UPDATE resident_imports SET is_active=0 WHERE tenant_id=? AND community_id=? AND category=? AND id<>?').run(tenantId(req),c.id,category,info.lastInsertRowid);const ins=db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');const tx=db.transaction(rows=>{for(const r of rows)ins.run(info.lastInsertRowid,tenantId(req),c.id,category,r.building,r.unit,r.floor,r.name,r.phone,r.address,[r.relation,r.extra].filter(Boolean).join('；'),JSON.stringify(r.raw));});tx(parsed.rows);res.json({success:true,imported:parsed.rows.length,detected_fields:parsed.detected,message:`已匯入 ${parsed.rows.length} 筆，並成為目前這個案場的最新${category==='residents-contact'?'住戶聯繫表':category==='residents-owners'?'區分所有權人':'承租人'}。`});}catch(e){res.status(400).json({error:e.message||'匯入失敗'});}finally{ /* 保留原始匯入檔，方便日後追溯 */ }
+});
+
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
 const upload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,Date.now()+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>file.originalname.toLowerCase().endsWith('.docx')?cb(null,true):cb(new Error('只允許上傳 .docx 檔案'))});
+const residentUpload=multer({
+  storage:multer.diskStorage({
+    destination:(req,file,cb)=>cb(null,RESIDENT_IMPORTS_DIR),
+    filename:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();const base=path.basename(file.originalname||'resident',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'resident';cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`)}
+  }),
+  limits:{fileSize:20*1024*1024},
+  fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.xlsx','.xls','.csv','.txt'].includes(ext)?null:new Error('住戶名冊只允許 Excel（xlsx/xls）、CSV 或 TXT'),true);}
+});
 const analyzerUpload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,'__analysis__'+Date.now()+'-'+file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>['.docx','.xlsx','.xlsm'].includes(path.extname(file.originalname).toLowerCase())?cb(null,true):cb(new Error('只允許上傳 .docx、.xlsx、.xlsm 檔案'))});
 app.post('/api/admin/template-analyze',requireSuperAdmin,analyzerUpload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});const filePath=path.join(TEMPLATES_DIR,req.file.filename);try{const result=analyzeTemplate(filePath);res.json({success:true,analysis:result});}catch(err){console.error(err);res.status(400).json({error:'模板分析失敗',detail:err.message});}finally{try{fs.unlinkSync(filePath)}catch(e){}}});
 app.post('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),upload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});db.prepare('INSERT INTO templates (name,filename,is_active,created_at,tenant_id) VALUES (?,?,0,?,?)').run(req.body.name||req.file.originalname,req.file.filename,now(),tenantId(req));res.json({success:true});});
