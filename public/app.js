@@ -1,10 +1,7 @@
 let formConfig=null, answers={}, currentPage=0, draftId=null, draftCommunityId=null, autosaveTimer=null, saving=false, dirty=false, communities=[];
-const DEFAULT_STAFF_UI_COPY={workspaceLoading:'正在讀取資料，請稍候…',moduleDefaultDescription:'這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。',moduleDefaultNote:'您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。',todoDescription:'目前需要處理的工作會顯示在這裡；完成後會自動移到「已封存」。',todoEmpty:'目前尚無代辦事項。',archivedDescription:'已完成的代辦事項會保留在這裡，不會被刪除。',archivedEmpty:'查無符合條件的封存紀錄。',handoverDescription:'交接相關工作集中在這裡；完成後不會一直顯示在工作台首頁。',handoverEmpty:'目前沒有未完成的交接紀錄。',sopIntro:'目前登入職務：{{job}}。{{scope}}只會顯示您目前有權限閱讀的內容。',sopEmpty:'目前還沒有可閱讀的 SOP。公司基本 SOP 與本案場注意事項會依您的職務自動分流。',managerUploadEyebrow:'📤 經理分流上傳',managerUploadTitle:'上傳社區 SOP',managerUploadHint:'只要您的身分是經理即可上傳。不論公司內勤或派駐社區的經理，都可以把 SOP 回傳公司管理；駐點經理只會看到自己的派駐社區，內勤經理可選擇本公司啟用中的社區。',managerUploadButton:'📤 上傳 SOP',managerUploadSubmit:'上傳並回傳公司',managerUploadSuccess:'✅ SOP 已上傳，也已回傳公司管理端。',moduleDescriptions:{todo:'目前需要處理的工作會顯示在這裡；完成後會自動移到「已封存」。','work-journal':'工作日誌會集中記錄日常工作與處理進度，方便日後追蹤與交接。',finance:'財務相關工作與資料會依目前帳號權限集中顯示在這裡。',committee:'管理委員會相關資料與工作會集中顯示在這裡。',residents:'住戶相關資料與工作會依目前帳號權限顯示在這裡。',vendors:'廠商聯繫與合作資料會集中顯示在這裡，方便查詢與後續處理。',handover:'交接相關工作集中在這裡；完成後不會一直顯示在工作台首頁。','company-resources':'公司提供的文件、資源與工作資訊會集中顯示在這裡。',shift:'班表與勤務相關工作會集中顯示在這裡。', 'finance-income':'收入報表相關資料會依目前帳號權限顯示在這裡。', 'finance-payable':'支出與應付相關資料會依目前帳號權限顯示在這裡。', 'committee-current':'本屆管理委員會相關資料會集中顯示在這裡。', 'committee-monthly':'管理委員會月例會相關資料會集中顯示在這裡。', 'committee-owners':'區分所有權人會議相關資料會集中顯示在這裡。', 'residents-contact':'住戶聯繫相關資料會集中顯示在這裡。', 'residents-owners':'區分所有權人相關資料會集中顯示在這裡。', 'residents-tenants':'承租人相關資料會集中顯示在這裡。', 'vendors-maintenance':'簽約保養廠商相關資料會集中顯示在這裡。', 'vendors-general':'一般廠商相關資料會集中顯示在這裡。', 'vendors-special':'特約廠商相關資料會集中顯示在這裡。', 'handover-manager':'經理交接清冊相關工作會集中顯示在這裡。', 'handover-secretary':'秘書交接清冊相關工作會集中顯示在這裡。'}};
-window.__staffUiCopy={...DEFAULT_STAFF_UI_COPY};
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);}catch(e){console.warn('Staff branding load skipped',e)}}
-async function loadStaffUiCopy(){try{const d=await api('/api/staff/ui-copy');window.__staffUiCopy={...DEFAULT_STAFF_UI_COPY,...(d.copy||{})};}catch(e){console.warn('Staff ui copy load skipped',e)}}
 async function boot(){
   // 平台名稱與「表單範本標題」分離，避免公司自訂的表單名稱跑到網站／瀏覽器標題。
   // 例如表單可以叫「社區行政事務回報」，但網站仍維持「社區管理工作平台」。
@@ -22,7 +19,6 @@ async function boot(){
     if(s.loggedIn){
       if(s.entry==='company' || s.user.role==='company_admin'){ location.href='company.html'; return; }
       await applyStaffBranding();
-      await loadStaffUiCopy();
       showHome(s.user);
     }else showLogin();
   }catch(err){
@@ -48,7 +44,7 @@ function showLogin(){
 }
 function showCompanyHint(user){ location.href='company.html'; }
 function showHome(user){
-  window.__messageCurrentUserId=user?.id||null; window.__staffUser=user||null;
+  window.__messageCurrentUserId=user?.id||null;
   window.__workspaceAuthenticated=true;window.setMessageCenterVisible?.(true);
   $('loginView').style.display='none';$('homeView').style.display='block';$('editorView').style.display='none';$('staffTop').style.display='flex';$('loginInternal').style.display='none';
   $('staffName').textContent=user.name||'使用者';
@@ -130,21 +126,40 @@ function openSalaryDetailsCard(salary){
 
 
 let staffClockTimer=null;
+function staffJobSummary(user){
+  const cats=Array.isArray(user?.job_categories)?user.job_categories:[];
+  const level=String(user?.job_level||'').trim();
+  const position=String(user?.position||user?.job_title||user?.title||'').trim();
+  const main=level||position||'現場人員';
+  const extras=cats.filter(x=>String(x||'').trim() && String(x).trim()!==main).map(String);
+  return [main,...extras].slice(0,2).join('｜');
+}
 async function loadHome(user){
   const el=$('staffHome');
   if(!el)return;
   const displayName=String(user?.name||'').trim()||'使用者';
-  const position=String(user?.position||user?.job_title||user?.title||'職務').trim()||'職務';
-  el.innerHTML=`<div class="dashboard-layout"><div class="dashboard-left"><div class="panel home-head"><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)}（${escapeHtml(position)}）</h1><div id="staffCommunityHint" class="home-community"></div></div><div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div><div class="dashboard-note">本日尚未安排事務</div></div></div><div class="panel dashboard-todo"><div class="section-title"><span>📌</span> 代辦事項 <button type="button" class="todo-add" id="todoAddBtn" aria-label="新增代辦事項">＋</button></div><div id="todoList" class="todo-list"><div class="todo-empty">載入中…</div></div></div></div><div id="pinnedWorkPanel" class="panel pinned-panel"><div class="section-title">⭐ 釘選工作</div><div id="pinnedWorkList" class="pinned-work-list"><div class="empty">載入中…</div></div></div>`;
+  const jobSummary=staffJobSummary(user);
+  el.innerHTML=`<div class="dashboard-layout dashboard-layout-v2">
+    <div class="dashboard-left">
+      <div class="panel home-head home-head-v2"><div><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)} <span class="home-role">（${escapeHtml(jobSummary)}）</span></h1><div id="staffCommunityHint" class="home-community"></div></div><div class="home-community-badge">🏢 <span id="staffCommunityBadge">案場</span></div></div>
+      <div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div><div class="dashboard-note">本日尚未安排事務</div></div>
+    </div>
+    <div class="panel dashboard-todo"><div class="section-title"><span>📌</span> 代辦事項 <span id="todoCount" class="home-count-badge">0</span><button type="button" class="todo-add" id="todoAddBtn" aria-label="新增代辦事項">＋</button></div><div id="todoList" class="todo-list"><div class="todo-empty">載入中…</div></div></div>
+  </div>
+  <div class="dashboard-bottom-grid">
+    <div id="pinnedWorkPanel" class="panel pinned-panel pinned-panel-v2"><div class="section-title">⭐ 釘選工作</div><div id="pinnedWorkList" class="pinned-work-list"><div class="empty">載入中…</div></div></div>
+    <div class="panel important-panel"><div class="section-title"><span>🔔</span> 重要事項提醒 <button type="button" class="important-view-all" id="importantViewAll">查看全部</button></div><div id="importantReminderList" class="important-reminder-list"><div class="important-empty"><div class="important-empty-icon">🔔</div><strong>目前尚無重要事項提醒</strong><span>有需要優先處理的公告、設備、住戶或案場事項時，會顯示在這裡。</span></div></div></div>
+  </div>`;
   clearInterval(staffClockTimer);
   const tick=()=>{const d=new Date();const date=$('staffDate'),clock=$('staffClock');if(date)date.textContent=d.toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'long'});if(clock)clock.textContent=d.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit'});};
   tick();staffClockTimer=setInterval(tick,1000);
   $('todoAddBtn')?.addEventListener('click',openTodoCreateModal);
+  $('importantViewAll')?.addEventListener('click',()=>{ const item=document.querySelector('[data-action="todo"]'); if(item) item.click(); });
   await Promise.all([loadPinnedWork(),loadHomeTodos(),loadStaffCommunityHint()]);
 }
 async function loadStaffCommunityHint(){
   const el=$('staffCommunityHint'); if(!el)return;
-  try{const d=await api('/api/staff/communities'); const list=Array.isArray(d)?d:[]; if(list.length===1)el.textContent=list[0].name||''; else if(list.length>1)el.textContent=list.map(x=>x.name).join('、'); else el.textContent='';}
+  try{const d=await api('/api/staff/communities'); const list=Array.isArray(d)?d:[]; const text=list.length===1?(list[0].name||''):list.length>1?list.map(x=>x.name).join('、'):''; el.textContent=text; const badge=$('staffCommunityBadge'); if(badge) badge.textContent=list.length===1?(list[0].name||'案場'):(list.length>1?'多案場':'案場');}
   catch(e){el.textContent='';}
 }
 function todoTime(s){if(!s)return '—';const d=new Date(s);return d.toLocaleString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
@@ -152,8 +167,9 @@ async function loadHomeTodos(){
   const list=$('todoList'); if(!list)return;
   try{
     const d=await api('/api/staff/todos'); const todos=(d.todos||[]).filter(x=>x.status==='open');
+    const badge=$('todoCount');if(badge)badge.textContent=String(todos.length);
     if(!todos.length){list.innerHTML='<div class="todo-empty">目前尚無代辦事項。</div>';return;}
-    list.innerHTML=todos.map(t=>`<div class="todo-row" data-todo-id="${t.id}"><button type="button" class="todo-check" aria-label="完成代辦事項" title="標記完成">○</button><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small></div></div>`).join('');
+    list.innerHTML=todos.slice(0,5).map(t=>`<div class="todo-row" data-todo-id="${t.id}"><button type="button" class="todo-check" aria-label="完成代辦事項" title="標記完成">○</button><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small></div></div>`).join('') + (todos.length>5?`<div class="todo-more">還有 ${todos.length-5} 項待處理…</div>`:'');
     list.querySelectorAll('.todo-check').forEach(btn=>btn.addEventListener('click',async()=>{const row=btn.closest('.todo-row');const id=Number(row?.dataset.todoId);if(!id)return;btn.disabled=true;try{await api(`/api/staff/todos/${id}/complete`,{method:'PUT'});await loadHomeTodos();}catch(e){btn.disabled=false;alert(e.message||'完成代辦事項失敗');}}));
   }catch(e){list.innerHTML=`<div class="todo-empty">目前無法載入代辦事項。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
@@ -172,7 +188,7 @@ async function loadTodoPage(){
   try{
     const d=await api('/api/staff/todos');
     const rows=(d.todos||[]).filter(x=>x.status==='open');
-    el.innerHTML=`<div class="panel todo-page-panel"><div class="todo-page-head"><div><div class="eyebrow">📌 工作項目</div><h1>代辦事項</h1><p class="hint">${escapeHtml((window.__staffUiCopy?.moduleDescriptions?.todo)||window.__staffUiCopy?.todoDescription||DEFAULT_STAFF_UI_COPY.todoDescription)}</p></div><button type="button" class="todo-page-add" id="todoPageAddBtn">＋ 新增代辦事項</button></div><div id="todoPageList" class="todo-page-list">${rows.length?rows.map(t=>`<div class="todo-page-row" data-todo-id="${t.id}"><button type="button" class="todo-check" title="完成並封存">○</button><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記人：${escapeHtml(t.created_by_name||'—')}</small><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small></div></div>`).join(''):'<div class="todo-empty">目前尚無代辦事項。</div>'}</div></div>`;
+    el.innerHTML=`<div class="panel todo-page-panel"><div class="todo-page-head"><div><div class="eyebrow">📌 工作項目</div><h1>代辦事項</h1><p class="hint">目前需要處理的工作會顯示在這裡；完成後會自動移到「已封存」。</p></div><button type="button" class="todo-page-add" id="todoPageAddBtn">＋ 新增代辦事項</button></div><div id="todoPageList" class="todo-page-list">${rows.length?rows.map(t=>`<div class="todo-page-row" data-todo-id="${t.id}"><button type="button" class="todo-check" title="完成並封存">○</button><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記人：${escapeHtml(t.created_by_name||'—')}</small><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small></div></div>`).join(''):'<div class="todo-empty">目前尚無代辦事項。</div>'}</div></div>`;
     $('todoPageAddBtn')?.addEventListener('click',openTodoCreateModal);
     el.querySelectorAll('.todo-page-row .todo-check').forEach(btn=>btn.addEventListener('click',async()=>{const row=btn.closest('.todo-page-row');const id=Number(row?.dataset.todoId);if(!id)return;btn.disabled=true;try{await api(`/api/staff/todos/${id}/complete`,{method:'PUT'});await loadTodoPage();}catch(e){btn.disabled=false;alert(e.message||'完成代辦事項失敗');}}));
   }catch(e){showWorkspaceError('代辦事項',e);}
@@ -183,7 +199,7 @@ async function loadArchivedTodos(params={}){
     const q=new URLSearchParams(); if(params.keyword)q.set('keyword',params.keyword); if(params.date)q.set('date',params.date);
     const d=await api('/api/staff/todos/archived'+(q.toString()?`?${q.toString()}`:''));
     const rows=d.todos||[];
-    el.innerHTML=`<div class="panel workspace-placeholder archived-todos-panel"><div class="eyebrow">📌 代辦事項</div><h1>已封存</h1><p class="hint">${escapeHtml(window.__staffUiCopy?.archivedDescription||DEFAULT_STAFF_UI_COPY.archivedDescription)}</p><form id="archivedTodoSearch" class="archived-search"><input id="archivedKeyword" type="search" placeholder="搜尋名稱／關鍵字" value="${escapeHtml(params.keyword||'')}"><input id="archivedDate" type="date" value="${escapeHtml(params.date||'')}"><button type="submit">搜尋</button><button type="button" class="secondary" id="archivedClearBtn">清除</button></form>${rows.length?`<div class="archived-todo-list">${rows.map(t=>`<div class="archived-todo-row"><div class="archived-todo-check">✓</div><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記人：${escapeHtml(t.created_by_name||'—')}</small><small>處理人：${escapeHtml(t.completed_by_name||'—')}</small><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small><small>處理完畢：${escapeHtml(todoTime(t.completed_at))}</small></div></div>`).join('')}</div>`:'<div class="todo-empty">'+escapeHtml(window.__staffUiCopy?.archivedEmpty||DEFAULT_STAFF_UI_COPY.archivedEmpty)+'</div>'}</div>`;
+    el.innerHTML=`<div class="panel workspace-placeholder archived-todos-panel"><div class="eyebrow">📌 代辦事項</div><h1>已封存</h1><p class="hint">已完成的代辦事項會保留在這裡，不會被刪除。</p><form id="archivedTodoSearch" class="archived-search"><input id="archivedKeyword" type="search" placeholder="搜尋名稱／關鍵字" value="${escapeHtml(params.keyword||'')}"><input id="archivedDate" type="date" value="${escapeHtml(params.date||'')}"><button type="submit">搜尋</button><button type="button" class="secondary" id="archivedClearBtn">清除</button></form>${rows.length?`<div class="archived-todo-list">${rows.map(t=>`<div class="archived-todo-row"><div class="archived-todo-check">✓</div><div class="todo-content"><strong>${escapeHtml(t.content)}</strong><small>登記人：${escapeHtml(t.created_by_name||'—')}</small><small>處理人：${escapeHtml(t.completed_by_name||'—')}</small><small>登記時間：${escapeHtml(todoTime(t.created_at))}</small><small>處理完畢：${escapeHtml(todoTime(t.completed_at))}</small></div></div>`).join('')}</div>`:'<div class="todo-empty">查無符合條件的封存紀錄。</div>'}</div>`;
     $('archivedTodoSearch')?.addEventListener('submit',e=>{e.preventDefault();loadArchivedTodos({keyword:$('archivedKeyword')?.value.trim()||'',date:$('archivedDate')?.value||''});});
     $('archivedClearBtn')?.addEventListener('click',()=>loadArchivedTodos());
   }catch(e){showWorkspaceError('已封存',e);}
@@ -250,19 +266,18 @@ async function loadChecklistModule(label='交接清冊'){
   if(!el)return;
   const cards=drafts.length?drafts.map(d=>{const pct=Math.min(99,Math.round(((d.current_page+1)/formConfig.pages.length)*100));const community=d.data.community_name||communities.find(c=>c.id===d.community_id)?.name||'尚未指定社區';return `<div class="draft-card"><div><div class="draft-title">🏠 ${escapeHtml(community)}</div><div class="hint">最後儲存：${formatDate(d.updated_at)}　｜　目前第 ${Math.min(d.current_page+1,formConfig.pages.length)} / ${formConfig.pages.length} 頁</div><div class="progress-mini"><span style="width:${pct}%"></span></div></div><div class="draft-actions"><button onclick="continueDraft(${d.id})">繼續填寫</button><button class="danger" onclick="deleteDraft(${d.id})">刪除草稿</button></div></div>`}).join(''):'<div class="empty">目前沒有未完成的交接紀錄。</div>';
   const communityOptions=communities.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  el.innerHTML=`<div class="panel"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label)}</h1><p class="hint">${escapeHtml(window.__staffUiCopy?.handoverDescription||DEFAULT_STAFF_UI_COPY.handoverDescription)}</p><div class="new-draft-box"><label>選擇要交接的社區</label><select id="newCommunity">${communityOptions||'<option value="">目前尚無可用社區</option>'}</select><button class="big-action" onclick="newDraft()" ${communities.length?'':'disabled'}>＋ 開始新的交接</button></div></div><div class="panel"><div class="section-title">🟡 未完成交接清冊</div>${cards}</div>`;
+  el.innerHTML=`<div class="panel"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label)}</h1><p class="hint">交接相關工作集中在這裡；完成後不會一直顯示在工作台首頁。</p><div class="new-draft-box"><label>選擇要交接的社區</label><select id="newCommunity">${communityOptions||'<option value="">目前尚無可用社區</option>'}</select><button class="big-action" onclick="newDraft()" ${communities.length?'':'disabled'}>＋ 開始新的交接</button></div></div><div class="panel"><div class="section-title">🟡 未完成交接清冊</div>${cards}</div>`;
 }
-function showWorkspacePlaceholder(label,action=''){
+function showWorkspacePlaceholder(label){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
-  const ui=window.__staffUiCopy||DEFAULT_STAFF_UI_COPY; const desc=ui.moduleDescriptions?.[action]||ui.moduleDefaultDescription||DEFAULT_STAFF_UI_COPY.moduleDefaultDescription; const note=ui.moduleDefaultNote||DEFAULT_STAFF_UI_COPY.moduleDefaultNote;
-  const el=$('staffHome');el.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">工作項目</div><h1>🚧 ${escapeHtml(label||'工作功能')}</h1><p>${escapeHtml(desc)}</p><div class="placeholder-note">${escapeHtml(note)}</div></div>`;
+  const el=$('staffHome');el.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">工作項目</div><h1>🚧 ${escapeHtml(label||'工作功能')}</h1><p>這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。</p><div class="placeholder-note">您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。</div></div>`;
 }
 
 function showWorkspaceLoading(label){
   const el=$('staffHome');
   if(!el)return;
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
-  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>${escapeHtml(window.__staffUiCopy?.workspaceLoading||DEFAULT_STAFF_UI_COPY.workspaceLoading)}</p></div>`;
+  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>正在讀取您的社區與交接資料，請稍候…</p></div>`;
 }
 function showWorkspaceError(label,err){
   const el=$('staffHome');
@@ -270,28 +285,9 @@ function showWorkspaceError(label,err){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
   el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label||'工作功能')}</div><h1>目前無法開啟</h1><p>${escapeHtml(err?.message||'系統暫時無法取得資料。')}</p><button type="button" class="secondary" onclick="location.reload()">重新整理</button></div>`;
 }
-async function loadSopPage(category,label,scope=''){
-  const el=$('staffHome'); if(!el)return;
-  const d=await api(`/api/staff/sops?category=${encodeURIComponent(category||'')}&scope=${encodeURIComponent(scope||'')}`); const rows=d.sops||[]; const viewer=d.viewer||{}; window.__sopViewer=viewer;
-  const user=window.__staffUser||{};
-  const scopeText=scope==='company_basic'?'公司基本 SOP':scope==='community'?'本案場 SOP':category||'全部 SOP';
-  const ui=window.__staffUiCopy||DEFAULT_STAFF_UI_COPY; const managerButton=viewer.can_upload?`<div class="panel-lite manager-sop-upload"><strong>📤 經理專用</strong><p class="hint">${escapeHtml(ui.managerUploadHint)}</p><button type="button" class="big-action" onclick="openManagerSopUpload()">${escapeHtml(ui.managerUploadButton)}</button></div>`:'';
-  const items=rows.map(x=>{const target=(x.target_jobs||[]).length?(x.target_jobs||[]).join('、'):'全部駐點人員';const source=x.source_type==='manager'?'案場經理回傳':'公司內勤建立';return `<div class="panel"><div class="section-title">📘 ${escapeHtml(x.title)}</div><div class="hint">${escapeHtml(x.category||'SOP')}　｜　版本 ${escapeHtml(x.version||'1.0')}　｜　${escapeHtml(source)}${x.description?`<br>${escapeHtml(x.description)}`:''}<br>適用：${escapeHtml(target)}</div><div class="modal-actions"><button type="button" onclick="window.open('/api/staff/sops/${x.id}/download','_blank','noopener')">開啟／下載 SOP</button></div></div>`}).join('');
-  const sopIntro=String(ui.sopIntro||DEFAULT_STAFF_UI_COPY.sopIntro).replaceAll('{{job}}',String(user.job_level||user.job_category||'駐點人員')).replaceAll('{{scope}}',String(scopeText)); el.innerHTML=`<div class="panel"><div class="eyebrow">📚 案場 SOP</div><h1>${escapeHtml(label||'案場 SOP')}</h1><p>${escapeHtml(sopIntro)}</p>${managerButton}</div>${items||`<div class="panel empty">${escapeHtml(ui.sopEmpty)}</div>`}`;
-}
-function openManagerSopUpload(){
-  const user=window.__staffUser||{}; const assignments=Array.isArray(user.site_assignments)?user.site_assignments:[]; const viewer=window.__sopViewer||{}; const sopCommunities=Array.isArray(viewer.upload_communities)?viewer.upload_communities:[];
-  const old=document.getElementById('managerSopUploadModal'); if(old)old.remove();
-  const modal=document.createElement('div'); modal.id='managerSopUploadModal'; modal.className='modal-backdrop';
-  const communityOptions=sopCommunities.length?sopCommunities:assignments; const options=communityOptions.length?communityOptions.map(a=>`<option value="${escapeAttr(a.community_id||a.id)}">${escapeHtml(a.community_name||a.name||'未命名案場')}</option>`).join(''):'<option value="">目前沒有可選的啟用社區</option>';
-  modal.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><button class="modal-close" type="button">×</button><div class="eyebrow">${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadEyebrow)}</div><h2>${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadTitle)}</h2><p class="modal-note">${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadHint)}</p><form id="managerSopForm"><label>適用社區</label><select id="managerSopCommunity" required>${options}</select><label>SOP 名稱</label><input id="managerSopTitle" placeholder="例如：本社區夜間巡查注意事項" required><label>版本</label><input id="managerSopVersion" value="1.0"><label>檔案</label><input id="managerSopFile" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.txt" required><label>說明</label><textarea id="managerSopDescription" rows="3" placeholder="可補充本案場特殊注意事項"></textarea><div class="panel-lite"><strong>👥 哪些職務可以看到？</strong><div class="check-list"><label class="check-row"><input type="checkbox" data-manager-target value="秘書" checked> 秘書</label><label class="check-row"><input type="checkbox" data-manager-target value="保全" checked> 保全</label></div></div><div class="modal-actions"><button type="button" class="secondary" id="managerSopCancel">取消</button><button type="submit">${escapeHtml((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadSubmit)}</button></div></form></div>`;
-  document.body.appendChild(modal); document.body.classList.add('modal-open'); const close=()=>{modal.remove();document.body.classList.remove('modal-open')}; modal.querySelector('.modal-close').onclick=close; modal.querySelector('#managerSopCancel').onclick=close; modal.querySelector('#managerSopForm').addEventListener('submit',async e=>{e.preventDefault();try{const fd=new FormData();fd.append('community_id',modal.querySelector('#managerSopCommunity').value);fd.append('title',modal.querySelector('#managerSopTitle').value);fd.append('version',modal.querySelector('#managerSopVersion').value);fd.append('description',modal.querySelector('#managerSopDescription').value);fd.append('target_jobs',JSON.stringify([...modal.querySelectorAll('[data-manager-target]:checked')].map(x=>x.value)));fd.append('file',modal.querySelector('#managerSopFile').files[0]);await api('/api/staff/sops/community-upload',{method:'POST',body:fd});close();await loadSopPage('','案場注意事項','community');alert((window.__staffUiCopy||DEFAULT_STAFF_UI_COPY).managerUploadSuccess);}catch(err){alert(err.message)}});
-}
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
-  if(action==='company-resources'||/文件公版|公家單位公版|公司公版/.test(String(label||''))){const mode=/公家單位公版/.test(String(label||''))?'government':/文件公版|公司公版/.test(String(label||''))?'company':'all';showWorkspaceLoading(label||'公司資源');try{await window.CompanyResourcesModule.render(mode,label||'公司資源')}catch(err){showWorkspaceError(label||'公司資源',err)}return;}
-  if(['residents','residents-contact','residents-owners','residents-tenants'].includes(action)){showWorkspaceLoading(label||'住戶名冊');try{await window.ResidentRosterModule.render(action,label||'住戶名冊')}catch(err){showWorkspaceError(label||'住戶名冊',err)}return;}
   if(action==='todo'){
     await loadTodoPage();
     return;
@@ -300,11 +296,6 @@ async function handleWorkspaceMenu(e){
     try{await loadArchivedTodos();}catch(err){showWorkspaceError(label||'已封存',err);}
     return;
   }
-  if(action==='sop-admin'){showWorkspaceLoading(label||'行政 SOP');try{await loadSopPage('行政',label||'行政 SOP')}catch(err){showWorkspaceError(label||'行政 SOP',err)}return;}
-  if(action==='sop-duty'){showWorkspaceLoading(label||'勤務 SOP');try{await loadSopPage('勤務',label||'勤務 SOP')}catch(err){showWorkspaceError(label||'勤務 SOP',err)}return;}
-  if(action==='sop-company'){showWorkspaceLoading(label||'公司基本 SOP');try{await loadSopPage('',label||'公司基本 SOP','company_basic')}catch(err){showWorkspaceError(label||'公司基本 SOP',err)}return;}
-  if(action==='sop-community'){showWorkspaceLoading(label||'案場注意事項');try{await loadSopPage('',label||'案場注意事項','community')}catch(err){showWorkspaceError(label||'案場注意事項',err)}return;}
-  if(action==='sop'){showWorkspaceLoading(label||'案場 SOP');try{await loadSopPage('',label||'案場 SOP')}catch(err){showWorkspaceError(label||'案場 SOP',err)}return;}
   if(action==='manager-checklist'){
     showWorkspaceLoading(label||'經理交接清冊');
     try{await openManagerChecklist(label||'經理交接清冊');}catch(err){showWorkspaceError(label||'經理交接清冊',err);}
@@ -315,27 +306,12 @@ async function handleWorkspaceMenu(e){
     try{await loadChecklistModule(label||'交接清冊');}catch(err){showWorkspaceError(label||'交接清冊',err);}
     return;
   }
-  if(action==='staff-schedule'){
-    showWorkspaceLoading(label||'班表');
-    try{const role=String(session?.user?.schedule_role||''); if(role==='admin') await loadStaffScheduleCommunity(label||'班表'); else await loadStaffScheduleModule(label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
+  if(['residents-contact','residents-owners','residents-tenants'].includes(action)){
+    showWorkspaceLoading(label||'住戶名冊');
+    try{if(!window.ResidentRosterModule) throw new Error('住戶名冊模組尚未載入，請重新整理頁面'); await window.ResidentRosterModule.render(action,label||'住戶名冊');}catch(err){showWorkspaceError(label||'住戶名冊',err);}
     return;
   }
-  if(action==='staff-schedule-rules'){
-    showWorkspaceLoading(label||'排班表');
-    try{await loadStaffScheduleRules(label||'排班表');}catch(err){showWorkspaceError(label||'排班表',err);}
-    return;
-  }
-  if(action==='staff-schedule-leave'){
-    showWorkspaceLoading(label||'請假／代班');
-    try{await loadStaffScheduleRequests(label||'請假／代班');}catch(err){showWorkspaceError(label||'請假／代班',err);}
-    return;
-  }
-  if(action==='staff-schedule-overtime'){
-    showWorkspaceLoading(label||'加班');
-    try{await loadStaffScheduleOvertime(label||'加班');}catch(err){showWorkspaceError(label||'加班',err);}
-    return;
-  }
-  showWorkspacePlaceholder(label||'工作功能',action);
+  showWorkspacePlaceholder(label||'工作功能');
 }
 document.addEventListener('workspace-menu',e=>{handleWorkspaceMenu(e).catch(err=>showWorkspaceError(e.detail?.label||'工作功能',err));});
 document.addEventListener('dashboard-pins-changed',()=>{if($('homeView')&&getComputedStyle($('homeView')).display!=='none')loadPinnedWork();});
@@ -372,49 +348,7 @@ $('staffLogout').addEventListener('click',async()=>{if(dirty&&draftId)await save
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function escapeAttr(str){return escapeHtml(str)}
 window.newDraft=newDraft;window.continueDraft=continueDraft;window.deleteDraft=deleteDraft;window.saveNow=saveNow;window.backHome=backHome;
 window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&draftId&&dirty)saveNow(true)});
 window.addEventListener('beforeunload',()=>{if(!draftId||!dirty)return;savePageAnswers();fetch(`/api/staff/drafts/${draftId}`,{method:'PUT',keepalive:true,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:answers,current_page:currentPage,community_id:draftCommunityId})}).catch(()=>{})});
 boot().catch(e=>showMessage(e.message,'error'));
-
-
-// ===== 智慧班表｜現場行政／保全／機動分流 V2 =====
-function scheduleMonthNowStaff(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}
-async function loadStaffScheduleModule(label='班表'){
-  const el=$('staffHome'); if(!el)return;
-  const month=scheduleMonthNowStaff();
-  const session=await api('/api/staff/session');
-  const role=String(session?.user?.schedule_role||'');
-  if(role==='admin') return loadStaffAdminCommunitySchedule(el,label,month);
-  const d=await api(`/api/staff/schedule/month?month=${encodeURIComponent(month)}`);
-  const p=d.profile||{};
-  const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>i+1);
-  const map=new Map((d.entries||[]).map(x=>[Number(x.work_date.slice(-2)),x]));
-  const roleName=p.schedule_role==='mobile'?'機動':p.schedule_role==='security'?'保全':'班表';
-  const canSelf=['security','mobile'].includes(p.schedule_role);
-  el.innerHTML=`<div class="panel staff-schedule-panel"><div class="eyebrow">我的班表</div><h1>📅 ${escapeHtml(label)}</h1><p>${p.schedule_role==='mobile'?'機動人員可支援多個社區；自選休假會與支援社區的保全休假及其他機動人員先選日期自動比對。':p.schedule_role==='security'?'保全班表由勤務規則產生；您可在允許範圍內自選指定休假。':'這裡顯示系統產生的正式班表。'}</p><div class="staff-schedule-summary"><span>班表身分：<strong>${escapeHtml(roleName)}</strong></span><span>月休：<strong>${p.rest_days||0} 天</strong></span>${canSelf?`<span>自選：<strong>${p.self_select_days||0} 天</strong></span>`:''}</div><div id="staffScheduleCalendar" class="staff-schedule-calendar">${days.map(day=>{const r=map.get(day);const code=r?.shift_code||'work';const cls=code==='off'?'off':code==='night'?'night':code==='leave'?'leave':'work';return `<button type="button" class="staff-schedule-day ${cls}" data-day="${day}" title="${code==='off'?'休假':code==='leave'?'請假':code==='night'?'夜班':'工作'}"><strong>${day}</strong><small>${code==='off'?'休':code==='leave'?'假':code==='night'?'夜':'班'}</small></button>`}).join('')}</div><div class="staff-schedule-note">${canSelf?'💡 您可以在允許的範圍內自選休假；衝突日期會由系統直接拒絕。':'🔒 此班表由公司／勤務規則統整產生，現場不直接修改公司設定的休假規範。'}</div></div>`;
-  if(canSelf) el.querySelectorAll('.staff-schedule-day').forEach(btn=>btn.addEventListener('click',async()=>{const day=Number(btn.dataset.day);const date=`${month}-${String(day).padStart(2,'0')}`;if(btn.classList.contains('off')){alert('這一天目前已排休。若要調整，請由勤務主管處理。');return;}try{await api('/api/staff/schedule/self-select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({month,work_date:date})});alert(`已自選 ${date} 為休假。`);await loadStaffScheduleModule(label);}catch(e){alert(e.message)}}));
-}
-async function loadStaffAdminCommunitySchedule(el,label,month){
-  const d=await api(`/api/staff/schedule/community?month=${encodeURIComponent(month)}`);
-  const communities=d.communities||[];
-  if(!communities.length){el.innerHTML=`<div class="panel"><div class="eyebrow">社區班表</div><h1>📅 ${escapeHtml(label)}</h1><p>目前沒有可查看的派駐社區。</p></div>`;return;}
-  const byCommunity=new Map();for(const c of communities)byCommunity.set(Number(c.id),[]);for(const r of d.entries||[]){if(byCommunity.has(Number(r.community_id)))byCommunity.get(Number(r.community_id)).push(r);}
-  const rulesBy=new Map((d.rules||[]).map(x=>[Number(x.community_id),x.config||{}]));
-  const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>i+1);
-  el.innerHTML=`<div class="panel staff-schedule-panel"><div class="eyebrow">社區現場完整班表</div><h1>📅 ${escapeHtml(label)}</h1><p>這裡顯示您所屬社區的「所有現場同仁」最終班表。行政、保全、機動由各自規則統整後產生；現場經理／秘書只能查看公司鎖定的規則與結果。</p>${communities.map(c=>{const rows=byCommunity.get(Number(c.id))||[];const staffIds=[...new Set(rows.map(r=>r.staff_id))];const rule=rulesBy.get(Number(c.id))||{};const m=rule.manager||{},sec=rule.secretary||{};return `<section class="staff-community-schedule"><div class="section-title">🏠 ${escapeHtml(c.name)}</div><div class="staff-rule-lock">🔒 公司設定：經理 ${escapeHtml(m.mode==='red_holiday'?'見紅休':m.mode==='rotation'?'輪排休':m.mode==='fixed_monthly'?'固定月休':'依公司規範')}｜秘書 ${escapeHtml(sec.mode==='red_holiday'?'見紅休':sec.mode==='rotation'?'輪排休':sec.mode==='fixed_monthly'?'固定月休':'依公司規範')}<br><small>規則由公司管理端設定，現場不可修改。</small></div>${staffIds.length?`<div class="table-wrap schedule-grid-wrap"><table class="schedule-grid"><thead><tr><th>人員</th>${days.map(i=>`<th>${i}</th>`).join('')}</tr></thead><tbody>${staffIds.map(id=>{const rr=rows.filter(r=>Number(r.staff_id)===Number(id));const first=rr[0]||{};const map=new Map(rr.map(r=>[Number(r.work_date.slice(-2)),r]));return `<tr><th>${escapeHtml(first.staff_name||'')}</th>${days.map(day=>{const r=map.get(day);const code=r?.shift_code||'';const cls=code==='off'?'off':code==='leave'?'leave':code==='night'?'night':code?'work':'';return `<td class="${cls}" title="${escapeAttr(r?.community_name||'')}">${code==='off'?'休':code==='leave'?'假':code==='night'?'夜':code?'班':'—'}</td>`}).join('')}</tr>`}).join('')}</tbody></table></div>`:'<div class="empty">目前尚未產生本社區正式班表。</div>'}</section>`}).join('')}</div>`;
-}
-async function loadStaffScheduleRules(label='排班表'){
-  const el=$('staffHome'); if(!el)return; const d=await api('/api/staff/schedule/rules');
-  el.innerHTML=`<div class="panel"><div class="eyebrow">公司鎖定的排班規則</div><h1>📋 ${escapeHtml(label)}</h1><p>以下規則由公司在社區開通／班表設定時建立。現場經理與秘書只能查看，不能修改，以避免自行異動合約休假規範。</p>${(d.rules||[]).map(r=>{const c=r.config||{},m=c.manager||{},s=c.secretary||{};const mode=x=>x==='red_holiday'?'國定假日見紅休':x==='rotation'?'國定假日輪排休':x==='fixed_monthly'?'固定月休':'依公司設定';return `<div class="staff-rule-card"><h2>🏠 ${escapeHtml(r.name)}</h2><div class="rule-columns"><div><strong>經理</strong><p>${mode(m.mode)}</p><p>月休：${Number(m.rest_days||0)} 天</p></div><div><strong>秘書</strong><p>${mode(s.mode)}</p><p>月休：${Number(s.rest_days||0)} 天</p></div></div><div class="staff-rule-lock">🔒 公司設定｜現場不可修改。如合約變更，請由公司管理端調整。</div></div>`}).join('')||'<div class="empty">目前沒有可查看的社區排班規則。</div>'}</div>`;
-}
-async function loadStaffScheduleRequests(label='請假／代班'){const el=$('staffHome');if(!el)return;const d=await api('/api/staff/schedule/requests');el.innerHTML=`<div class="panel"><div class="eyebrow">現場行政紀錄</div><h1>📝 ${escapeHtml(label)}</h1><p>這裡顯示您所屬社區的請假／代班紀錄；正式班表仍由公司規則與核准流程統整。</p>${renderStaffScheduleRequestRows(d.rows||[])}</div>`;}
-function renderStaffScheduleRequestRows(rows){return rows.length?`<div class="table-wrap"><table><thead><tr><th>日期</th><th>人員</th><th>社區</th><th>類型</th><th>代班</th><th>原因</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.work_date)}</td><td>${escapeHtml(r.staff_name)}</td><td>${escapeHtml(r.community_name||'—')}</td><td>${r.request_type==='cover'?'代班':'請假'}</td><td>${escapeHtml(r.target_staff_name||'—')}</td><td>${escapeHtml(r.reason||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有請假／代班紀錄。</div>';}
-async function loadStaffScheduleOvertime(label='加班'){const el=$('staffHome');if(!el)return;const d=await api('/api/staff/schedule/overtime');el.innerHTML=`<div class="panel"><div class="eyebrow">現場行政紀錄</div><h1>➕ ${escapeHtml(label)}</h1><p>這裡顯示您所屬社區的加班紀錄；加班獨立於基本班表，不會把機動人員綁死在固定工作天數。</p>${renderStaffOvertimeRows(d.rows||[])}</div>`;}
-function renderStaffOvertimeRows(rows){return rows.length?`<div class="table-wrap"><table><thead><tr><th>日期</th><th>人員</th><th>社區</th><th>時數</th><th>原因</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.work_date)}</td><td>${escapeHtml(r.staff_name)}</td><td>${escapeHtml(r.community_name||'—')}</td><td>${r.hours}</td><td>${escapeHtml(r.reason||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有加班紀錄。</div>';}
-window.loadStaffScheduleModule=loadStaffScheduleModule;window.loadStaffScheduleRules=loadStaffScheduleRules;window.loadStaffScheduleRequests=loadStaffScheduleRequests;window.loadStaffScheduleOvertime=loadStaffScheduleOvertime;
-(function(){if(document.getElementById('staffScheduleStylesV2'))return;const s=document.createElement('style');s.id='staffScheduleStylesV2';s.textContent=`.staff-schedule-summary{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.staff-schedule-summary span{padding:8px 12px;border:1px solid #d8e7e0;border-radius:999px;background:#f5faf7}.staff-schedule-calendar{display:grid;grid-template-columns:repeat(7,minmax(70px,1fr));gap:8px;margin-top:16px}.staff-schedule-day{min-height:68px;border:1px solid #d8e4df;border-radius:10px;background:#fff;text-align:left;padding:8px;cursor:pointer}.staff-schedule-day strong{display:block;font-size:18px}.staff-schedule-day small{display:block;margin-top:5px}.staff-schedule-day.work:hover{background:#eef7f2}.staff-schedule-day.off{background:#fff0f0;color:#a63b3b}.staff-schedule-day.night{background:#eef0ff;color:#3f4d91}.staff-schedule-day.leave{background:#fff8df;color:#8a6500}.staff-community-schedule{margin-top:18px;padding-top:14px;border-top:1px solid #dbe7e2}.staff-rule-lock,.staff-rule-card{padding:12px 14px;border:1px solid #d8e7e0;border-radius:10px;background:#f7fbf8;margin:10px 0;line-height:1.7}.staff-rule-card h2{margin:0 0 10px}.rule-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rule-columns>div{padding:12px;background:#fff;border:1px solid #e1ebe7;border-radius:9px}@media(max-width:800px){.staff-schedule-calendar{grid-template-columns:repeat(4,minmax(60px,1fr))}.rule-columns{grid-template-columns:1fr}}`;document.head.appendChild(s)})();
-
-
-(function(){if(document.getElementById('staffScheduleRoleColors'))return;const s=document.createElement('style');s.id='staffScheduleRoleColors';s.textContent=`.staff-role-badge{display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;font-weight:700}.staff-role-admin{color:#17624b;background:#e6f5ee;border:1px solid #9fd3bd}.staff-role-security{color:#174f78;background:#e7f1fb;border:1px solid #9dc5e5}.staff-role-mobile{color:#7a4b12;background:#fff2d8;border:1px solid #e4c17d}`;document.head.appendChild(s)})();
