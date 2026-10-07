@@ -480,6 +480,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       // 經理不論內勤或駐點，都可以進入案場 SOP；上傳權限由 SOP API 再次驗證。
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
       if(scope==='staff' && key==='schedule' && ['admin','security','mobile'].includes(scheduleDefaultRole(staffUser))) return true;
+      if(scope==='staff' && key==='residents') return true;
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
     if(scope==='staff'){
