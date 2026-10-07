@@ -12,7 +12,7 @@
   function locationRows(filterType){
     const rows=(cache.locations||[]).filter(x=>!filterType||x.location_type===filterType);
     if(!rows.length)return '<div class="empty">目前尚未建立地點。</div>';
-    return `<div class="attendance-batchbar"><label><input type="checkbox" id="attSelectAll"> 全選</label><span id="attSelectedCount">已選 0 個</span><button type="button" class="secondary" id="attBatchPrint">🖨️ 列印選取 QR Code</button></div><div class="table-wrap"><table><thead><tr><th>選取</th><th>社區</th><th>類型</th><th>名稱</th><th>位置</th><th>GPS</th><th>半徑</th><th>狀態</th><th>QR</th><th>操作</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.location_type==='patrol'?`<input type="checkbox" class="att-row-check" data-id="${r.id}">`:'—'}</td><td>${esc((cache.communities.find(c=>c.id===r.community_id)||{}).name||'')}</td><td>${typeName(r.location_type)}</td><td>${esc(r.name)}</td><td>${esc(r.address||'未設定')}</td><td>${r.lat!=null&&r.lng!=null?`${Number(r.lat).toFixed(6)}, ${Number(r.lng).toFixed(6)}`:'未設定'}</td><td>${r.location_type==='attendance'?`${r.radius_m} m`:'—'}</td><td>${r.is_active?'<span class="tag success">啟用</span>':'<span class="tag">停用</span>'}</td><td>${r.location_type==='patrol'?`<button class="secondary attendance-print" data-id="${r.id}">列印 QR</button>`:'—'}</td><td><button class="secondary attendance-edit" data-id="${r.id}">編輯</button> ${r.location_type==='patrol'?`<button class="secondary attendance-regenerate" data-id="${r.id}">換 QR</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="attendance-batchbar"><label><input type="checkbox" id="attSelectAll"> 全選</label><span id="attSelectedCount">已選 0 個</span><button type="button" class="secondary" id="attBatchPrint">🖨️ 列印選取 QR Code</button></div><div class="table-wrap"><table><thead><tr><th>選取</th><th>社區</th><th>類型</th><th>名稱</th><th>位置</th><th>GPS</th><th>半徑</th><th>狀態</th><th>QR</th><th>操作</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.location_type==='patrol'?`<input type="checkbox" class="att-row-check" data-id="${r.id}">`:'—'}</td><td>${esc((cache.communities.find(c=>c.id===r.community_id)||{}).name||'')}</td><td>${typeName(r.location_type)}</td><td>${esc(r.name)}</td><td>${esc(r.address||'未設定')}</td><td>${r.lat!=null&&r.lng!=null?`${Number(r.lat).toFixed(6)}, ${Number(r.lng).toFixed(6)}`:'未設定'}</td><td>${r.location_type==='attendance'?`${r.radius_m} m`:'—'}</td><td>${r.is_active?'<span class="tag success">啟用</span>':'<span class="tag">停用</span>'}</td><td>${r.location_type==='patrol'?`<button class="secondary attendance-print" data-id="${r.id}">列印 QR</button>`:'—'}</td><td><button class="secondary attendance-edit" data-id="${r.id}">編輯</button> ${r.location_type==='patrol'?`<button class="secondary attendance-regenerate" data-id="${r.id}">換 QR</button>`:''} <button class="danger attendance-delete" data-id="${r.id}">${r.is_active?'刪除':'永久刪除'}</button></td></tr>`).join('')}</tbody></table></div>`;
   }
   function selectedIds(box){return [...box.querySelectorAll('.att-row-check:checked')].map(x=>Number(x.dataset.id)).filter(Boolean)}
   function bindBatch(box){
@@ -38,6 +38,14 @@
     box.querySelectorAll('.attendance-edit').forEach(btn=>btn.addEventListener('click',()=>editLocation(box,Number(btn.dataset.id))));
     box.querySelectorAll('.attendance-regenerate').forEach(btn=>btn.addEventListener('click',async()=>{if(!confirm('換 QR 後，舊 QR 將失效。確定要換嗎？'))return;try{const d=await api(`/api/company/attendance/locations/${btn.dataset.id}/regenerate-qr`,{method:'POST'});cache.locations=cache.locations.map(x=>x.id===d.location.id?d.location:x);alert('QR 已更新，請重新列印。');renderLocations(box)}catch(e){alert(e.message)}}));
     box.querySelectorAll('.attendance-print').forEach(btn=>btn.addEventListener('click',()=>printQr(Number(btn.dataset.id))));
+    box.querySelectorAll('.attendance-delete').forEach(btn=>btn.addEventListener('click',async()=>{
+      const r=cache.locations.find(x=>x.id===Number(btn.dataset.id)); if(!r)return;
+      const action=r.is_active?'刪除':'永久刪除';
+      const msg=r.is_active
+        ? `確定要${action}「${r.name}」嗎？\n\n若此地點已有歷史出勤／巡邏紀錄，系統會自動改為「停用」並保留歷史紀錄；沒有歷史紀錄才會真正刪除。`
+        : `確定要永久刪除「${r.name}」嗎？\n\n此操作僅適用於沒有歷史紀錄的地點。`;
+      if(!confirm(msg))return;
+      try{const d=await api(`/api/company/attendance/locations/${r.id}`,{method:'DELETE'});cache=await api('/api/company/attendance/bootstrap');alert(d.message||'處理完成。');renderLocations(box);}catch(e){alert(e.message)}}));
   }
   async function editLocation(parent,id){
     const r=cache.locations.find(x=>x.id===id);if(!r)return;
