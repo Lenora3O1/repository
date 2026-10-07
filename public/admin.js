@@ -5,7 +5,7 @@ async function checkSession(){try{const r=await api('/api/admin/session');if(r.i
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
 function showMain(){$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
-for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}});
+for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','attendanceRules','messageAudit'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='attendanceRules'){await loadPlatformRules();renderAttendanceRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
   for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料…</div></div>';}
@@ -493,6 +493,63 @@ function renderPlatformRules(){
    if(history) renderPlatformHistory();
  }));
 }
+function renderAttendanceRules(){
+ const el=$('tab-attendanceRules'); if(!el)return;
+ const r=state.platformRules||{}, a=r.attendance||{};
+ const ci=a.check_in||{}, p=a.patrol||{}, privacy=a.privacy||{};
+ el.innerHTML=`
+ <div class="panel designer-intro">
+   <div class="section-title">📍 出勤與巡邏｜平台母設定</div>
+   <p><strong>這一頁先只設定「整個平台的預設規則」；公司後台與現場人員的實際操作先不開放。</strong> 之後公司可以依自己的合約與社區需求決定是否啟用，以及各社區的打卡點與巡邏點。</p>
+   <div class="msg warning">🔒 總後臺不建立任何客戶公司的打卡資料。這裡只保存平台層級的功能開關、預設定位範圍與資料保存政策。</div>
+ </div>
+ <div class="panel">
+   <div class="section-title">🟢 功能總開關</div>
+   <div class="editor-grid">
+     <div class="field"><label>出勤／巡邏模組</label><label class="switch"><input id="attEnabled" type="checkbox" ${a.enabled!==false?'checked':''}> 平台允許使用此模組</label></div>
+     <div class="field"><label>未來公司端預設狀態</label><select id="attDefaultCompany"><option value="enabled" ${a.default_company_state==='enabled'?'selected':''}>預設開啟</option><option value="disabled" ${a.default_company_state!=='enabled'?'selected':''}>預設關閉</option></select></div>
+   </div>
+ </div>
+ <div class="panel">
+   <div class="section-title">🕐 出勤打卡預設</div>
+   <p class="hint">這裡只定義平台預設；真正的打卡地點會等你設計公司／人員端後，再由公司或社區設定。</p>
+   <div class="editor-grid">
+     <div class="field"><label>必須使用 GPS 定位</label><label class="switch"><input id="attGpsRequired" type="checkbox" ${ci.gps_required!==false?'checked':''}> 未取得定位不得完成打卡</label></div>
+     <div class="field"><label>預設有效半徑（公尺）</label><input id="attRadius" type="number" min="10" max="1000" value="${Number(ci.default_radius_m??100)}"></div>
+     <div class="field"><label>允許最大定位誤差（公尺）</label><input id="attAccuracy" type="number" min="10" max="500" value="${Number(ci.max_accuracy_m??100)}"></div>
+     <div class="field"><label>打卡照片</label><select id="attPhoto"><option value="off" ${ci.allow_photo?'':'selected'}>預設不要求</option><option value="on" ${ci.allow_photo?'selected':''}>預設要求</option></select></div>
+   </div>
+ </div>
+ <div class="panel">
+   <div class="section-title">🚨 巡邏打卡預設</div>
+   <div class="editor-grid">
+     <div class="field"><label>巡邏功能</label><label class="switch"><input id="patrolEnabled" type="checkbox" ${p.enabled!==false?'checked':''}> 平台允許公司使用巡邏打卡</label></div>
+     <div class="field"><label>巡邏點預設有效半徑（公尺）</label><input id="patrolRadius" type="number" min="10" max="1000" value="${Number(p.default_radius_m??50)}"></div>
+     <div class="field"><label>允許最大定位誤差（公尺）</label><input id="patrolAccuracy" type="number" min="10" max="500" value="${Number(p.max_accuracy_m??100)}"></div>
+     <div class="field"><label>記錄巡邏 GPS</label><label class="switch"><input id="patrolRecordGps" type="checkbox" ${p.record_gps!==false?'checked':''}> 保留每次巡邏打卡的定位紀錄</label></div>
+     <div class="field"><label>最短巡邏打卡間隔（分鐘）</label><input id="patrolMinInterval" type="number" min="0" max="1440" value="${Number(p.min_interval_minutes??5)}"></div>
+   </div>
+ </div>
+ <div class="panel">
+   <div class="section-title">🔐 定位資料保存政策</div>
+   <p class="hint">這是平台預設值，未來仍可依正式服務條款、公司需求與適用法規調整。不要把「保存天數」當成法律判定。</p>
+   <div class="editor-grid">
+     <div class="field"><label>定位紀錄預設保存天數</label><input id="attRetention" type="number" min="1" max="3650" value="${Number(privacy.location_retention_days??90)}"></div>
+   </div>
+ </div>
+ <div class="form-nav"><button onclick="saveAttendanceRules()">💾 儲存出勤與巡邏平台設定</button><span id="attendanceSaveMsg"></span></div>`;
+}
+async function saveAttendanceRules(){
+ const body={attendance:{
+   enabled:$('attEnabled').checked,
+   default_company_state:$('attDefaultCompany').value,
+   check_in:{gps_required:$('attGpsRequired').checked,default_radius_m:Number($('attRadius').value),max_accuracy_m:Number($('attAccuracy').value),allow_photo:$('attPhoto').value==='on'},
+   patrol:{enabled:$('patrolEnabled').checked,default_radius_m:Number($('patrolRadius').value),max_accuracy_m:Number($('patrolAccuracy').value),record_gps:$('patrolRecordGps').checked,min_interval_minutes:Number($('patrolMinInterval').value)},
+   privacy:{location_retention_days:Number($('attRetention').value)}
+ }};
+ try{const d=await api('/api/admin/platform-rules',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});state.platformRules=d.rules;const h=await api('/api/admin/platform-rules/history');state.platformRuleHistory=h.history||[];renderAttendanceRules();const msg=$('attendanceSaveMsg');if(msg)msg.innerHTML='<span class="msg success inline-msg">✓ 已儲存出勤與巡邏平台設定</span>';}catch(err){const msg=$('attendanceSaveMsg');if(msg)msg.innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`;}
+}
+
 function renderPlatformHistory(){
  const el=$('platform-history-view');if(!el)return;
  const list=state.platformRuleHistory||[];

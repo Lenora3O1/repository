@@ -343,36 +343,7 @@ function validateCurrentPage(){savePageAnswers();const missing=getPageQuestions(
 async function onSubmit(e){e.preventDefault();if(!validateCurrentPage())return;await saveNow(true);const btn=$('submitBtn');btn.disabled=true;btn.textContent='送出中…';try{const r=await api(`/api/staff/drafts/${draftId}/submit`,{method:'POST'});showMessage(`🎉 交接清冊已正式送出！單號：${r.id}`,'success');draftId=null;draftCommunityId=null;answers={};currentPage=0;setTimeout(()=>showHomeAfterSubmit(),900)}catch(err){showMessage(err.message,'error');btn.disabled=false;btn.textContent='確認並正式送出 ✓'}}
 function showHomeAfterSubmit(){api('/api/staff/session').then(s=>showHome(s.user)).catch(showLogin)}
 async function backHome(){await saveNow(true);await loadChecklistModule('交接清冊');}
-
-function securityOverlay(title,html){
-  const old=document.getElementById('securityOverlay'); if(old)old.remove();
-  const wrap=document.createElement('div');wrap.id='securityOverlay';
-  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
-  wrap.innerHTML=`<div style="background:#fff;max-width:460px;width:100%;border-radius:18px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)"><h2 style="margin:0 0 10px">${escapeHtml(title)}</h2>${html}</div>`;
-  document.body.appendChild(wrap); return wrap;
-}
-function openForcePasswordChange(onDone){
-  const box=securityOverlay('🔐 第一次登入，請設定您的個人密碼',`<p style="color:#666">公司提供的是初始密碼。設定完成後，公司管理員不會知道您的新密碼。</p><form id="forcePwdForm"><div class="field"><label>目前／初始密碼</label><input id="forceCurrent" type="password" required autocomplete="current-password"></div><div class="field"><label>新密碼（至少 8 碼）</label><input id="forceNew" type="password" required autocomplete="new-password"></div><div class="field"><label>再次輸入新密碼</label><input id="forceConfirm" type="password" required autocomplete="new-password"></div><div id="forcePwdMsg"></div><button type="submit">設定新密碼並繼續</button></form>`);
-  box.querySelector('#forcePwdForm').addEventListener('submit',async e=>{
-    e.preventDefault();const msg=box.querySelector('#forcePwdMsg');msg.innerHTML='';
-    try{await api('/api/staff/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:box.querySelector('#forceCurrent').value,newPassword:box.querySelector('#forceNew').value,confirmPassword:box.querySelector('#forceConfirm').value})});box.remove();if(typeof onDone==='function')onDone();else showMessage('密碼已更新，之後請使用您自己的密碼登入。','success');}
-    catch(err){msg.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}
-  });
-}
-function openForgotPassword(){
-  const box=securityOverlay('🔑 忘記密碼',`<p style="color:#666">請輸入員編與帳號登記的 Email，我們會寄送一次性驗證碼。驗證碼 10 分鐘內有效。</p><form id="forgotPwdForm"><div class="field"><label>員編</label><input id="forgotEmployee" required></div><div class="field"><label>登記 Email</label><input id="forgotEmail" type="email" required autocomplete="email"></div><div id="forgotStep2" style="display:none"><div class="field"><label>6 位數驗證碼</label><input id="forgotCode" inputmode="numeric" maxlength="6"></div><div class="field"><label>新密碼（至少 8 碼）</label><input id="forgotNew" type="password" autocomplete="new-password"></div><div class="field"><label>再次輸入新密碼</label><input id="forgotConfirm" type="password" autocomplete="new-password"></div></div><div id="forgotMsg"></div><button id="forgotSubmit" type="submit">寄送驗證碼</button></form>`);
-  let sent=false;
-  box.querySelector('#forgotPwdForm').addEventListener('submit',async e=>{
-    e.preventDefault();const msg=box.querySelector('#forgotMsg');msg.innerHTML='';
-    const payload={employeeId:box.querySelector('#forgotEmployee').value.trim(),email:box.querySelector('#forgotEmail').value.trim()};
-    try{
-      if(!sent){await api('/api/auth/password-reset/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});sent=true;box.querySelector('#forgotStep2').style.display='block';box.querySelector('#forgotSubmit').textContent='重設密碼';msg.innerHTML='<div class="msg success">如果資料符合系統紀錄，驗證碼已寄出，請檢查 Email。</div>';}
-      else{await api('/api/auth/password-reset/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,code:box.querySelector('#forgotCode').value.trim(),newPassword:box.querySelector('#forgotNew').value,confirmPassword:box.querySelector('#forgotConfirm').value})});msg.innerHTML='<div class="msg success">密碼已重設完成，請用新密碼登入。</div>';setTimeout(()=>box.remove(),900);}
-    }catch(err){msg.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}
-  });
-}
-$('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){if(r.user.password_must_change){location.href='company.html?forcePassword=1';return}location.href='company.html';return}await applyStaffBranding();if(r.user.password_must_change){openForcePasswordChange(()=>{showHome(r.user)});return}showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
-$('forgotPasswordBtn')?.addEventListener('click',openForgotPassword);
+$('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('staffLogout').addEventListener('click',async()=>{if(dirty&&draftId)await saveNow(true);await api('/api/staff/logout',{method:'POST'});showLogin();$('employeePassword').value='';});
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
