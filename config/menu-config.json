@@ -430,6 +430,14 @@
       "label": "班表與排班規則",
       "action": "platform-rules-schedule",
       "enabled": true
+    },
+    {
+      "id": "platform-rules-attendance",
+      "parentId": "platform-rules",
+      "icon": "↳",
+      "label": "出勤與巡邏規則",
+      "action": "platform-rules-attendance",
+      "enabled": true
     }
   ]
 }
