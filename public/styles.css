@@ -2345,3 +2345,14 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .todo-more{padding:9px 12px;text-align:center;color:#6c7a74;font-size:.82rem;border-top:1px solid #edf1ee;}
 @media(max-width:900px){.dashboard-bottom-grid{grid-template-columns:1fr;}.pinned-panel-v2 .pinned-work-list{grid-template-columns:repeat(3,minmax(0,1fr));}}
 @media(max-width:600px){.dashboard-bottom-grid{gap:10px;}.home-head-v2{padding:20px!important;}.home-head-v2 h1{font-size:1.7rem!important;}.home-community-badge{display:none;}.pinned-panel-v2 .pinned-work-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+
+/* 出勤／巡邏公司端：批次 QR 與 Google 地圖搜尋 */
+.attendance-batchbar{display:flex;align-items:center;gap:14px;padding:10px 12px;margin:10px 0;border:1px solid #d9e4df;border-radius:10px;background:#f7faf8}
+.attendance-batchbar label{font-weight:700}
+.attendance-batchbar input[type="checkbox"]{width:18px;height:18px;vertical-align:middle}
+.attendance-place-search{display:flex;gap:8px;align-items:center}
+.attendance-place-search input{flex:1}
+.attendance-place-results{margin-top:8px;display:grid;gap:6px}
+.attendance-place-item{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:10px 12px;border:1px solid #cfded8;border-radius:9px;background:#fff;cursor:pointer}
+.attendance-place-item:hover{background:#f2f8f5}
+.attendance-place-item span{font-size:.9em;color:#666}
