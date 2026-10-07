@@ -1449,20 +1449,10 @@ function attendanceDistanceMeters(lat1,lng1,lat2,lng2){
 }
 function attendanceLocationPayload(r){return {id:r.id,community_id:r.community_id,location_type:r.location_type,name:r.name,address:r.address||'',place_id:r.place_id||'',lat:r.lat,lng:r.lng,radius_m:r.radius_m,qr_token:r.qr_token,is_active:!!r.is_active,created_at:r.created_at,updated_at:r.updated_at};}
 
-app.get('/api/company/attendance/place-search',requireCompanyAdmin,requireCompanyPermission('attendance'),async(req,res)=>{
+app.get('/api/company/attendance/maps-config',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
   const key=String(process.env.GOOGLE_MAPS_API_KEY||'').trim();
-  if(!key)return res.json({configured:false,places:[]});
-  const q=String(req.query?.q||'').trim();
-  if(!q)return res.status(400).json({error:'請輸入地點或地址。'});
-  try{
-    const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),8000);
-    const response=await fetch('https://places.googleapis.com/v1/places:searchText',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','X-Goog-Api-Key':key,'X-Goog-FieldMask':'places.id,places.displayName,places.formattedAddress,places.location'},body:JSON.stringify({textQuery:q,languageCode:'zh-TW',regionCode:'TW',maxResultCount:5})});
-    clearTimeout(timer);
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok)return res.status(502).json({error:data?.error?.message||'Google 地圖搜尋失敗。'});
-    const places=(data.places||[]).map(p=>({place_id:p.id||'',name:p.displayName?.text||'',address:p.formattedAddress||'',lat:p.location?.latitude??null,lng:p.location?.longitude??null})).filter(p=>Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
-    res.json({configured:true,places});
-  }catch(e){res.status(502).json({error:e?.name==='AbortError'?'Google 地圖搜尋逾時，請稍後再試。':(e.message||'Google 地圖搜尋失敗。')});}
+  // Maps JavaScript API 的瀏覽器金鑰本來就會出現在前端請求中；安全性靠 Google Cloud 的「網站限制」與「API 限制」保護。
+  res.json({configured:!!key,key:key||''});
 });
 
 app.get('/api/company/attendance/bootstrap',requireCompanyAdmin,(req,res)=>{

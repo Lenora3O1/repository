@@ -5,6 +5,70 @@
   async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
   let cache={rules:{},communities:[],locations:[]};
   function qrUrl(token,size=420){return `https://quickchart.io/qr?text=${encodeURIComponent(token)}&size=${size}&margin=2`;}
+  let googlePlacesPromise=null;
+  async function loadGooglePlaces(){
+    if(googlePlacesPromise)return googlePlacesPromise;
+    googlePlacesPromise=(async()=>{
+      const cfg=await api('/api/company/attendance/maps-config');
+      if(!cfg.configured||!cfg.key)throw new Error('尚未設定 Google Maps API Key，請先到 Zeabur 環境變數設定 GOOGLE_MAPS_API_KEY。');
+      if(!window.google?.maps){
+        await new Promise((resolve,reject)=>{
+          const existing=document.querySelector('script[data-google-maps-loader]');
+          if(existing){existing.addEventListener('load',resolve,{once:true});existing.addEventListener('error',()=>reject(new Error('Google Maps 載入失敗，請檢查 API 限制與網域設定。')),{once:true});return;}
+          const script=document.createElement('script');
+          script.dataset.googleMapsLoader='1';
+          script.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(cfg.key)}&v=weekly&loading=async`;
+          script.async=true;script.defer=true;
+          script.onload=resolve;
+          script.onerror=()=>reject(new Error('Google Maps 載入失敗，請檢查 Maps JavaScript API 是否已啟用，以及網站限制是否包含 https://handover.zeabur.app/*。'));
+          document.head.appendChild(script);
+        });
+      }
+      await google.maps.importLibrary('places');
+      return true;
+    })().catch(err=>{googlePlacesPromise=null;throw err;});
+    return googlePlacesPromise;
+  }
+  function placeLatLng(location){
+    if(!location)return {lat:null,lng:null};
+    const lat=typeof location.lat==='function'?location.lat():location.lat;
+    const lng=typeof location.lng==='function'?location.lng():location.lng;
+    return {lat:Number.isFinite(Number(lat))?Number(lat):null,lng:Number.isFinite(Number(lng))?Number(lng):null};
+  }
+  async function setupGooglePlaceAutocomplete(box){
+    const host=box.querySelector('#attPlaceAutocomplete');
+    const status=box.querySelector('#attPlaceSearchStatus');
+    if(!host)return;
+    try{
+      if(status)status.textContent='正在載入 Google 地圖搜尋…';
+      await loadGooglePlaces();
+      const {PlaceAutocompleteElement}=await google.maps.importLibrary('places');
+      const autocomplete=new PlaceAutocompleteElement();
+      autocomplete.placeholder='輸入社區、地址或地點名稱';
+      autocomplete.includedRegionCodes=['tw'];
+      host.replaceChildren(autocomplete);
+      autocomplete.addEventListener('gmp-select',async({placePrediction})=>{
+        try{
+          if(status)status.textContent='正在取得地點座標…';
+          const place=placePrediction.toPlace();
+          await place.fetchFields({fields:['id','displayName','formattedAddress','location']});
+          const pos=placeLatLng(place.location);
+          if(pos.lat===null||pos.lng===null)throw new Error('這個地點沒有可用的座標，請選擇其他搜尋結果。');
+          box.querySelector('#attLat').value=pos.lat.toFixed(7);
+          box.querySelector('#attLng').value=pos.lng.toFixed(7);
+          box.querySelector('#attAddress').value=place.formattedAddress||'';
+          if(!box.querySelector('#attName').value.trim())box.querySelector('#attName').value=place.displayName||'';
+          const selectedBox=box.querySelector('#attSelectedPlace');
+          if(selectedBox)selectedBox.innerHTML=`<strong>📍 已選擇位置</strong><div>${esc(place.formattedAddress||place.displayName||'')}</div><div class="muted">座標：${pos.lat.toFixed(7)}, ${pos.lng.toFixed(7)}</div>`;
+          box.dataset.googlePlaceId=place.id||'';
+          if(status)status.textContent='✓ 已選擇 Google 地點，可直接儲存。';
+        }catch(e){if(status)status.textContent=e.message||'無法取得地點資料。';}
+      });
+      if(status)status.textContent='輸入後請從 Google 下拉選單選擇正確地點。';
+    }catch(e){
+      if(status)status.innerHTML=`<span class="msg error inline-msg">${esc(e.message||'Google 地圖搜尋載入失敗。')}</span>`;
+    }
+  }
   function typeName(t){return t==='patrol'?'巡邏點':'出勤打卡點'}
   function open(title,html){return window.openCompanyModal(title,html,true)}
   async function load(){cache=await api('/api/company/attendance/bootstrap');return cache}
@@ -45,14 +109,14 @@
   }
   function renderLocationEditor(box,communityId,type='patrol',existing=null){
     const r=existing||{};
-    box.innerHTML=pageShell(`${existing?'✏️ 編輯':'＋ 新增'}${type==='patrol'?'巡邏點':'出勤打卡點'}`,`先設定基本資料，再選擇 Google 地圖位置。${type==='patrol'?'巡邏以 QR Code 為主要驗證方式。':'出勤打卡使用 GPS 判斷是否在有效範圍內。'}`,`<div class="attendance-form-card"><div class="attendance-form-columns"><section><div class="form-section-title">① 基本資料</div><div class="field-stack"><div><label>社區</label><select id="attCommunityEdit">${communityOptions(communityId||r.community_id||'')}</select></div><div><label>地點類型</label><div class="attendance-type-choice"><button type="button" class="${type==='attendance'?'selected':''}" data-type="attendance">📍 出勤打卡點</button><button type="button" class="${type==='patrol'?'selected':''}" data-type="patrol">🚨 巡邏點</button></div></div><div><label>地點名稱</label><input id="attName" value="${esc(r.name||'')}" placeholder="例如：社區大門／B1 機房" required></div></div></section><section><div class="form-section-title">② 地點位置</div><label>Google 地圖搜尋</label><div class="attendance-place-search"><input id="attPlaceQuery" placeholder="輸入社區、地址或地點名稱"><button type="button" class="secondary" id="attPlaceSearch">🔎 搜尋</button></div><div id="attPlaceResults" class="attendance-place-results"></div><div class="selected-place-box" id="attSelectedPlace">${r.address?`<strong>📍 目前位置</strong><div>${esc(r.address)}</div>`:'尚未選擇位置'}</div><details class="advanced-location"><summary>進階位置資訊（地址／緯度／經度）</summary><div class="three-fields"><div><label>地址／位置說明</label><input id="attAddress" value="${esc(r.address||'')}" placeholder="可由 Google 地圖搜尋帶入"></div><div><label>緯度</label><input id="attLat" value="${r.lat??''}" placeholder="自動帶入"></div><div><label>經度</label><input id="attLng" value="${r.lng??''}" placeholder="自動帶入"></div></div></details><button type="button" class="secondary" id="attUseGps">📍 使用目前位置取得 GPS</button><span id="attGpsHint" class="hint-inline"></span></section><section><div class="form-section-title">③ ${type==='patrol'?'巡邏設定':'出勤打卡設定'}</div>${type==='attendance'?`<div><label>有效範圍（公尺）</label><input id="attRadius" type="number" min="5" max="1000" value="${Number(r.radius_m||cache.rules?.default_checkin_radius_m||100)}"><p class="hint">人員必須在此範圍內才可完成出勤打卡。</p></div>`:`<div class="info-box purple"><strong>🚨 巡邏使用 QR Code</strong><p>建立後系統會自動產生專屬 QR Code，現場人員掃描後完成巡邏紀錄。</p></div><div><label>位置說明</label><input id="attPatrolNote" value="${esc(r.address||'')}" placeholder="例如：B1 停車場入口右側、機房鐵門旁"></div>`}</section></div><div class="form-actions"><button type="button" class="secondary" id="attCancel">取消</button><button type="button" id="attSave">${existing?'💾 儲存':'＋ 建立地點'}</button></div></div>`);
+    box.innerHTML=pageShell(`${existing?'✏️ 編輯':'＋ 新增'}${type==='patrol'?'巡邏點':'出勤打卡點'}`,`先設定基本資料，再選擇 Google 地圖位置。${type==='patrol'?'巡邏以 QR Code 為主要驗證方式。':'出勤打卡使用 GPS 判斷是否在有效範圍內。'}`,`<div class="attendance-form-card"><div class="attendance-form-columns"><section><div class="form-section-title">① 基本資料</div><div class="field-stack"><div><label>社區</label><select id="attCommunityEdit">${communityOptions(communityId||r.community_id||'')}</select></div><div><label>地點類型</label><div class="attendance-type-choice"><button type="button" class="${type==='attendance'?'selected':''}" data-type="attendance">📍 出勤打卡點</button><button type="button" class="${type==='patrol'?'selected':''}" data-type="patrol">🚨 巡邏點</button></div></div><div><label>地點名稱</label><input id="attName" value="${esc(r.name||'')}" placeholder="例如：社區大門／B1 機房" required></div></div></section><section><div class="form-section-title">② 地點位置</div><label>Google 地圖搜尋</label><div id="attPlaceAutocomplete" class="attendance-place-autocomplete"></div><div id="attPlaceSearchStatus" class="hint-inline">準備載入 Google 地圖搜尋…</div><div class="selected-place-box" id="attSelectedPlace">${r.address?`<strong>📍 目前位置</strong><div>${esc(r.address)}</div>${r.lat!=null&&r.lng!=null?`<div class="muted">座標：${Number(r.lat).toFixed(7)}, ${Number(r.lng).toFixed(7)}</div>`:''}`:'尚未選擇位置'}</div><details class="advanced-location"><summary>進階位置資訊（地址／緯度／經度）</summary><div class="three-fields"><div><label>地址／位置說明</label><input id="attAddress" value="${esc(r.address||'')}" placeholder="可由 Google 地圖搜尋帶入"></div><div><label>緯度</label><input id="attLat" value="${r.lat??''}" placeholder="自動帶入"></div><div><label>經度</label><input id="attLng" value="${r.lng??''}" placeholder="自動帶入"></div></div></details><button type="button" class="secondary" id="attUseGps">📍 使用目前位置取得 GPS</button><span id="attGpsHint" class="hint-inline"></span></section><section><div class="form-section-title">③ ${type==='patrol'?'巡邏設定':'出勤打卡設定'}</div>${type==='attendance'?`<div><label>有效範圍（公尺）</label><input id="attRadius" type="number" min="5" max="1000" value="${Number(r.radius_m||cache.rules?.default_checkin_radius_m||100)}"><p class="hint">人員必須在此範圍內才可完成出勤打卡。</p></div>`:`<div class="info-box purple"><strong>🚨 巡邏使用 QR Code</strong><p>建立後系統會自動產生專屬 QR Code，現場人員掃描後完成巡邏紀錄。</p></div><div><label>位置說明</label><input id="attPatrolNote" value="${esc(r.address||'')}" placeholder="例如：B1 停車場入口右側、機房鐵門旁"></div>`}</section></div><div class="form-actions"><button type="button" class="secondary" id="attCancel">取消</button><button type="button" id="attSave">${existing?'💾 儲存':'＋ 建立地點'}</button></div></div>`);
     let currentType=type;
     const selectedBox=box.querySelector('#attSelectedPlace');
     box.querySelectorAll('.attendance-type-choice button').forEach(b=>b.addEventListener('click',()=>{currentType=b.dataset.type;box.querySelectorAll('.attendance-type-choice button').forEach(x=>x.classList.toggle('selected',x===b));renderLocationEditor(box,communityId,currentType,existing)}));
     box.querySelector('#attCancel').addEventListener('click',()=>renderLocationCommunityPage(box,communityId,currentType));
     box.querySelector('#attUseGps').addEventListener('click',()=>navigator.geolocation?.getCurrentPosition(pos=>{box.querySelector('#attLat').value=pos.coords.latitude.toFixed(7);box.querySelector('#attLng').value=pos.coords.longitude.toFixed(7);selectedBox.innerHTML='<strong>📍 已使用目前位置</strong><div>座標已帶入，可在進階位置資訊查看。</div>';box.querySelector('#attGpsHint').textContent=`精度約 ${Math.round(pos.coords.accuracy||0)} 公尺`},err=>alert(`無法取得目前位置：${err.message}`),{enableHighAccuracy:true,timeout:10000,maximumAge:0}));
-    box.querySelector('#attPlaceSearch').addEventListener('click',async()=>{const term=box.querySelector('#attPlaceQuery').value.trim();if(!term){alert('請先輸入地點或地址。');return;}const rb=box.querySelector('#attPlaceResults');rb.innerHTML='<div class="profile-loading">搜尋中…</div>';try{const d=await api(`/api/company/attendance/place-search?q=${encodeURIComponent(term)}`);if(!d.configured){rb.innerHTML='<div class="msg warning">尚未設定 Google Maps API Key；也可以先使用「目前位置」取得 GPS。</div>';return;}if(!d.places?.length){rb.innerHTML='<div class="empty">找不到符合的地點，請換關鍵字。</div>';return;}rb.innerHTML=d.places.map((p,i)=>`<button type="button" class="attendance-place-item" data-i="${i}"><strong>${esc(p.name||'未命名地點')}</strong><span>${esc(p.address||'')}</span></button>`).join('');rb.querySelectorAll('.attendance-place-item').forEach(btn=>btn.addEventListener('click',()=>{const p=d.places[Number(btn.dataset.i)];box.querySelector('#attLat').value=Number(p.lat).toFixed(7);box.querySelector('#attLng').value=Number(p.lng).toFixed(7);box.querySelector('#attAddress').value=p.address||'';if(!box.querySelector('#attName').value.trim())box.querySelector('#attName').value=p.name||'';selectedBox.innerHTML=`<strong>📍 已選擇位置</strong><div>${esc(p.address||p.name||'')}</div>`;rb.innerHTML=''}));}catch(e){rb.innerHTML=`<div class="msg error">${esc(e.message)}</div>`}});
-    box.querySelector('#attSave').addEventListener('click',async()=>{try{const address=(box.querySelector('#attAddress')?.value||box.querySelector('#attPatrolNote')?.value||'').trim();const body={community_id:Number(box.querySelector('#attCommunityEdit').value),location_type:currentType,name:box.querySelector('#attName').value.trim(),radius_m:Number(box.querySelector('#attRadius')?.value||cache.rules?.default_checkin_radius_m||100),lat:box.querySelector('#attLat').value,lng:box.querySelector('#attLng').value,address};if(!body.name)throw new Error('請輸入地點名稱');const url=existing?`/api/company/attendance/locations/${existing.id}`:'/api/company/attendance/locations';const d=await api(url,{method:existing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});cache.locations=existing?cache.locations.map(x=>x.id===existing.id?d.location:x).concat([]):cache.locations.concat(d.location);alert(existing?'地點已更新。':'地點已建立。');renderLocationCommunityPage(box,body.community_id,currentType)}catch(e){alert(e.message)}});
+    setupGooglePlaceAutocomplete(box);
+    box.querySelector('#attSave').addEventListener('click',async()=>{try{const address=(box.querySelector('#attAddress')?.value||box.querySelector('#attPatrolNote')?.value||'').trim();const body={community_id:Number(box.querySelector('#attCommunityEdit').value),location_type:currentType,name:box.querySelector('#attName').value.trim(),radius_m:Number(box.querySelector('#attRadius')?.value||cache.rules?.default_checkin_radius_m||100),lat:box.querySelector('#attLat').value,lng:box.querySelector('#attLng').value,address,place_id:box.dataset.googlePlaceId||''};if(!body.name)throw new Error('請輸入地點名稱');const url=existing?`/api/company/attendance/locations/${existing.id}`:'/api/company/attendance/locations';const d=await api(url,{method:existing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});cache.locations=existing?cache.locations.map(x=>x.id===existing.id?d.location:x).concat([]):cache.locations.concat(d.location);alert(existing?'地點已更新。':'地點已建立。');renderLocationCommunityPage(box,body.community_id,currentType)}catch(e){alert(e.message)}});
   }
   function renderLocationCommunityPage(box,communityId,type='patrol'){
     const c=cache.communities.find(x=>String(x.id)===String(communityId));
