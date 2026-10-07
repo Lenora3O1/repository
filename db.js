@@ -516,6 +516,8 @@ db.exec(`
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    address TEXT DEFAULT '',
+    place_id TEXT DEFAULT '',
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
     FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
   );
@@ -545,6 +547,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_attendance_records_tenant_date ON attendance_records(tenant_id,community_id,recorded_at);
   CREATE INDEX IF NOT EXISTS idx_attendance_records_staff_date ON attendance_records(tenant_id,staff_id,recorded_at);
 `);
+
+// 相容既有資料庫：不覆蓋原有巡邏地點，只補上地址與 Google Place ID 欄位。
+addColumnIfMissing('attendance_locations', 'address', "TEXT DEFAULT ''");
+addColumnIfMissing('attendance_locations', 'place_id', "TEXT DEFAULT ''");
 
 function repairDuplicateNamedTenants() {
   const tenants = db.prepare('SELECT * FROM tenants ORDER BY id').all();

@@ -1447,7 +1447,23 @@ function attendanceDistanceMeters(lat1,lng1,lat2,lng2){
   const x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
   return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));
 }
-function attendanceLocationPayload(r){return {id:r.id,community_id:r.community_id,location_type:r.location_type,name:r.name,lat:r.lat,lng:r.lng,radius_m:r.radius_m,qr_token:r.qr_token,is_active:!!r.is_active,created_at:r.created_at,updated_at:r.updated_at};}
+function attendanceLocationPayload(r){return {id:r.id,community_id:r.community_id,location_type:r.location_type,name:r.name,address:r.address||'',place_id:r.place_id||'',lat:r.lat,lng:r.lng,radius_m:r.radius_m,qr_token:r.qr_token,is_active:!!r.is_active,created_at:r.created_at,updated_at:r.updated_at};}
+
+app.get('/api/company/attendance/place-search',requireCompanyAdmin,requireCompanyPermission('attendance'),async(req,res)=>{
+  const key=String(process.env.GOOGLE_MAPS_API_KEY||'').trim();
+  if(!key)return res.json({configured:false,places:[]});
+  const q=String(req.query?.q||'').trim();
+  if(!q)return res.status(400).json({error:'請輸入地點或地址。'});
+  try{
+    const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),8000);
+    const response=await fetch('https://places.googleapis.com/v1/places:searchText',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','X-Goog-Api-Key':key,'X-Goog-FieldMask':'places.id,places.displayName,places.formattedAddress,places.location'},body:JSON.stringify({textQuery:q,languageCode:'zh-TW',regionCode:'TW',maxResultCount:5})});
+    clearTimeout(timer);
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)return res.status(502).json({error:data?.error?.message||'Google 地圖搜尋失敗。'});
+    const places=(data.places||[]).map(p=>({place_id:p.id||'',name:p.displayName?.text||'',address:p.formattedAddress||'',lat:p.location?.latitude??null,lng:p.location?.longitude??null})).filter(p=>Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
+    res.json({configured:true,places});
+  }catch(e){res.status(502).json({error:e?.name==='AbortError'?'Google 地圖搜尋逾時，請稍後再試。':(e.message||'Google 地圖搜尋失敗。')});}
+});
 
 app.get('/api/company/attendance/bootstrap',requireCompanyAdmin,(req,res)=>{
   const tid=tenantId(req), communities=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY name").all(tid);
@@ -1461,7 +1477,7 @@ app.post('/api/company/attendance/locations',requireCompanyAdmin,requireCompanyP
   let lat=req.body?.lat===''||req.body?.lat==null?null:Number(req.body.lat), lng=req.body?.lng===''||req.body?.lng==null?null:Number(req.body.lng);
   if(!Number.isFinite(lat))lat=null; if(!Number.isFinite(lng))lng=null;
   const token=`P-${crypto.randomBytes(12).toString('hex').toUpperCase()}`; const t=now();
-  const info=db.prepare('INSERT INTO attendance_locations (tenant_id,community_id,location_type,name,lat,lng,radius_m,qr_token,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,?,?)').run(tenantId(req),c.id,type,name,lat,lng,radius,token,t,t);
+  const address=String(req.body?.address||'').trim().slice(0,500), placeId=String(req.body?.place_id||'').trim().slice(0,200); const info=db.prepare('INSERT INTO attendance_locations (tenant_id,community_id,location_type,name,lat,lng,radius_m,qr_token,is_active,created_at,updated_at,address,place_id) VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)').run(tenantId(req),c.id,type,name,lat,lng,radius,token,t,t,address,placeId);
   res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(info.lastInsertRowid))});
 });
 app.put('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
@@ -1469,7 +1485,7 @@ app.put('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompa
   const c=attendanceCommunityForCompany(req,req.body?.community_id??row.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
   const type=attendanceCleanType(req.body?.location_type||row.location_type), name=String(req.body?.name??row.name).trim(); if(!name)return res.status(400).json({error:'地點名稱不可空白'});
   const radius=Math.max(5,Math.min(1000,Number(req.body?.radius_m??row.radius_m))); let lat=req.body?.lat===''||req.body?.lat==null?null:Number(req.body.lat),lng=req.body?.lng===''||req.body?.lng==null?null:Number(req.body.lng); if(!Number.isFinite(lat))lat=null;if(!Number.isFinite(lng))lng=null;
-  const active=req.body?.is_active===undefined?!!row.is_active:!!req.body.is_active; db.prepare('UPDATE attendance_locations SET community_id=?,location_type=?,name=?,lat=?,lng=?,radius_m=?,is_active=?,updated_at=? WHERE id=? AND tenant_id=?').run(c.id,type,name,lat,lng,radius,active?1:0,now(),id,tenantId(req));
+  const active=req.body?.is_active===undefined?!!row.is_active:!!req.body.is_active; const address=String(req.body?.address??row.address??'').trim().slice(0,500), placeId=String(req.body?.place_id??row.place_id??'').trim().slice(0,200); db.prepare('UPDATE attendance_locations SET community_id=?,location_type=?,name=?,lat=?,lng=?,radius_m=?,is_active=?,updated_at=?,address=?,place_id=? WHERE id=? AND tenant_id=?').run(c.id,type,name,lat,lng,radius,active?1:0,now(),address,placeId,id,tenantId(req));
   res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
 });
 app.post('/api/company/attendance/locations/:id/regenerate-qr',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
