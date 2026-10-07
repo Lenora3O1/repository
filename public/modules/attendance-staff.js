@@ -1,7 +1,7 @@
 (function(){
   const M=window.AttendanceStaffModule={};
   const esc=s=>window.escapeHtml?window.escapeHtml(s):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const api=window.api;
+  async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
   const KEY='handover-attendance-offline-v2';
   let state={rules:{},locations:[],communities:[],activeCommunityId:null,box:null,scanner:null,stream:null};
   const readQueue=()=>{try{const x=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(x)?x:[]}catch{return[]}};

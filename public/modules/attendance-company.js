@@ -2,7 +2,7 @@
   const A=window.AttendanceCompanyModule={};
   const q=s=>document.querySelector(s);
   const esc=s=>window.escapeHtml?window.escapeHtml(s):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const api=window.api;
+  async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
   let cache={rules:{},communities:[],locations:[]};
   function qrUrl(token,size=320){return `https://quickchart.io/qr?text=${encodeURIComponent(token)}&size=${size}&margin=2`;}
   function typeName(t){return t==='patrol'?'巡邏點':'出勤打卡點'}
