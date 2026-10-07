@@ -69,6 +69,23 @@ addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('staff_users', 'job_categories_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('staff_users', 'person_uid', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'person_status', "TEXT DEFAULT 'active'");
+addColumnIfMissing('staff_users', 'email', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'password_must_change', "INTEGER DEFAULT 0");
+addColumnIfMissing('staff_users', 'password_changed_at', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'reset_requested_at', "TEXT DEFAULT ''");
+
+db.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL,
+  tenant_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts INTEGER DEFAULT 0,
+  used_at TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_staff ON password_reset_tokens(staff_id, created_at)`);
+
 addColumnIfMissing('submissions', 'tenant_id', "INTEGER");
 addColumnIfMissing('submissions', 'community_id', "INTEGER");
 addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
@@ -163,6 +180,23 @@ addColumnIfMissing('staff_users', 'permission_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('staff_users', 'job_categories_json', "TEXT DEFAULT '[]'");
 addColumnIfMissing('staff_users', 'person_uid', "TEXT DEFAULT ''");
 addColumnIfMissing('staff_users', 'person_status', "TEXT DEFAULT 'active'");
+addColumnIfMissing('staff_users', 'email', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'password_must_change', "INTEGER DEFAULT 0");
+addColumnIfMissing('staff_users', 'password_changed_at', "TEXT DEFAULT ''");
+addColumnIfMissing('staff_users', 'reset_requested_at', "TEXT DEFAULT ''");
+
+db.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL,
+  tenant_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts INTEGER DEFAULT 0,
+  used_at TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_staff ON password_reset_tokens(staff_id, created_at)`);
+
 
 // New tenant tables
 
