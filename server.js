@@ -1,6 +1,5 @@
 require('dotenv').config();
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -28,43 +27,6 @@ const DATA_DIR = process.env.DATA_DIR || __dirname;
 const TEMPLATES_DIR = path.join(DATA_DIR, 'uploads', 'templates');
 const PLATFORM_RESOURCES_DIR = path.join(DATA_DIR, 'uploads', 'platform-resources');
 const RESIDENT_IMPORTS_DIR = path.join(DATA_DIR, 'uploads', 'resident-imports');
-function isValidEmail(email){
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email||'').trim());
-}
-function getMailTransport(){
-  const host=String(process.env.SMTP_HOST||'').trim();
-  const port=Number(process.env.SMTP_PORT||587);
-  const user=String(process.env.SMTP_USER||'').trim();
-  const pass=String(process.env.SMTP_PASS||'');
-  if(!host || !user || !pass) return null;
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure:String(process.env.SMTP_SECURE||'').toLowerCase()==='true' || port===465,
-    auth:{user,pass}
-  });
-}
-async function sendPasswordResetEmail(to, code){
-  const transport=getMailTransport();
-  if(!transport){
-    if(String(process.env.PASSWORD_RESET_DEV_LOG||'').toLowerCase()==='true'){
-      console.warn(`[PASSWORD_RESET_DEV] ${to} OTP=${code}`);
-      return {sent:false,dev:true};
-    }
-    throw new Error('尚未設定寄信服務（SMTP）');
-  }
-  const from=String(process.env.SMTP_FROM||process.env.SMTP_USER||'').trim();
-  await transport.sendMail({
-    from,
-    to,
-    subject:'物業管理系統｜密碼重設驗證碼',
-    text:`您的密碼重設驗證碼為 ${code}。驗證碼 10 分鐘內有效，且只能使用一次。若不是您本人操作，請忽略此信件。`,
-    html:`<p>您好，</p><p>您的密碼重設驗證碼為：</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>驗證碼 10 分鐘內有效，且只能使用一次。</p><p>若不是您本人操作，請忽略此信件。</p>`
-  });
-  return {sent:true};
-}
-function hashResetToken(token){ return crypto.createHash('sha256').update(String(token)).digest('hex'); }
-
 fs.mkdirSync(PLATFORM_RESOURCES_DIR, { recursive: true });
 fs.mkdirSync(RESIDENT_IMPORTS_DIR, { recursive: true });
 
@@ -139,10 +101,17 @@ const DEFAULT_STAFF_UI_COPY = {
 };
 const DEFAULT_ADMIN_MENU = [
   {id:'platform-rules',parentId:null,icon:'⚙️',label:'平台規則與設定',action:'platform-rules',enabled:true},
-  {id:'platform-rules-schedule',parentId:'platform-rules',icon:'↳',label:'班表與排班規則',action:'platform-rules-schedule',enabled:true}
+  {id:'platform-rules-schedule',parentId:'platform-rules',icon:'↳',label:'班表與排班規則',action:'platform-rules-schedule',enabled:true},
+  {id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true}
 ];
 const DEFAULT_PLATFORM_RULES = {
   schemaVersion: 1,
+  attendance: {
+    enabled: true,
+    check_in: { gps_required: true, default_radius_m: 100, max_accuracy_m: 100, allow_photo: false },
+    patrol: { enabled: true, default_radius_m: 50, max_accuracy_m: 100, record_gps: true, min_interval_minutes: 5 },
+    privacy: { location_retention_days: 90 }
+  },
   schedule: {
     max_consecutive: 6,
     cross_month_check: true,
@@ -162,6 +131,12 @@ function cloneJson(x){ return JSON.parse(JSON.stringify(x)); }
 function mergePlatformRules(base, incoming){
   const out=cloneJson(base);
   const src=incoming&&typeof incoming==='object'?incoming:{};
+  if(src.attendance&&typeof src.attendance==='object'){
+    out.attendance={...out.attendance,...src.attendance};
+    if(src.attendance.check_in&&typeof src.attendance.check_in==='object') out.attendance.check_in={...out.attendance.check_in,...src.attendance.check_in};
+    if(src.attendance.patrol&&typeof src.attendance.patrol==='object') out.attendance.patrol={...out.attendance.patrol,...src.attendance.patrol};
+    if(src.attendance.privacy&&typeof src.attendance.privacy==='object') out.attendance.privacy={...out.attendance.privacy,...src.attendance.privacy};
+  }
   if(src.schedule&&typeof src.schedule==='object'){
     for(const k of ['max_consecutive','cross_month_check','overflow_action','holiday_source']) if(src.schedule[k]!==undefined) out.schedule[k]=src.schedule[k];
     for(const role of ['security','mobile']) if(src.schedule[role]&&typeof src.schedule[role]==='object') out.schedule[role]={...out.schedule[role],...src.schedule[role]};
@@ -377,6 +352,13 @@ function readMenuConfig(){
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
   const seedConfig=defaultMenuConfig();
   if(!Array.isArray(c.admin)) c.admin=Array.isArray(seedConfig.admin)?seedConfig.admin.map(x=>({...x})):DEFAULT_ADMIN_MENU.map(x=>({...x}));
+  // V10.1：新增「出勤與巡邏規則」時只補缺少的母目錄項目，不刪除／重排既有總後臺目錄。
+  const adminSeed=Array.isArray(seedConfig.admin)?seedConfig.admin:DEFAULT_ADMIN_MENU;
+  let adminMenuChanged=false;
+  for(const item of adminSeed){
+    if(!c.admin.some(x=>String(x.id)===String(item.id))){ c.admin.push({...item}); adminMenuChanged=true; }
+  }
+  if(adminMenuChanged) { try{ fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8'); }catch(e){} }
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
   // V5.9：平台預設與企業目錄必須完全隔離。
   // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
@@ -742,7 +724,7 @@ app.post('/api/staff/login',(req,res)=>{
   // 保留舊欄位給尚未分流的舊 API；新的 /api/company/*、/api/staff/* 會優先使用各自登入身分。
   req.session.userId=user.id; req.session.entry=entry||'staff'; req.session.employeeId=user.employee_id; req.session.employeeName=user.name; req.session.tenantId=user.tenant_id; req.session.role=user.role||'staff';
   db.prepare('UPDATE staff_users SET last_login_at=? WHERE id=?').run(now(),user.id);
-  res.json({success:true,user:{id:user.id,employee_id:user.employee_id,name:user.name,role:user.role||'staff',admin_level:user.admin_level||'admin',tenant_id:user.tenant_id,tenant_name:user.tenant_name,tenant_code:user.tenant_code,position:user.position||'',work_type:user.work_type||'site',job_category:user.job_category||'',job_level:user.job_level||'',permissions:parsePermissions(user),job_categories:getJobCategories(user),site_assignments:getSiteAssignments(user),company_assignment:getCompanyAssignment(user),password_must_change:!!user.password_must_change}});
+  res.json({success:true,user:{id:user.id,employee_id:user.employee_id,name:user.name,role:user.role||'staff',admin_level:user.admin_level||'admin',tenant_id:user.tenant_id,tenant_name:user.tenant_name,tenant_code:user.tenant_code,position:user.position||'',work_type:user.work_type||'site',job_category:user.job_category||'',job_level:user.job_level||'',permissions:parsePermissions(user),job_categories:getJobCategories(user),site_assignments:getSiteAssignments(user),company_assignment:getCompanyAssignment(user)}});
 });
 app.post('/api/staff/logout',(req,res)=>{
   delete req.session.staffUserId; delete req.session.staffEmployeeId; delete req.session.staffEmployeeName; delete req.session.staffTenantId;
@@ -759,94 +741,6 @@ app.get('/api/staff/session',(req,res)=>{
   const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(u.tenant_id); if(!t || t.status!=='active') return res.json({loggedIn:false});
   res.json({loggedIn:true,entry:req.session.entry||'staff',user:{id:u.id,employee_id:u.employee_id,name:u.name,position:u.position||'',job_category:u.job_category||'',job_level:u.job_level||'',work_type:u.work_type||'site',permissions:effectivePermissions(u),job_categories:getJobCategories(u),schedule_role:scheduleDefaultRole(u),schedule_profile:scheduleGetProfile(u.tenant_id,u.id),site_assignments:getSiteAssignments(u),company_assignment:getCompanyAssignment(u),trial_end_date:u.trial_end_date||'',formal_salary:u.formal_salary||'',insurance_level:u.insurance_level||'',health_dependents:Number(u.health_dependents||0),role:u.role||'staff',tenant_id:u.tenant_id,tenant_name:t.name}});
 });
-
-// ===== 帳號密碼安全：首次登入強制修改 =====
-app.post('/api/staff/change-password',(req,res)=>{
-  const u=getUser(req);
-  if(!u) return res.status(401).json({error:'登入狀態已失效，請重新登入。'});
-  const current=String(req.body?.currentPassword||'');
-  const next=String(req.body?.newPassword||'');
-  const confirm=String(req.body?.confirmPassword||'');
-  if(!next || next.length<8) return res.status(400).json({error:'新密碼至少 8 碼。'});
-  if(next!==confirm) return res.status(400).json({error:'兩次輸入的新密碼不一致。'});
-  if(next===current) return res.status(400).json({error:'新密碼不可與目前密碼相同。'});
-  if(!db.verifyPassword(current,u.password_salt,u.password_hash)) return res.status(400).json({error:'目前密碼不正確。'});
-  const p=db.makePassword(next);
-  db.prepare('UPDATE staff_users SET password_hash=?,password_salt=?,password_must_change=0,password_changed_at=?,updated_at=? WHERE id=?')
-    .run(p.hash,p.salt,now(),now(),u.id);
-  res.json({success:true});
-});
-
-// ===== 忘記密碼：員編 + 登記 Email → 一次性 OTP =====
-app.post('/api/auth/password-reset/request',async(req,res)=>{
-  const employeeId=String(req.body?.employeeId||'').trim();
-  const email=String(req.body?.email||'').trim().toLowerCase();
-  const generic={success:true,message:'如果資料符合系統紀錄，驗證碼會寄到登記的 Email。'};
-  if(!employeeId || !isValidEmail(email)) return res.json(generic);
-  const u=db.prepare("SELECT id,tenant_id,email,is_active FROM staff_users WHERE employee_id=? AND lower(email)=? LIMIT 1").get(employeeId,email);
-  if(!u || !u.is_active || !u.tenant_id) return res.json(generic);
-  // 舊 OTP 立即失效，並限制短時間內重複寄送。
-  const recent=db.prepare("SELECT id FROM password_reset_tokens WHERE staff_id=? AND created_at>=? AND used_at='' ORDER BY id DESC LIMIT 1")
-    .get(u.id,new Date(Date.now()-60*1000).toISOString());
-  if(recent) return res.json(generic);
-  const code=String(crypto.randomInt(0,1000000)).padStart(6,'0');
-  const tokenHash=hashResetToken(code);
-  const created=now();
-  const expires=new Date(Date.now()+10*60*1000).toISOString();
-  db.prepare("UPDATE password_reset_tokens SET used_at=? WHERE staff_id=? AND used_at=''").run(created,u.id);
-  db.prepare("INSERT INTO password_reset_tokens (staff_id,tenant_id,token_hash,expires_at,attempts,used_at,created_at) VALUES (?,?,?,?,0,'',?)")
-    .run(u.id,u.tenant_id,tokenHash,expires,created);
-  try{
-    await sendPasswordResetEmail(email,code);
-    db.prepare("UPDATE staff_users SET reset_requested_at=? WHERE id=?").run(created,u.id);
-  }catch(e){
-    db.prepare("UPDATE password_reset_tokens SET used_at=? WHERE staff_id=? AND token_hash=?").run(created,u.id,tokenHash);
-    console.error('[PASSWORD_RESET_EMAIL]',e.message);
-    if(String(process.env.PASSWORD_RESET_DEV_LOG||'').toLowerCase()!=='true') return res.status(503).json({error:'目前尚未設定密碼重設寄信服務，請稍後再試。'});
-  }
-  res.json(generic);
-});
-
-app.post('/api/auth/password-reset/verify',(req,res)=>{
-  const employeeId=String(req.body?.employeeId||'').trim();
-  const email=String(req.body?.email||'').trim().toLowerCase();
-  const code=String(req.body?.code||'').trim();
-  const u=db.prepare("SELECT id,tenant_id FROM staff_users WHERE employee_id=? AND lower(email)=? AND is_active=1 LIMIT 1").get(employeeId,email);
-  if(!u) return res.status(400).json({error:'驗證碼或身分資料不正確。'});
-  const row=db.prepare("SELECT * FROM password_reset_tokens WHERE staff_id=? AND tenant_id=? AND used_at='' ORDER BY id DESC LIMIT 1").get(u.id,u.tenant_id);
-  if(!row || new Date(row.expires_at).getTime()<Date.now()) return res.status(400).json({error:'驗證碼已失效，請重新取得。'});
-  if(row.attempts>=5) return res.status(429).json({error:'驗證碼嘗試次數過多，請重新取得。'});
-  const ok=hashResetToken(code)===row.token_hash;
-  if(!ok){
-    db.prepare('UPDATE password_reset_tokens SET attempts=attempts+1 WHERE id=?').run(row.id);
-    return res.status(400).json({error:'驗證碼或身分資料不正確。'});
-  }
-  res.json({success:true});
-});
-
-app.post('/api/auth/password-reset/complete',(req,res)=>{
-  const employeeId=String(req.body?.employeeId||'').trim();
-  const email=String(req.body?.email||'').trim().toLowerCase();
-  const code=String(req.body?.code||'').trim();
-  const next=String(req.body?.newPassword||'');
-  const confirm=String(req.body?.confirmPassword||'');
-  if(next.length<8) return res.status(400).json({error:'新密碼至少 8 碼。'});
-  if(next!==confirm) return res.status(400).json({error:'兩次輸入的新密碼不一致。'});
-  const u=db.prepare("SELECT id,tenant_id FROM staff_users WHERE employee_id=? AND lower(email)=? AND is_active=1 LIMIT 1").get(employeeId,email);
-  if(!u) return res.status(400).json({error:'驗證碼或身分資料不正確。'});
-  const row=db.prepare("SELECT * FROM password_reset_tokens WHERE staff_id=? AND tenant_id=? AND used_at='' ORDER BY id DESC LIMIT 1").get(u.id,u.tenant_id);
-  if(!row || new Date(row.expires_at).getTime()<Date.now() || row.attempts>=5 || hashResetToken(code)!==row.token_hash) return res.status(400).json({error:'驗證碼已失效或不正確，請重新取得。'});
-  const p=db.makePassword(next);
-  const t=now();
-  const tx=db.transaction(()=>{
-    db.prepare('UPDATE staff_users SET password_hash=?,password_salt=?,password_must_change=0,password_changed_at=?,reset_requested_at=?,updated_at=? WHERE id=?')
-      .run(p.hash,p.salt,t,t,t,u.id);
-    db.prepare('UPDATE password_reset_tokens SET used_at=? WHERE id=?').run(t,row.id);
-  });
-  tx();
-  res.json({success:true});
-});
-
 
 app.post('/api/staff/select-community',requireStaffFiller,(req,res)=>{const cid=Number(req.body?.community_id);const u=getUser(req);if(!cid||!getAccessibleCommunity(req,cid))return res.status(403).json({error:'您沒有這個案場的工作權限'});req.session.activeCommunityId=cid;const c=db.prepare('SELECT id,name FROM communities WHERE id=?').get(cid);res.json({success:true,community:c});});
 // ===== 公司/社區資訊給前台 =====
@@ -1099,9 +993,9 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
 app.put('/api/admin/tenants/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!t)return res.status(404).json({error:'找不到公司'});const name=String(req.body?.name||t.name).trim();const status=req.body?.status===undefined?t.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'公司名稱不可空白'});db.prepare('UPDATE tenants SET name=?,status=?,updated_at=? WHERE id=?').run(name,status,now(),id);res.json({success:true});});
 app.get('/api/admin/tenants/:id/admin',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT id,employee_id,name,is_active,last_login_at,created_at,admin_level FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(id);if(!u)return res.status(404).json({error:'找不到公司負責人'});res.json({admin:u,password_viewable:false});});
 app.get('/api/admin/tenants/:id/admins',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const rows=db.prepare("SELECT id,employee_id,name,is_active,last_login_at,created_at,updated_at,admin_level FROM staff_users WHERE tenant_id=? AND role='company_admin' ORDER BY admin_level='owner' DESC,id").all(id);res.json(rows);});
-app.post('/api/admin/tenants/:id/admins',requireSuperAdmin,(req,res)=>{const tenantIdValue=Number(req.params.id);const tenant=db.prepare('SELECT id,status FROM tenants WHERE id=?').get(tenantIdValue);if(!tenant)return res.status(404).json({error:'找不到公司'});const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');const email=String(req.body?.email||'').trim().toLowerCase();if(!employeeId||!name||!isValidEmail(email)||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantIdValue,employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level,email,password_must_change) VALUES (?,?,?,?,1,?,?,?,?,?,?,1)').run(employeeId,name,p.hash,p.salt,t,t,'company_admin',tenantIdValue,'admin',email);res.json({success:true,id:info.lastInsertRowid});});
-app.put('/api/admin/company-admins/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND role='company_admin'").get(id);if(!u)return res.status(404).json({error:'找不到公司管理員'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');const email=req.body?.email===undefined?String(u.email||'').trim().toLowerCase():String(req.body?.email||'').trim().toLowerCase();if(!name)return res.status(400).json({error:'姓名不可空白'});if(!isValidEmail(email))return res.status(400).json({error:'請填寫有效 Email。'});if(u.admin_level==='owner'&&!active)return res.status(400).json({error:'公司負責人不能由這裡停用，請先指定新的負責人'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,email=?,password_must_change=1,updated_at=? WHERE id=?').run(name,active?1:0,p.hash,p.salt,email,t,id);}else db.prepare('UPDATE staff_users SET name=?,is_active=?,email=?,updated_at=? WHERE id=?').run(name,active?1:0,email,t,id);res.json({success:true});});
-app.post('/api/admin/tenants/:id/admin/reset-password',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const password=String(req.body?.password||'');if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const u=db.prepare("SELECT id FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(id);if(!u)return res.status(404).json({error:'找不到公司負責人'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET password_hash=?,password_salt=?,password_must_change=1,updated_at=? WHERE id=?').run(p.hash,p.salt,now(),u.id);res.json({success:true});});
+app.post('/api/admin/tenants/:id/admins',requireSuperAdmin,(req,res)=>{const tenantIdValue=Number(req.params.id);const tenant=db.prepare('SELECT id,status FROM tenants WHERE id=?').get(tenantIdValue);if(!tenant)return res.status(404).json({error:'找不到公司'});const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantIdValue,employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'company_admin',tenantIdValue,'admin');res.json({success:true,id:info.lastInsertRowid});});
+app.put('/api/admin/company-admins/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND role='company_admin'").get(id);if(!u)return res.status(404).json({error:'找不到公司管理員'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');if(!name)return res.status(400).json({error:'姓名不可空白'});if(u.admin_level==='owner'&&!active)return res.status(400).json({error:'公司負責人不能由這裡停用，請先指定新的負責人'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,updated_at=? WHERE id=?').run(name,active?1:0,p.hash,p.salt,t,id);}else db.prepare('UPDATE staff_users SET name=?,is_active=?,updated_at=? WHERE id=?').run(name,active?1:0,t,id);res.json({success:true});});
+app.post('/api/admin/tenants/:id/admin/reset-password',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const password=String(req.body?.password||'');if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const u=db.prepare("SELECT id FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(id);if(!u)return res.status(404).json({error:'找不到公司負責人'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET password_hash=?,password_salt=?,updated_at=? WHERE id=?').run(p.hash,p.salt,now(),u.id);res.json({success:true});});
 
 app.get('/api/admin/platform-rules',requireSuperAdmin,(req,res)=>{
   res.json({scope:'platform',rules:readPlatformRules()});
@@ -1141,22 +1035,8 @@ app.get('/api/admin/form-config',requireSuperAdmin,(req,res)=>res.json(readFormC
 app.put('/api/admin/form-config',requireSuperAdmin,(req,res)=>{const config=req.body;if(!config||!Array.isArray(config.pages)||!Array.isArray(config.questions))return res.status(400).json({error:'表單設定格式錯誤'});const pageIds=new Set(config.pages.map(p=>p.id));const ids=config.questions.map(q=>q.id);if(new Set(ids).size!==ids.length)return res.status(400).json({error:'欄位代碼不能重複'});if(config.questions.some(q=>!pageIds.has(q.pageId)))return res.status(400).json({error:'有題目尚未指定有效頁面'});writeFormConfig(config);res.json({success:true});});
 
 // 總後臺可查看全部帳號，但一般公司管理操作應在公司後台進行
-app.post('/api/admin/staff',requireSuperAdmin,(req,res)=>{
-  const employeeId=String(req.body?.employee_id||'').trim();
-  const name=String(req.body?.name||'').trim();
-  const password=String(req.body?.password||'');
-  const email=String(req.body?.email||'').trim().toLowerCase();
-  const tenantIdValue=req.body?.tenant_id?Number(req.body.tenant_id):null;
-  if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且初始密碼至少 4 碼。'});
-  if(tenantIdValue && !isValidEmail(email))return res.status(400).json({error:'公司人員請填寫有效 Email。'});
-  if(db.prepare('SELECT id FROM staff_users WHERE tenant_id IS ? AND employee_id=?').get(tenantIdValue,employeeId))return res.status(400).json({error:'此公司已有相同員編。'});
-  const p=db.makePassword(password),t=now();
-  const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,email,password_must_change) VALUES (?,?,?,?,1,?,?,?,?,?,1)')
-    .run(employeeId,name,p.hash,p.salt,t,t,'staff',tenantIdValue,email);
-  res.json({success:true,id:info.lastInsertRowid});
-});
-app.get('/api/admin/staff',requireSuperAdmin,(req,res)=>{const rows=db.prepare(`SELECT u.id,u.employee_id,u.name,u.email,u.is_active,u.role,u.tenant_id,u.password_must_change,u.created_at,u.updated_at,t.name tenant_name FROM staff_users u LEFT JOIN tenants t ON t.id=u.tenant_id ORDER BY u.tenant_id,u.role DESC,u.employee_id`).all();res.json(rows);});
-app.put('/api/admin/staff/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const user=db.prepare('SELECT * FROM staff_users WHERE id=?').get(id);if(!user)return res.status(404).json({error:'找不到人員'});const name=String(req.body?.name||user.name).trim();const active=req.body?.is_active===undefined?!!user.is_active:!!req.body.is_active;const role=req.body?.role||user.role||'staff';const tenantIdValue=req.body?.tenant_id===null?null:(req.body?.tenant_id===undefined?user.tenant_id:Number(req.body.tenant_id));const password=String(req.body?.password||'');const email=req.body?.email===undefined?String(user.email||'').trim().toLowerCase():String(req.body?.email||'').trim().toLowerCase();if(!name)return res.status(400).json({error:'姓名不可空白'});if(tenantIdValue&&!isValidEmail(email))return res.status(400).json({error:'公司人員請填寫有效 Email。'});if(!['staff','company_admin'].includes(role))return res.status(400).json({error:'角色不正確'});if(role==='company_admin'&&!tenantIdValue)return res.status(400).json({error:'公司管理員必須隸屬一家公司'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,role=?,tenant_id=?,password_hash=?,password_salt=?,email=?,password_must_change=1,updated_at=? WHERE id=?').run(name,active?1:0,role,tenantIdValue,p.hash,p.salt,email,t,id);}else db.prepare('UPDATE staff_users SET name=?,is_active=?,role=?,tenant_id=?,email=?,updated_at=? WHERE id=?').run(name,active?1:0,role,tenantIdValue,email,t,id);res.json({success:true});});
+app.get('/api/admin/staff',requireSuperAdmin,(req,res)=>{const rows=db.prepare(`SELECT u.id,u.employee_id,u.name,u.is_active,u.role,u.tenant_id,u.created_at,u.updated_at,t.name tenant_name FROM staff_users u LEFT JOIN tenants t ON t.id=u.tenant_id ORDER BY u.tenant_id,u.role DESC,u.employee_id`).all();res.json(rows);});
+app.put('/api/admin/staff/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const user=db.prepare('SELECT * FROM staff_users WHERE id=?').get(id);if(!user)return res.status(404).json({error:'找不到人員'});const name=String(req.body?.name||user.name).trim();const active=req.body?.is_active===undefined?!!user.is_active:!!req.body.is_active;const role=req.body?.role||user.role||'staff';const tenantIdValue=req.body?.tenant_id===null?null:(req.body?.tenant_id===undefined?user.tenant_id:Number(req.body.tenant_id));const password=String(req.body?.password||'');if(!name)return res.status(400).json({error:'姓名不可空白'});if(!['staff','company_admin'].includes(role))return res.status(400).json({error:'角色不正確'});if(role==='company_admin'&&!tenantIdValue)return res.status(400).json({error:'公司管理員必須隸屬一家公司'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,role=?,tenant_id=?,password_hash=?,password_salt=?,updated_at=? WHERE id=?').run(name,active?1:0,role,tenantIdValue,p.hash,p.salt,t,id);}else db.prepare('UPDATE staff_users SET name=?,is_active=?,role=?,tenant_id=?,updated_at=? WHERE id=?').run(name,active?1:0,role,tenantIdValue,t,id);res.json({success:true});});
 app.delete('/api/admin/staff/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=?').get(id);if(!u)return res.status(404).json({error:'找不到人員'});db.prepare('DELETE FROM staff_users WHERE id=?').run(id);db.prepare('DELETE FROM drafts WHERE employee_id=? AND tenant_id=?').run(u.employee_id,u.tenant_id);res.json({success:true});});
 
 // ===== 公司管理後台 =====
@@ -1167,9 +1047,9 @@ app.get('/api/company/session',requireCompanyAdmin,(req,res)=>{const u=getUser(r
 app.get('/api/company/admins',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const rows=db.prepare("SELECT id,employee_id,name,is_active,admin_level,last_login_at,created_at,updated_at FROM staff_users WHERE tenant_id=? AND role='company_admin' ORDER BY admin_level='owner' DESC,id").all(tenantId(req));res.json({admins:rows,current_user_id:getUser(req).id,current_admin_level:getUser(req).admin_level||'admin'});});
 app.post('/api/company/admins',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const me=getUser(req);if((me.admin_level||'admin')!=='owner')return res.status(403).json({error:'只有公司負責人可以新增公司管理員。一般公司管理員仍可開通總務、會計等一般人員帳號。'});const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'company_admin',tenantId(req),'admin');res.json({success:true,id:info.lastInsertRowid});});
 app.put('/api/company/admins/:id',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const me=getUser(req);if((me.admin_level||'admin')!=='owner')return res.status(403).json({error:'只有公司負責人可以管理其他公司管理員'});const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND tenant_id=? AND role='company_admin'").get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到公司管理員'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');if(!name)return res.status(400).json({error:'姓名不可空白'});if(u.admin_level==='owner'&&!active)return res.status(400).json({error:'不能停用公司負責人'});const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare('UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,p.hash,p.salt,t,id,tenantId(req));}else db.prepare('UPDATE staff_users SET name=?,is_active=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,active?1:0,t,id,tenantId(req));res.json({success:true});});
-app.get('/api/company/staff',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const rows=db.prepare(`SELECT id,employee_id,name,email,is_active,role,admin_level,position,job_category,job_level,work_type,job_categories_json,permission_json,person_uid,person_status,password_must_change,created_at,updated_at FROM staff_users WHERE tenant_id=? ORDER BY role DESC,admin_level='owner' DESC,is_active DESC,employee_id`).all(tenantId(req));res.json(rows.map(r=>({...r,permissions:effectivePermissions(r),job_categories:getJobCategories(r)})));});
-app.post('/api/company/staff',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');const email=String(req.body?.email||'').trim().toLowerCase();const workType=['site','internal','hybrid'].includes(req.body?.work_type)?req.body.work_type:'site';const jobCategories=Array.isArray(req.body?.job_categories)?req.body.job_categories.map(String).filter(Boolean):String(req.body?.job_category||'').trim()?[String(req.body.job_category).trim()]:[];const jobLevel=String(req.body?.job_level||'').trim();const permissions=Array.isArray(req.body?.permissions)?req.body.permissions.map(String).filter(Boolean):STAFF_PERMISSION_DEFAULTS.slice();const communityIds=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):[];if(!employeeId)return res.status(400).json({error:'請填寫員編。'});if(!name)return res.status(400).json({error:'請填寫姓名。姓名不限制字數。'});if(!isValidEmail(email))return res.status(400).json({error:'請填寫有效的 Email，忘記密碼時會用來接收驗證碼。'});if(password.length<4)return res.status(400).json({error:`初始密碼至少 4 碼，目前收到 ${password.length} 碼。`});if(!jobCategories.length)return res.status(400).json({error:'至少選擇一個職務類別'});if(!jobLevel)return res.status(400).json({error:'請選擇職務位階'});if(workType!=='internal'&&!communityIds.length)return res.status(400).json({error:'駐點／兼任駐點人員至少要勾選一個案場'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司目前已有相同員編的啟用帳號'});const valid=new Set(db.prepare("SELECT id FROM communities WHERE tenant_id=? AND status='active'").all(tenantId(req)).map(x=>x.id));if(communityIds.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的啟用案場'});const p=db.makePassword(password);const t=now();const position=`${jobLevel}${jobCategories.length?'｜'+jobCategories.join('、'):''}`;const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,position,work_type,job_category,job_level,job_categories_json,permission_json,person_uid,person_status,email,password_must_change) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,1)').run(employeeId,name,p.hash,p.salt,t,t,'staff',tenantId(req),position,workType,jobCategories[0],jobLevel,JSON.stringify(jobCategories),JSON.stringify(permissions),'P'+String(Date.now()),'active',email);syncWorkAssignments(info.lastInsertRowid,tenantId(req),workType,communityIds,jobCategories,jobLevel,permissions);res.json({success:true,id:info.lastInsertRowid});});
-app.put('/api/company/staff/:id',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin'&&u.id!==getUser(req).id)return res.status(400).json({error:'公司管理員請由公司負責人管理'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');const email=req.body?.email===undefined?String(u.email||'').trim().toLowerCase():String(req.body?.email||'').trim().toLowerCase();const workType=['site','internal','hybrid'].includes(req.body?.work_type)?req.body.work_type:(u.work_type||'site');const jobCategories=Array.isArray(req.body?.job_categories)?req.body.job_categories.map(String).filter(Boolean):String(req.body?.job_category||u.job_category||'').trim()?[String(req.body?.job_category||u.job_category).trim()]:getJobCategories(u);const jobLevel=String(req.body?.job_level===undefined?(u.job_level||''):req.body.job_level).trim();const permissions=Array.isArray(req.body?.permissions)?req.body.permissions.map(String).filter(Boolean):parsePermissions(u);const communityIds=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);if(!name)return res.status(400).json({error:'姓名不可空白'});if(!isValidEmail(email))return res.status(400).json({error:'請填寫有效的 Email。'});if(!jobCategories.length)return res.status(400).json({error:'至少選擇一個職務類別'});if(!jobLevel)return res.status(400).json({error:'請選擇職務位階'});if(workType!=='internal'&&!communityIds.length)return res.status(400).json({error:'駐點／兼任駐點人員至少要勾選一個案場'});const valid=new Set(db.prepare("SELECT id FROM communities WHERE tenant_id=? AND status='active'").all(tenantId(req)).map(x=>x.id));if(communityIds.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的啟用案場'});const position=`${jobLevel}｜${jobCategories.join('、')}`;const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare("UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,position=?,work_type=?,job_category=?,job_level=?,job_categories_json=?,permission_json=?,person_status='active',email=?,password_must_change=1,updated_at=? WHERE id=? AND tenant_id=?").run(name,active?1:0,p.hash,p.salt,position,workType,jobCategories[0],jobLevel,JSON.stringify(jobCategories),JSON.stringify(permissions),email,t,id,tenantId(req));}else db.prepare("UPDATE staff_users SET name=?,is_active=?,position=?,work_type=?,job_category=?,job_level=?,job_categories_json=?,permission_json=?,person_status='active',email=?,updated_at=? WHERE id=? AND tenant_id=?").run(name,active?1:0,position,workType,jobCategories[0],jobLevel,JSON.stringify(jobCategories),JSON.stringify(permissions),email,t,id,tenantId(req));syncWorkAssignments(id,tenantId(req),workType,communityIds,jobCategories,jobLevel,permissions);res.json({success:true});});
+app.get('/api/company/staff',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const rows=db.prepare(`SELECT id,employee_id,name,is_active,role,admin_level,position,job_category,job_level,work_type,job_categories_json,permission_json,person_uid,person_status,created_at,updated_at FROM staff_users WHERE tenant_id=? ORDER BY role DESC,admin_level='owner' DESC,is_active DESC,employee_id`).all(tenantId(req));res.json(rows.map(r=>({...r,permissions:effectivePermissions(r),job_categories:getJobCategories(r)})));});
+app.post('/api/company/staff',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const employeeId=String(req.body?.employee_id||'').trim();const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');const workType=['site','internal','hybrid'].includes(req.body?.work_type)?req.body.work_type:'site';const jobCategories=Array.isArray(req.body?.job_categories)?req.body.job_categories.map(String).filter(Boolean):String(req.body?.job_category||'').trim()?[String(req.body.job_category).trim()]:[];const jobLevel=String(req.body?.job_level||'').trim();const permissions=Array.isArray(req.body?.permissions)?req.body.permissions.map(String).filter(Boolean):STAFF_PERMISSION_DEFAULTS.slice();const communityIds=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):[];if(!employeeId)return res.status(400).json({error:'請填寫員編。'});if(!name)return res.status(400).json({error:'請填寫姓名。姓名不限制字數。'});if(password.length<4)return res.status(400).json({error:`初始密碼至少 4 碼，目前收到 ${password.length} 碼。`});if(!jobCategories.length)return res.status(400).json({error:'至少選擇一個職務類別'});if(!jobLevel)return res.status(400).json({error:'請選擇職務位階'});if(workType!=='internal'&&!communityIds.length)return res.status(400).json({error:'駐點／兼任駐點人員至少要勾選一個案場'});if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantId(req),employeeId))return res.status(400).json({error:'這家公司目前已有相同員編的啟用帳號'});const valid=new Set(db.prepare("SELECT id FROM communities WHERE tenant_id=? AND status='active'").all(tenantId(req)).map(x=>x.id));if(communityIds.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的啟用案場'});const p=db.makePassword(password);const t=now();const position=`${jobLevel}${jobCategories.length?'｜'+jobCategories.join('、'):''}`;const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,position,work_type,job_category,job_level,job_categories_json,permission_json,person_uid,person_status) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'staff',tenantId(req),position,workType,jobCategories[0],jobLevel,JSON.stringify(jobCategories),JSON.stringify(permissions),'P'+String(Date.now()),'active');syncWorkAssignments(info.lastInsertRowid,tenantId(req),workType,communityIds,jobCategories,jobLevel,permissions);res.json({success:true,id:info.lastInsertRowid});});
+app.put('/api/company/staff/:id',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin'&&u.id!==getUser(req).id)return res.status(400).json({error:'公司管理員請由公司負責人管理'});const name=String(req.body?.name||u.name).trim();const active=req.body?.is_active===undefined?!!u.is_active:!!req.body.is_active;const password=String(req.body?.password||'');const workType=['site','internal','hybrid'].includes(req.body?.work_type)?req.body.work_type:(u.work_type||'site');const jobCategories=Array.isArray(req.body?.job_categories)?req.body.job_categories.map(String).filter(Boolean):String(req.body?.job_category||u.job_category||'').trim()?[String(req.body?.job_category||u.job_category).trim()]:getJobCategories(u);const jobLevel=String(req.body?.job_level===undefined?(u.job_level||''):req.body.job_level).trim();const permissions=Array.isArray(req.body?.permissions)?req.body.permissions.map(String).filter(Boolean):parsePermissions(u);const communityIds=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);if(!name)return res.status(400).json({error:'姓名不可空白'});if(!jobCategories.length)return res.status(400).json({error:'至少選擇一個職務類別'});if(!jobLevel)return res.status(400).json({error:'請選擇職務位階'});if(workType!=='internal'&&!communityIds.length)return res.status(400).json({error:'駐點／兼任駐點人員至少要勾選一個案場'});const valid=new Set(db.prepare("SELECT id FROM communities WHERE tenant_id=? AND status='active'").all(tenantId(req)).map(x=>x.id));if(communityIds.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的啟用案場'});const position=`${jobLevel}｜${jobCategories.join('、')}`;const t=now();if(password){if(password.length<4)return res.status(400).json({error:'新密碼至少 4 碼'});const p=db.makePassword(password);db.prepare("UPDATE staff_users SET name=?,is_active=?,password_hash=?,password_salt=?,position=?,work_type=?,job_category=?,job_level=?,job_categories_json=?,permission_json=?,person_status='active',updated_at=? WHERE id=? AND tenant_id=?").run(name,active?1:0,p.hash,p.salt,position,workType,jobCategories[0],jobLevel,JSON.stringify(jobCategories),JSON.stringify(permissions),t,id,tenantId(req));}else db.prepare("UPDATE staff_users SET name=?,is_active=?,position=?,work_type=?,job_category=?,job_level=?,job_categories_json=?,permission_json=?,person_status='active',updated_at=? WHERE id=? AND tenant_id=?").run(name,active?1:0,position,workType,jobCategories[0],jobLevel,JSON.stringify(jobCategories),JSON.stringify(permissions),t,id,tenantId(req));syncWorkAssignments(id,tenantId(req),workType,communityIds,jobCategories,jobLevel,permissions);res.json({success:true});});
 app.post('/api/company/staff/:id/status',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u||u.role==='company_admin'&&u.admin_level==='owner')return res.status(404).json({error:'找不到可異動的人員'});if(u.role==='company_admin'&&(getUser(req).admin_level||'admin')!=='owner')return res.status(403).json({error:'只有公司負責人可以處理其他公司管理員的離職、停用或黑名單。'});const status=String(req.body?.status||'').trim();if(!['active','disabled','left','blacklist'].includes(status))return res.status(400).json({error:'人員狀態不正確'});if(status==='disabled'){db.prepare("UPDATE staff_users SET is_active=0,person_status='disabled',updated_at=? WHERE id=? AND tenant_id=?").run(now(),id,tenantId(req));return res.json({success:true,action:'disabled'});}if(status==='active'){db.prepare("UPDATE staff_users SET is_active=1,person_status='active',updated_at=? WHERE id=? AND tenant_id=?").run(now(),id,tenantId(req));return res.json({success:true,action:'active'});}const snapshot={employee_id:u.employee_id,name:u.name,work_type:u.work_type,job_categories:getJobCategories(u),job_level:u.job_level,permissions:parsePermissions(u),communities:getSiteAssignments(u).map(x=>({id:x.community_id,name:x.community_name})),archived_from_account_id:u.id};db.prepare('INSERT INTO staff_person_archive (person_uid,tenant_id,employee_id,name,person_status,archived_at,archived_by_staff_id,snapshot_json) VALUES (?,?,?,?,?,?,?,?)').run(u.person_uid||('P'+String(u.id).padStart(8,'0')),tenantId(req),u.employee_id,u.name,status,now(),getUser(req).id,JSON.stringify(snapshot));db.prepare('DELETE FROM staff_users WHERE id=? AND tenant_id=?').run(id,tenantId(req));return res.json({success:true,action:'archived_deleted_account'});});
 app.get('/api/company/personnel-archive',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const status=String(req.query?.status||'').trim();const rows=status?db.prepare('SELECT * FROM staff_person_archive WHERE tenant_id=? AND person_status=? ORDER BY archived_at DESC').all(tenantId(req),status):db.prepare('SELECT * FROM staff_person_archive WHERE tenant_id=? ORDER BY archived_at DESC').all(tenantId(req));res.json(rows.map(r=>({...r,snapshot:JSON.parse(r.snapshot_json||'{}')})));});
 app.delete('/api/company/staff/:id',requireCompanyAdmin,(req,res)=>res.status(400).json({error:'請使用「停用」、「離職」或「黑名單」處理人員狀態；離職與黑名單會封存人事資料並刪除登入帳號。'}));

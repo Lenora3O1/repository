@@ -141,19 +141,3 @@ handover-system/
 ### 資料保存
 
 表單設定現在會保存到 `/data/form-config.json`，而填答資料仍保存於 `/data/data.sqlite`。因此 Zeabur 的 Volume 請維持掛載 `/data`。
-
-
-### 帳號密碼安全（V5.9）
-新開通的人員帳號會標記為「首次登入必須修改密碼」。公司管理員只設定初始密碼，不會看到人員之後自行設定的正式密碼；資料庫只保存 scrypt 雜湊與 salt。
-
-忘記密碼目前採「員編＋登記 Email＋一次性驗證碼」流程。驗證碼 10 分鐘有效、單次使用，錯誤最多 5 次，且限制短時間重複寄送。
-
-若要啟用 Email 驗證，請在 Zeabur 設定：
-- `SMTP_HOST`
-- `SMTP_PORT`（常見 587；SSL 465）
-- `SMTP_SECURE`（465 可設 `true`）
-- `SMTP_USER`
-- `SMTP_PASS`
-- `SMTP_FROM`（可省略，預設使用 SMTP_USER）
-
-測試階段若尚未設定 SMTP，可暫時設定 `PASSWORD_RESET_DEV_LOG=true`，OTP 會只寫入伺服器 log，方便測試；正式環境請務必關閉此設定並使用真正的 SMTP。
