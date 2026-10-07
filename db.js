@@ -500,6 +500,52 @@ for (const u of unassignedStaff) assignDefault.run(u.id, defaultCommunity.id);
 // 一般人員／社區卻仍在 tenant B，造成總後台看得到、公司後台看不到。
 // 本修復只處理「完全同名」的 tenant，並以「有公司管理員的 tenant」作為公司主 tenant。
 // 為避免誤合併：若同名 tenant 之間存在相同員編，整組不自動合併，只記錄警告。
+
+// 出勤／巡邏模組 V2：公司地點設定、巡邏 QR、出勤與巡邏紀錄。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS attendance_locations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    community_id INTEGER NOT NULL,
+    location_type TEXT NOT NULL DEFAULT 'attendance',
+    name TEXT NOT NULL,
+    lat REAL,
+    lng REAL,
+    radius_m INTEGER NOT NULL DEFAULT 100,
+    qr_token TEXT NOT NULL UNIQUE,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_attendance_locations_tenant_community ON attendance_locations(tenant_id,community_id,location_type,is_active);
+  CREATE TABLE IF NOT EXISTS attendance_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    staff_id INTEGER NOT NULL,
+    community_id INTEGER NOT NULL,
+    location_id INTEGER,
+    record_type TEXT NOT NULL,
+    qr_token TEXT DEFAULT '',
+    lat REAL,
+    lng REAL,
+    accuracy_m REAL,
+    recorded_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'online',
+    client_record_id TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+    FOREIGN KEY (location_id) REFERENCES attendance_locations(id) ON DELETE SET NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_records_client ON attendance_records(tenant_id,staff_id,client_record_id);
+  CREATE INDEX IF NOT EXISTS idx_attendance_records_tenant_date ON attendance_records(tenant_id,community_id,recorded_at);
+  CREATE INDEX IF NOT EXISTS idx_attendance_records_staff_date ON attendance_records(tenant_id,staff_id,recorded_at);
+`);
+
 function repairDuplicateNamedTenants() {
   const tenants = db.prepare('SELECT * FROM tenants ORDER BY id').all();
   const norm = v => String(v || '').trim().replace(/\\s+/g, '');
@@ -573,6 +619,8 @@ function repairDuplicateNamedTenants() {
           db.prepare('UPDATE dashboard_pins SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
           db.prepare('UPDATE staff_todos SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
           db.prepare('UPDATE sops SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE attendance_locations SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
+          db.prepare('UPDATE attendance_records SET tenant_id=? WHERE tenant_id=?').run(targetId, sourceId);
 
           const sourceMenus = db.prepare('SELECT id,scope FROM menu_configs WHERE tenant_id=?').all(sourceId);
           for (const m of sourceMenus) {

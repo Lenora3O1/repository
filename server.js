@@ -106,12 +106,6 @@ const DEFAULT_ADMIN_MENU = [
 ];
 const DEFAULT_PLATFORM_RULES = {
   schemaVersion: 1,
-  attendance: {
-    enabled: true,
-    check_in: { gps_required: true, default_radius_m: 100, max_accuracy_m: 100, allow_photo: false },
-    patrol: { enabled: true, default_radius_m: 50, max_accuracy_m: 100, record_gps: true, min_interval_minutes: 5 },
-    privacy: { location_retention_days: 90 }
-  },
   schedule: {
     max_consecutive: 6,
     cross_month_check: true,
@@ -124,6 +118,18 @@ const DEFAULT_PLATFORM_RULES = {
       secretary: {mode: 'rotation', rest_days: 8}
     }
   },
+  attendance: {
+    enabled: true,
+    gps_checkin_enabled: true,
+    default_checkin_radius_m: 100,
+    max_gps_accuracy_m: 150,
+    patrol_enabled: true,
+    patrol_qr_enabled: true,
+    patrol_qr_radius_m: 30,
+    gps_log_enabled: true,
+    offline_queue_enabled: true,
+    offline_sync_enabled: true
+  },
   updated_at: '',
   updated_by: 'system'
 };
@@ -131,18 +137,13 @@ function cloneJson(x){ return JSON.parse(JSON.stringify(x)); }
 function mergePlatformRules(base, incoming){
   const out=cloneJson(base);
   const src=incoming&&typeof incoming==='object'?incoming:{};
-  if(src.attendance&&typeof src.attendance==='object'){
-    out.attendance={...out.attendance,...src.attendance};
-    if(src.attendance.check_in&&typeof src.attendance.check_in==='object') out.attendance.check_in={...out.attendance.check_in,...src.attendance.check_in};
-    if(src.attendance.patrol&&typeof src.attendance.patrol==='object') out.attendance.patrol={...out.attendance.patrol,...src.attendance.patrol};
-    if(src.attendance.privacy&&typeof src.attendance.privacy==='object') out.attendance.privacy={...out.attendance.privacy,...src.attendance.privacy};
-  }
   if(src.schedule&&typeof src.schedule==='object'){
     for(const k of ['max_consecutive','cross_month_check','overflow_action','holiday_source']) if(src.schedule[k]!==undefined) out.schedule[k]=src.schedule[k];
     for(const role of ['security','mobile']) if(src.schedule[role]&&typeof src.schedule[role]==='object') out.schedule[role]={...out.schedule[role],...src.schedule[role]};
     if(src.schedule.admin&&typeof src.schedule.admin==='object') for(const role of ['manager','secretary']) if(src.schedule.admin[role]&&typeof src.schedule.admin[role]==='object') out.schedule.admin[role]={...out.schedule.admin[role],...src.schedule.admin[role]};
   }
-  out.schemaVersion=1; return out;
+  if(src.attendance&&typeof src.attendance==='object') out.attendance={...out.attendance,...src.attendance};
+  out.schemaVersion=2; return out;
 }
 function readPlatformRules(){
   let saved={};
@@ -326,6 +327,28 @@ const PLATFORM_COMPANY_SCHEDULE_MENU = [
   {id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},
   {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}
 ];
+const PLATFORM_STAFF_ATTENDANCE_MENU = [
+  {id:'staff-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'staff-attendance',enabled:true}
+];
+const PLATFORM_COMPANY_ATTENDANCE_MENU = [
+  {id:'company-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'attendance',enabled:true},
+  {id:'company-attendance-locations',parentId:'company-attendance',icon:'↳',label:'打卡／巡邏點',action:'attendance-locations',enabled:true},
+  {id:'company-attendance-records',parentId:'company-attendance',icon:'↳',label:'出勤紀錄',action:'attendance-records',enabled:true},
+  {id:'company-patrol-records',parentId:'company-attendance',icon:'↳',label:'巡邏紀錄',action:'patrol-records',enabled:true}
+];
+function isAttendanceMenuItem(item, scope){
+  const id=String(item?.id||'').trim(), action=String(item?.action||'').trim(), label=String(item?.label||'').trim();
+  if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||['出勤與巡邏','打卡／巡邏點','出勤紀錄','巡邏紀錄'].includes(label);
+  return id==='staff-attendance'||action==='staff-attendance'||label==='出勤與巡邏';
+}
+function normalizeAttendanceMenu(items, scope){
+  const source=Array.isArray(items)?items:[];
+  const first=source.findIndex(x=>isAttendanceMenuItem(x,scope));
+  const filtered=source.filter(x=>!isAttendanceMenuItem(x,scope));
+  const standard=scope==='company'?PLATFORM_COMPANY_ATTENDANCE_MENU:PLATFORM_STAFF_ATTENDANCE_MENU;
+  filtered.splice(first<0?filtered.length:first,0,...standard.map(x=>({...x})));
+  return filtered;
+}
 function isScheduleMenuItem(item, scope){
   const id=String(item?.id||'').trim();
   const action=String(item?.action||'').trim();
@@ -352,13 +375,10 @@ function readMenuConfig(){
   c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
   const seedConfig=defaultMenuConfig();
   if(!Array.isArray(c.admin)) c.admin=Array.isArray(seedConfig.admin)?seedConfig.admin.map(x=>({...x})):DEFAULT_ADMIN_MENU.map(x=>({...x}));
-  // V10.1：新增「出勤與巡邏規則」時只補缺少的母目錄項目，不刪除／重排既有總後臺目錄。
-  const adminSeed=Array.isArray(seedConfig.admin)?seedConfig.admin:DEFAULT_ADMIN_MENU;
-  let adminMenuChanged=false;
-  for(const item of adminSeed){
-    if(!c.admin.some(x=>String(x.id)===String(item.id))){ c.admin.push({...item}); adminMenuChanged=true; }
-  }
-  if(adminMenuChanged) { try{ fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8'); }catch(e){} }
+  // 平台規則中心標準化：保留既有目錄，只在缺少時補上出勤與巡邏規則。
+  if(!c.admin.some(x=>String(x.id)==='platform-rules')) c.admin.push({...DEFAULT_ADMIN_MENU[0]});
+  if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
+  if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
   // V5.9：平台預設與企業目錄必須完全隔離。
   // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
@@ -384,12 +404,15 @@ function readMenuConfig(){
     const beforeStaff=JSON.stringify(c.staff), beforeCompany=JSON.stringify(c.company);
     c.staff=normalizeScheduleMenu(c.staff,'staff');
     c.company=normalizeScheduleMenu(c.company,'company');
-    let menuChanged=(beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company));
+    const beforeAttendanceStaff=JSON.stringify(c.staff), beforeAttendanceCompany=JSON.stringify(c.company);
+    c.staff=normalizeAttendanceMenu(c.staff,'staff');
+    c.company=normalizeAttendanceMenu(c.company,'company');
+    let menuChanged=(beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company)||beforeAttendanceStaff!==JSON.stringify(c.staff)||beforeAttendanceCompany!==JSON.stringify(c.company));
     for(const t of tenantRows){
       const key=String(t.id);
       c.tenants[key]=c.tenants[key]||{};
-      const nextStaff=normalizeScheduleMenu(c.tenants[key].staff||c.staff,'staff');
-      const nextCompany=normalizeScheduleMenu(c.tenants[key].company||c.company,'company');
+      const nextStaff=normalizeAttendanceMenu(normalizeScheduleMenu(c.tenants[key].staff||c.staff,'staff'),'staff');
+      const nextCompany=normalizeAttendanceMenu(normalizeScheduleMenu(c.tenants[key].company||c.company,'company'),'company');
       if(JSON.stringify(c.tenants[key].staff||[])!==JSON.stringify(nextStaff)||JSON.stringify(c.tenants[key].company||[])!==JSON.stringify(nextCompany)) menuChanged=true;
       c.tenants[key].staff=nextStaff;
       c.tenants[key].company=nextCompany;
@@ -413,14 +436,14 @@ function cleanMenuItems(items){
   for(const x of clean){if(x.parentId===x.id || (x.parentId && !idSet.has(x.parentId))) x.parentId=null;}
   return clean;
 }
-const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','schedule'];
+const STAFF_PERMISSION_DEFAULTS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','schedule','attendance'];
 const STAFF_PERMISSION_LABELS={
   'todo':'代辦事項','work-journal':'工作日誌','finance':'財務／會計','committee':'管理委員會','residents':'住戶名冊','vendors':'廠商聯繫','handover':'交接清冊','company-resources':'公司資源',
-  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本','manage-sop':'案場 SOP 管理','sop':'案場 SOP','schedule':'班表',
+  'manage-staff':'公司人員管理','manage-communities':'社區管理','view-submissions':'交接紀錄','manage-templates':'公司文件／範本','manage-sop':'案場 SOP 管理','sop':'案場 SOP','schedule':'班表','attendance':'出勤與巡邏',
   'company-work-journal':'工作日誌管理','company-accounting':'會計','company-general-affairs':'總務管理','company-personnel':'人員','company-finance':'公司財務','company-hr':'人事管理','company-new-record':'新日錄'
 };
-const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record','schedule']);
-const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','sop','schedule']);
+const COMPANY_PERMISSION_KEYS=new Set(['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record','schedule','attendance']);
+const SITE_PERMISSION_KEYS=new Set(['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','sop','schedule','attendance']);
 function parsePermissions(u){
   try{const p=JSON.parse(u?.permission_json||'[]');return Array.isArray(p)?p.map(String):[];}catch{return []}
 }
@@ -433,7 +456,7 @@ function suggestedPermissionsForUser(u){
   if(has('勤務')) out.add('manage-staff');
   if(has('社區管理')) {out.add('manage-communities');out.add('view-submissions');}
   if(['internal','hybrid'].includes(u?.work_type||'')) out.add('schedule');
-  if((u?.work_type||'site')!=='internal' && (has('社區管理')||has('秘書')||has('保全')||has('機動'))) {['todo','work-journal','committee','residents','vendors','handover'].forEach(x=>out.add(x));out.add('schedule');}
+  if((u?.work_type||'site')!=='internal' && (has('社區管理')||has('秘書')||has('保全')||has('機動'))) {['todo','work-journal','committee','residents','vendors','handover'].forEach(x=>out.add(x));out.add('schedule');out.add('attendance');}
   if(!out.size) out.add((u?.work_type||'site')==='internal'?'company-resources':'todo');
   return [...out];
 }
@@ -479,7 +502,7 @@ function menuPermissionKey(item,scope='staff'){
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
   const rules=[
-    ['manage-staff',['staff','人員管理','公司人員']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
+    ['manage-staff',['staff','人員管理','公司人員']],['attendance',['attendance','出勤與巡邏','打卡','巡邏']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
     ['todo',['todo','代辦事項']],['work-journal',['work-journal','工作日誌']],['finance',['finance','財務','會計']],['committee',['committee','管理委員會']],['residents',['residents','住戶名冊']],['vendors',['vendors','廠商聯繫']],['handover',['handover','交接清冊']],['company-resources',['company-resources','公司資源']]
   ];
   for(const [key,terms] of rules) if(terms.some(t=>raw.includes(String(t).toLowerCase()))) return key;
@@ -500,6 +523,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       // 經理不論內勤或駐點，都可以進入案場 SOP；上傳權限由 SOP API 再次驗證。
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
       if(scope==='staff' && key==='schedule' && ['admin','security','mobile'].includes(scheduleDefaultRole(staffUser))) return true;
+      if(scope==='staff' && key==='attendance' && hasSiteAccess(staffUser)) return true;
       if(scope==='staff' && key==='residents') return true;
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
@@ -1006,6 +1030,7 @@ app.put('/api/admin/platform-rules',requireSuperAdmin,(req,res)=>{
     const s=body.schedule&&typeof body.schedule==='object'?body.schedule:{};
     const max=Math.max(1,Math.min(31,Number(s.max_consecutive||6)));
     const overflow=['auto_reschedule','warn_only','block_generation'].includes(String(s.overflow_action))?String(s.overflow_action):'auto_reschedule';
+    const a=body.attendance&&typeof body.attendance==='object'?body.attendance:{};
     const next={schedule:{
       max_consecutive:max,
       cross_month_check:body.schedule?.cross_month_check!==false,
@@ -1014,6 +1039,13 @@ app.put('/api/admin/platform-rules',requireSuperAdmin,(req,res)=>{
       security:{rest_days:Math.max(0,Math.min(31,Number(s.security?.rest_days??6))),self_select_days:Math.max(0,Math.min(31,Number(s.security?.self_select_days??2))),max_consecutive:Math.max(1,Math.min(31,Number(s.security?.max_consecutive??max))),shift:['day','night'].includes(String(s.security?.shift))?String(s.security.shift):'day'},
       mobile:{rest_days:Math.max(0,Math.min(31,Number(s.mobile?.rest_days??6))),self_select_days:Math.max(0,Math.min(31,Number(s.mobile?.self_select_days??2))),max_consecutive:Math.max(1,Math.min(31,Number(s.mobile?.max_consecutive??max)))},
       admin:{manager:{mode:['red_holiday','rotation','fixed_monthly'].includes(String(s.admin?.manager?.mode))?String(s.admin.manager.mode):'red_holiday',rest_days:Math.max(0,Math.min(31,Number(s.admin?.manager?.rest_days??8)))},secretary:{mode:['red_holiday','rotation','fixed_monthly'].includes(String(s.admin?.secretary?.mode))?String(s.admin.secretary.mode):'rotation',rest_days:Math.max(0,Math.min(31,Number(s.admin?.secretary?.rest_days??8)))}}
+    },attendance:{
+      enabled:a.enabled!==false, gps_checkin_enabled:a.gps_checkin_enabled!==false,
+      default_checkin_radius_m:Math.max(20,Math.min(1000,Number(a.default_checkin_radius_m??100))),
+      max_gps_accuracy_m:Math.max(10,Math.min(500,Number(a.max_gps_accuracy_m??150))),
+      patrol_enabled:a.patrol_enabled!==false, patrol_qr_enabled:a.patrol_qr_enabled!==false,
+      patrol_qr_radius_m:Math.max(5,Math.min(200,Number(a.patrol_qr_radius_m??30))),
+      gps_log_enabled:a.gps_log_enabled!==false, offline_queue_enabled:a.offline_queue_enabled!==false, offline_sync_enabled:a.offline_sync_enabled!==false
     }};
     const saved=writePlatformRules(next,`super_admin:${ADMIN_USER}`);
     res.json({success:true,rules:saved});
@@ -1393,6 +1425,111 @@ app.post('/api/staff/residents/import',requireStaffFiller,residentUpload.single(
   if(!req.file)return res.status(400).json({error:'請選擇 Excel／CSV 檔案'});
   try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req);if(!c)throw new Error('請先選擇目前要操作的案場');if(!residentCanUpload(u))throw new Error('目前帳號只有主管／社區管理人員可以上傳住戶名冊');const parsed=residentParseFile(path.join(RESIDENT_IMPORTS_DIR,req.file.filename));const t=now();const info=db.prepare('INSERT INTO resident_imports(tenant_id,community_id,category,original_filename,imported_at,imported_by,imported_by_name,row_count,detected_fields_json,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)').run(tenantId(req),c.id,category,req.file.originalname,t,u.id,u.name||u.employee_id||'',parsed.rows.length,JSON.stringify(parsed.detected));db.prepare('UPDATE resident_imports SET is_active=0 WHERE tenant_id=? AND community_id=? AND category=? AND id<>?').run(tenantId(req),c.id,category,info.lastInsertRowid);const ins=db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');const tx=db.transaction(rows=>{for(const r of rows)ins.run(info.lastInsertRowid,tenantId(req),c.id,category,r.building,r.unit,r.floor,r.name,r.phone,r.address,[r.relation,r.extra].filter(Boolean).join('；'),JSON.stringify(r.raw));});tx(parsed.rows);res.json({success:true,imported:parsed.rows.length,detected_fields:parsed.detected,message:`已匯入 ${parsed.rows.length} 筆，並成為目前這個案場的最新${category==='residents-contact'?'住戶聯繫表':category==='residents-owners'?'區分所有權人':'承租人'}。`});}catch(e){res.status(400).json({error:e.message||'匯入失敗'});}finally{ /* 保留原始匯入檔，方便日後追溯 */ }
 });
+
+
+// ===== 出勤／巡邏 V2：出勤 GPS、巡邏 QR、離線同步 =====
+function attendancePlatformRules(){ return readPlatformRules().attendance || DEFAULT_PLATFORM_RULES.attendance; }
+function attendanceCommunityForCompany(req, communityId){
+  const cid=Number(communityId||0); if(!cid) return null;
+  return db.prepare("SELECT * FROM communities WHERE id=? AND tenant_id=? AND status='active'").get(cid,tenantId(req));
+}
+function attendanceCommunityForStaff(req, communityId){
+  const cid=Number(communityId||0); if(!cid) return null;
+  const u=getUser(req); if(!u) return null;
+  return getAccessibleCommunity(req,cid);
+}
+function attendanceCleanType(v){ return ['attendance','patrol'].includes(String(v||''))?String(v):'attendance'; }
+function attendanceRecordType(v){ return ['checkin','checkout','patrol'].includes(String(v||''))?String(v):''; }
+function attendanceDistanceMeters(lat1,lng1,lat2,lng2){
+  const a=Number(lat1),b=Number(lng1),c=Number(lat2),d=Number(lng2);
+  if(![a,b,c,d].every(Number.isFinite)) return null;
+  const R=6371000, p1=a*Math.PI/180,p2=c*Math.PI/180,dp=(c-a)*Math.PI/180,dl=(d-b)*Math.PI/180;
+  const x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));
+}
+function attendanceLocationPayload(r){return {id:r.id,community_id:r.community_id,location_type:r.location_type,name:r.name,lat:r.lat,lng:r.lng,radius_m:r.radius_m,qr_token:r.qr_token,is_active:!!r.is_active,created_at:r.created_at,updated_at:r.updated_at};}
+
+app.get('/api/company/attendance/bootstrap',requireCompanyAdmin,(req,res)=>{
+  const tid=tenantId(req), communities=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY name").all(tid);
+  const locations=db.prepare('SELECT * FROM attendance_locations WHERE tenant_id=? ORDER BY community_id,location_type,name').all(tid).map(attendanceLocationPayload);
+  res.json({rules:attendancePlatformRules(),communities,locations});
+});
+app.post('/api/company/attendance/locations',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const c=attendanceCommunityForCompany(req,req.body?.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
+  const type=attendanceCleanType(req.body?.location_type), name=String(req.body?.name||'').trim(); if(!name)return res.status(400).json({error:'請輸入地點名稱'});
+  const rules=attendancePlatformRules(); const radius=Math.max(5,Math.min(1000,Number(req.body?.radius_m|| (type==='attendance'?rules.default_checkin_radius_m:rules.patrol_qr_radius_m))));
+  let lat=req.body?.lat===''||req.body?.lat==null?null:Number(req.body.lat), lng=req.body?.lng===''||req.body?.lng==null?null:Number(req.body.lng);
+  if(!Number.isFinite(lat))lat=null; if(!Number.isFinite(lng))lng=null;
+  const token=`P-${crypto.randomBytes(12).toString('hex').toUpperCase()}`; const t=now();
+  const info=db.prepare('INSERT INTO attendance_locations (tenant_id,community_id,location_type,name,lat,lng,radius_m,qr_token,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,?,?)').run(tenantId(req),c.id,type,name,lat,lng,radius,token,t,t);
+  res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(info.lastInsertRowid))});
+});
+app.put('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const id=Number(req.params.id), row=db.prepare('SELECT * FROM attendance_locations WHERE id=? AND tenant_id=?').get(id,tenantId(req)); if(!row)return res.status(404).json({error:'找不到地點'});
+  const c=attendanceCommunityForCompany(req,req.body?.community_id??row.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
+  const type=attendanceCleanType(req.body?.location_type||row.location_type), name=String(req.body?.name??row.name).trim(); if(!name)return res.status(400).json({error:'地點名稱不可空白'});
+  const radius=Math.max(5,Math.min(1000,Number(req.body?.radius_m??row.radius_m))); let lat=req.body?.lat===''||req.body?.lat==null?null:Number(req.body.lat),lng=req.body?.lng===''||req.body?.lng==null?null:Number(req.body.lng); if(!Number.isFinite(lat))lat=null;if(!Number.isFinite(lng))lng=null;
+  const active=req.body?.is_active===undefined?!!row.is_active:!!req.body.is_active; db.prepare('UPDATE attendance_locations SET community_id=?,location_type=?,name=?,lat=?,lng=?,radius_m=?,is_active=?,updated_at=? WHERE id=? AND tenant_id=?').run(c.id,type,name,lat,lng,radius,active?1:0,now(),id,tenantId(req));
+  res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
+});
+app.post('/api/company/attendance/locations/:id/regenerate-qr',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const id=Number(req.params.id), row=db.prepare('SELECT * FROM attendance_locations WHERE id=? AND tenant_id=?').get(id,tenantId(req)); if(!row)return res.status(404).json({error:'找不到地點'});
+  const token=`P-${crypto.randomBytes(12).toString('hex').toUpperCase()}`; db.prepare('UPDATE attendance_locations SET qr_token=?,updated_at=? WHERE id=? AND tenant_id=?').run(token,now(),id,tenantId(req)); res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
+});
+app.get('/api/company/attendance/records',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const tid=tenantId(req),cid=Number(req.query?.community_id||0),type=attendanceRecordType(req.query?.record_type||''); let sql=`SELECT r.*,u.name staff_name,u.employee_id,c.name community_name,l.name location_name FROM attendance_records r JOIN staff_users u ON u.id=r.staff_id AND u.tenant_id=r.tenant_id JOIN communities c ON c.id=r.community_id AND c.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id WHERE r.tenant_id=?`; const args=[tid]; if(cid){sql+=' AND r.community_id=?';args.push(cid);} if(type){sql+=' AND r.record_type=?';args.push(type);} const rows=db.prepare(sql+' ORDER BY r.recorded_at DESC LIMIT 1000').all(...args); res.json({rows});
+});
+
+app.get('/api/staff/attendance/bootstrap',requireStaffFiller,(req,res)=>{
+  const u=getUser(req),ids=getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean), rules=attendancePlatformRules();
+  if(rules.enabled===false)return res.json({rules,locations:[],communities:[]});
+  const placeholders=ids.map(()=>'?').join(',')||'0'; const communities=ids.length?db.prepare(`SELECT id,name,status FROM communities WHERE tenant_id=? AND id IN (${placeholders}) AND status='active' ORDER BY name`).all(tenantId(req),...ids):[];
+  const locations=ids.length?db.prepare(`SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id IN (${placeholders}) AND is_active=1 ORDER BY community_id,location_type,name`).all(tenantId(req),...ids):[];
+  res.json({rules,communities,locations:locations.map(attendanceLocationPayload),active_community_id:Number(req.session?.activeCommunityId||0)||null});
+});
+function attendanceValidateStaffCommunity(req,communityId){return attendanceCommunityForStaff(req,communityId);}
+app.post('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{
+  try{
+    const u=getUser(req),rules=attendancePlatformRules(); if(rules.enabled===false)return res.status(403).json({error:'平台目前尚未啟用出勤／巡邏功能'});
+    const cid=Number(req.body?.community_id||0), c=attendanceValidateStaffCommunity(req,cid); if(!c)return res.status(403).json({error:'您目前沒有這個案場的工作權限'});
+    const rt=attendanceRecordType(req.body?.record_type); if(!rt)return res.status(400).json({error:'打卡類型不正確'});
+    const clientId=String(req.body?.client_record_id||'').trim()||`C-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`;
+    const exists=db.prepare('SELECT * FROM attendance_records WHERE tenant_id=? AND staff_id=? AND client_record_id=?').get(tenantId(req),u.id,clientId); if(exists)return res.json({success:true,duplicate:true,record:exists});
+    const lat=req.body?.lat==null||req.body?.lat===''?null:Number(req.body.lat),lng=req.body?.lng==null||req.body?.lng===''?null:Number(req.body.lng),accuracy=req.body?.accuracy_m==null||req.body?.accuracy_m===''?null:Number(req.body.accuracy_m);
+    let location=null;
+    if(rt==='patrol'){
+      const token=String(req.body?.qr_token||'').trim(); if(!rules.patrol_qr_enabled||!token)return res.status(400).json({error:'巡邏打卡需要掃描有效 QR Code'});
+      location=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND qr_token=? AND is_active=1").get(tenantId(req),cid,token); if(!location)return res.status(400).json({error:'這張 QR Code 不屬於目前案場，或巡邏點已停用'});
+    } else {
+      const lid=Number(req.body?.location_id||0); location=db.prepare("SELECT * FROM attendance_locations WHERE id=? AND tenant_id=? AND community_id=? AND location_type='attendance' AND is_active=1").get(lid,tenantId(req),cid);
+      if(!location)return res.status(400).json({error:'找不到有效的出勤打卡點'});
+      if(rules.gps_checkin_enabled){
+        if(!Number.isFinite(lat)||!Number.isFinite(lng))return res.status(400).json({error:'出勤打卡需要開啟手機定位'});
+        if(location.lat==null||location.lng==null)return res.status(400).json({error:'此打卡點尚未設定 GPS 座標，請聯絡公司管理員'});
+        const distance=attendanceDistanceMeters(lat,lng,location.lat,location.lng); if(distance==null||distance>Number(location.radius_m||rules.default_checkin_radius_m))return res.status(400).json({error:`目前距離打卡點約 ${Math.round(distance||0)} 公尺，超出允許範圍 ${location.radius_m} 公尺`});
+        if(Number.isFinite(accuracy)&&accuracy>Number(rules.max_gps_accuracy_m||150))return res.status(400).json({error:`目前 GPS 誤差約 ${Math.round(accuracy)} 公尺，超過系統允許的 ${rules.max_gps_accuracy_m} 公尺`});
+      }
+    }
+    const recordedAt=String(req.body?.recorded_at||now()), source=String(req.body?.source||'online')==='offline'?'offline':'online';
+    const info=db.prepare('INSERT INTO attendance_records (tenant_id,staff_id,community_id,location_id,record_type,qr_token,lat,lng,accuracy_m,recorded_at,received_at,source,client_record_id,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),u.id,cid,location?.id||null,rt,rt==='patrol'?String(req.body.qr_token||''):'',Number.isFinite(lat)?lat:null,Number.isFinite(lng)?lng:null,Number.isFinite(accuracy)?accuracy:null,recordedAt,now(),source,clientId,JSON.stringify({user_agent:String(req.headers['user-agent']||'').slice(0,300)}));
+    res.json({success:true,id:info.lastInsertRowid,record:db.prepare('SELECT * FROM attendance_records WHERE id=?').get(info.lastInsertRowid)});
+  }catch(e){res.status(400).json({error:e.message||'打卡紀錄寫入失敗'});}
+});
+app.post('/api/staff/attendance/sync',requireStaffFiller,(req,res)=>{
+  const rows=Array.isArray(req.body?.records)?req.body.records.slice(0,100):[]; const results=[]; for(const row of rows){
+    try{ const fake={body:{...row,source:'offline'},session:req.session,headers:req.headers,path:'/api/staff/attendance/records'}; let done=false; const rr={status(n){this.code=n;return this},json(x){this.payload=x;done=true;return this}}; /* 以相同驗證邏輯重跑：直接呼叫內部函式不依賴 Express chain */
+      const u=getUser(req),c=attendanceValidateStaffCommunity(req,Number(row.community_id)); if(!c)throw new Error('案場權限已失效');
+      const cid=Number(row.community_id),rt=attendanceRecordType(row.record_type),clientId=String(row.client_record_id||'').trim(); if(!clientId)throw new Error('離線紀錄缺少識別碼');
+      if(db.prepare('SELECT id FROM attendance_records WHERE tenant_id=? AND staff_id=? AND client_record_id=?').get(tenantId(req),u.id,clientId)){results.push({client_record_id:clientId,success:true,duplicate:true});continue;}
+      const rules=attendancePlatformRules(); let location=null;
+      const lat=Number.isFinite(Number(row.lat))?Number(row.lat):null,lng=Number.isFinite(Number(row.lng))?Number(row.lng):null,accuracy=Number.isFinite(Number(row.accuracy_m))?Number(row.accuracy_m):null;
+      if(rt==='patrol'){const token=String(row.qr_token||'').trim();location=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND qr_token=? AND is_active=1").get(tenantId(req),cid,token);if(!location)throw new Error('巡邏 QR 已失效或不屬於此案場');}
+      else {location=db.prepare("SELECT * FROM attendance_locations WHERE id=? AND tenant_id=? AND community_id=? AND location_type='attendance' AND is_active=1").get(Number(row.location_id),tenantId(req),cid);if(!location)throw new Error('出勤打卡點已失效');if(rules.gps_checkin_enabled){if(lat==null||lng==null)throw new Error('離線出勤紀錄缺少 GPS');const d=attendanceDistanceMeters(lat,lng,location.lat,location.lng);if(d==null||d>Number(location.radius_m||rules.default_checkin_radius_m))throw new Error('離線出勤紀錄超出打卡範圍');if(accuracy!=null&&accuracy>Number(rules.max_gps_accuracy_m||150))throw new Error('離線 GPS 誤差過大');}}
+      const info=db.prepare('INSERT INTO attendance_records (tenant_id,staff_id,community_id,location_id,record_type,qr_token,lat,lng,accuracy_m,recorded_at,received_at,source,client_record_id,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),u.id,cid,location?.id||null,rt,rt==='patrol'?String(row.qr_token||''):'',lat,lng,accuracy,String(row.recorded_at||now()),now(),'offline',clientId,JSON.stringify({synced:true,user_agent:String(req.headers['user-agent']||'').slice(0,300)}));results.push({client_record_id:clientId,success:true,id:info.lastInsertRowid});
+    }catch(e){results.push({client_record_id:String(row.client_record_id||''),success:false,error:e.message||'同步失敗'});}
+  } res.json({success:true,results});
+});
+app.get('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{const u=getUser(req),cid=Number(req.query?.community_id||0),rows=db.prepare(`SELECT r.*,c.name community_name,l.name location_name FROM attendance_records r JOIN communities c ON c.id=r.community_id AND c.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.staff_id=? ${cid?'AND r.community_id=?':''} ORDER BY r.recorded_at DESC LIMIT 100`).all(...([tenantId(req),u.id].concat(cid?[cid]:[])));res.json({rows});});
 
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
 const upload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,Date.now()+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>file.originalname.toLowerCase().endsWith('.docx')?cb(null,true):cb(new Error('只允許上傳 .docx 檔案'))});
