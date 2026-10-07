@@ -1448,6 +1448,7 @@ function attendanceDistanceMeters(lat1,lng1,lat2,lng2){
   return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));
 }
 function attendanceLocationPayload(r){return {id:r.id,community_id:r.community_id,location_type:r.location_type,name:r.name,address:r.address||'',place_id:r.place_id||'',lat:r.lat,lng:r.lng,radius_m:r.radius_m,qr_token:r.qr_token,is_active:!!r.is_active,created_at:r.created_at,updated_at:r.updated_at};}
+function patrolRoutePayload(r, points=[]){return {id:r.id,community_id:r.community_id,name:r.name,time_label:r.time_label||'',note:r.note||'',is_active:!!r.is_active,created_at:r.created_at,updated_at:r.updated_at,points:points.map(x=>({id:x.location_id,sequence_no:x.sequence_no,name:x.name,address:x.address||'',qr_token:x.qr_token,is_active:!!x.is_active}))};}
 
 app.get('/api/company/attendance/maps-config',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
   const key=String(process.env.GOOGLE_MAPS_API_KEY||'').trim();
@@ -1455,10 +1456,58 @@ app.get('/api/company/attendance/maps-config',requireCompanyAdmin,requireCompany
   res.json({configured:!!key,key:key||''});
 });
 
+function patrolStaffIds(tenantIdValue, communityId){
+  return db.prepare('SELECT staff_id FROM patrol_staff_assignments WHERE tenant_id=? AND community_id=? AND is_active=1 ORDER BY staff_id').all(tenantIdValue,Number(communityId)||0).map(x=>Number(x.staff_id));
+}
+function isPatrolStaff(req, communityId){
+  const u=getUser(req); const cid=Number(communityId||0); if(!u||!cid)return false;
+  if(u.role==='company_admin')return true;
+  if(isSiteManager(u) && getUserSiteCommunityIds(u).includes(cid))return true;
+  return !!db.prepare('SELECT 1 FROM patrol_staff_assignments WHERE tenant_id=? AND community_id=? AND staff_id=? AND is_active=1').get(tenantId(req),cid,u.id);
+}
+function patrolCommunityForStaff(req, communityId){
+  const cid=Number(communityId||0); if(!cid)return null;
+  const c=attendanceCommunityForStaff(req,cid); if(!c)return null;
+  return isPatrolStaff(req,cid)?c:null;
+}
+function patrolStaffCandidates(tenantIdValue, communityId){
+  const cid=Number(communityId||0);
+  const rows=db.prepare(`SELECT DISTINCT u.id,u.name,u.employee_id,u.position,u.job_category,u.job_level,u.work_type,u.is_active
+    FROM staff_users u
+    LEFT JOIN staff_work_assignments a ON a.staff_id=u.id AND a.tenant_id=u.tenant_id AND a.scope_type='site' AND a.community_id=?
+    LEFT JOIN staff_communities sc ON sc.staff_id=u.id AND sc.community_id=?
+    WHERE u.tenant_id=? AND u.is_active=1 AND (a.id IS NOT NULL OR sc.staff_id IS NOT NULL)
+    ORDER BY u.name,u.employee_id`).all(cid,cid,tenantIdValue);
+  const active=new Set(patrolStaffIds(tenantIdValue,cid));
+  return rows.map(r=>({...r,enabled:active.has(Number(r.id))}));
+}
+
+app.get('/api/company/attendance/patrol-staff',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const c=attendanceCommunityForCompany(req,req.query?.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
+  res.json({community:c,staff:patrolStaffCandidates(tenantId(req),c.id)});
+});
+app.put('/api/company/attendance/patrol-staff',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const c=attendanceCommunityForCompany(req,req.body?.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
+  const ids=[...new Set((Array.isArray(req.body?.staff_ids)?req.body.staff_ids:[]).map(Number).filter(Boolean))];
+  const candidates=new Set(patrolStaffCandidates(tenantId(req),c.id).map(x=>Number(x.id)));
+  if(ids.some(id=>!candidates.has(id)))return res.status(400).json({error:'部分人員不是目前社區的有效駐點人員，無法開通巡邏'});
+  const t=now(),tid=tenantId(req);
+  const tx=db.transaction(()=>{
+    db.prepare('UPDATE patrol_staff_assignments SET is_active=0,updated_at=? WHERE tenant_id=? AND community_id=?').run(t,tid,c.id);
+    const up=db.prepare(`INSERT INTO patrol_staff_assignments(tenant_id,community_id,staff_id,is_active,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id,staff_id) DO UPDATE SET is_active=excluded.is_active,updated_at=excluded.updated_at`);
+    ids.forEach(id=>up.run(tid,c.id,id,1,t,t));
+  }); tx();
+  res.json({success:true,staff:patrolStaffCandidates(tid,c.id)});
+});
+
 app.get('/api/company/attendance/bootstrap',requireCompanyAdmin,(req,res)=>{
   const tid=tenantId(req), communities=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY name").all(tid);
   const locations=db.prepare('SELECT * FROM attendance_locations WHERE tenant_id=? ORDER BY community_id,location_type,name').all(tid).map(attendanceLocationPayload);
-  res.json({rules:attendancePlatformRules(),communities,locations});
+  const routes=db.prepare('SELECT * FROM patrol_routes WHERE tenant_id=? ORDER BY community_id,name,id').all(tid).map(r=>{
+    const points=db.prepare(`SELECT rp.location_id,rp.sequence_no,l.name,l.address,l.qr_token,l.is_active FROM patrol_route_points rp JOIN attendance_locations l ON l.id=rp.location_id AND l.tenant_id=? WHERE rp.route_id=? ORDER BY rp.sequence_no`).all(tid,r.id);
+    return patrolRoutePayload(r,points);
+  });
+  res.json({rules:attendancePlatformRules(),communities,locations,routes});
 });
 app.post('/api/company/attendance/locations',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
   const c=attendanceCommunityForCompany(req,req.body?.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
@@ -1478,6 +1527,44 @@ app.put('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompa
   const active=req.body?.is_active===undefined?!!row.is_active:!!req.body.is_active; const address=String(req.body?.address??row.address??'').trim().slice(0,500), placeId=String(req.body?.place_id??row.place_id??'').trim().slice(0,200); db.prepare('UPDATE attendance_locations SET community_id=?,location_type=?,name=?,lat=?,lng=?,radius_m=?,is_active=?,updated_at=?,address=?,place_id=? WHERE id=? AND tenant_id=?').run(c.id,type,name,lat,lng,radius,active?1:0,now(),address,placeId,id,tenantId(req));
   res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
 });
+app.get('/api/company/attendance/routes',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const tid=tenantId(req), cid=Number(req.query?.community_id||0);
+  let rows=db.prepare(`SELECT * FROM patrol_routes WHERE tenant_id=? ${cid?'AND community_id=?':''} ORDER BY community_id,name,id`).all(...(cid?[tid,cid]:[tid]));
+  rows=rows.map(r=>{const points=db.prepare(`SELECT rp.location_id,rp.sequence_no,l.name,l.address,l.qr_token,l.is_active FROM patrol_route_points rp JOIN attendance_locations l ON l.id=rp.location_id AND l.tenant_id=? WHERE rp.route_id=? ORDER BY rp.sequence_no`).all(tid,r.id);return patrolRoutePayload(r,points)});
+  res.json({routes:rows});
+});
+app.post('/api/company/attendance/routes',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const c=attendanceCommunityForCompany(req,req.body?.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
+  const name=String(req.body?.name||'').trim(); if(!name)return res.status(400).json({error:'請輸入巡邏動線名稱'});
+  const ids=Array.isArray(req.body?.point_ids)?req.body.point_ids.map(Number).filter(Number.isFinite):[];
+  const uniq=[...new Set(ids)];
+  if(!uniq.length)return res.status(400).json({error:'請至少選擇一個巡邏點'});
+  const placeholders=uniq.map(()=>'?').join(',');
+  const points=db.prepare(`SELECT id FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND is_active=1 AND id IN (${placeholders})`).all(tenantId(req),c.id,...uniq).map(x=>Number(x.id));
+  if(points.length!==uniq.length)return res.status(400).json({error:'部分巡邏點不存在、停用或不屬於目前社區'});
+  const t=now(), info=db.prepare('INSERT INTO patrol_routes (tenant_id,community_id,name,time_label,note,is_active,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)').run(tenantId(req),c.id,name,String(req.body?.time_label||'').trim().slice(0,80),String(req.body?.note||'').trim().slice(0,500),t,t);
+  const tx=db.transaction(()=>{points.forEach((locationId,i)=>db.prepare('INSERT INTO patrol_route_points (route_id,location_id,sequence_no) VALUES (?,?,?)').run(info.lastInsertRowid,locationId,i+1));}); tx();
+  const r=db.prepare('SELECT * FROM patrol_routes WHERE id=?').get(info.lastInsertRowid);
+  const routePoints=db.prepare(`SELECT rp.location_id,rp.sequence_no,l.name,l.address,l.qr_token,l.is_active FROM patrol_route_points rp JOIN attendance_locations l ON l.id=rp.location_id AND l.tenant_id=? WHERE rp.route_id=? ORDER BY rp.sequence_no`).all(tenantId(req),r.id);
+  res.json({success:true,route:patrolRoutePayload(r,routePoints)});
+});
+app.put('/api/company/attendance/routes/:id',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const tid=tenantId(req), id=Number(req.params.id), row=db.prepare('SELECT * FROM patrol_routes WHERE id=? AND tenant_id=?').get(id,tid); if(!row)return res.status(404).json({error:'找不到巡邏動線'});
+  const c=attendanceCommunityForCompany(req,req.body?.community_id??row.community_id); if(!c)return res.status(400).json({error:'請選擇本公司的啟用社區'});
+  const name=String(req.body?.name??row.name).trim(); if(!name)return res.status(400).json({error:'巡邏動線名稱不可空白'});
+  const ids=Array.isArray(req.body?.point_ids)?req.body.point_ids.map(Number).filter(Number.isFinite):[]; const uniq=[...new Set(ids)]; if(!uniq.length)return res.status(400).json({error:'請至少選擇一個巡邏點'});
+  const placeholders=uniq.map(()=>'?').join(','); const points=db.prepare(`SELECT id FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND is_active=1 AND id IN (${placeholders})`).all(tid,c.id,...uniq).map(x=>Number(x.id)); if(points.length!==uniq.length)return res.status(400).json({error:'部分巡邏點不存在、停用或不屬於目前社區'});
+  const t=now(); const tx=db.transaction(()=>{db.prepare('UPDATE patrol_routes SET community_id=?,name=?,time_label=?,note=?,updated_at=? WHERE id=? AND tenant_id=?').run(c.id,name,String((req.body?.time_label ?? row.time_label) || '').trim().slice(0,80),String((req.body?.note ?? row.note) || '').trim().slice(0,500),t,id,tid);db.prepare('DELETE FROM patrol_route_points WHERE route_id=?').run(id);points.forEach((locationId,i)=>db.prepare('INSERT INTO patrol_route_points (route_id,location_id,sequence_no) VALUES (?,?,?)').run(id,locationId,i+1));}); tx();
+  const r=db.prepare('SELECT * FROM patrol_routes WHERE id=?').get(id); const routePoints=db.prepare(`SELECT rp.location_id,rp.sequence_no,l.name,l.address,l.qr_token,l.is_active FROM patrol_route_points rp JOIN attendance_locations l ON l.id=rp.location_id AND l.tenant_id=? WHERE rp.route_id=? ORDER BY rp.sequence_no`).all(tid,id);
+  res.json({success:true,route:patrolRoutePayload(r,routePoints)});
+});
+app.delete('/api/company/attendance/routes/:id',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const tid=tenantId(req), id=Number(req.params.id), row=db.prepare('SELECT * FROM patrol_routes WHERE id=? AND tenant_id=?').get(id,tid); if(!row)return res.status(404).json({error:'找不到巡邏動線'});
+  const n=db.prepare('SELECT COUNT(*) n FROM attendance_records WHERE tenant_id=? AND patrol_route_id=?').get(tid,id)?.n||0;
+  if(Number(n)>0){db.prepare('UPDATE patrol_routes SET is_active=0,updated_at=? WHERE id=? AND tenant_id=?').run(now(),id,tid);return res.json({success:true,action:'deactivated',message:'此動線已有歷史巡邏紀錄，因此改為停用，歷史紀錄會保留。'});}
+  db.prepare('DELETE FROM patrol_routes WHERE id=? AND tenant_id=?').run(id,tid); res.json({success:true,action:'deleted',message:'巡邏動線已刪除。'});
+});
+
 app.delete('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
   const id=Number(req.params.id), tid=tenantId(req);
   const row=db.prepare('SELECT * FROM attendance_locations WHERE id=? AND tenant_id=?').get(id,tid);
@@ -1496,7 +1583,39 @@ app.post('/api/company/attendance/locations/:id/regenerate-qr',requireCompanyAdm
   const token=`P-${crypto.randomBytes(12).toString('hex').toUpperCase()}`; db.prepare('UPDATE attendance_locations SET qr_token=?,updated_at=? WHERE id=? AND tenant_id=?').run(token,now(),id,tenantId(req)); res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
 });
 app.get('/api/company/attendance/records',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
-  const tid=tenantId(req),cid=Number(req.query?.community_id||0),type=attendanceRecordType(req.query?.record_type||''),from=String(req.query?.from||'').trim(),to=String(req.query?.to||'').trim(); let sql=`SELECT r.*,u.name staff_name,u.employee_id,c.name community_name,l.name location_name FROM attendance_records r JOIN staff_users u ON u.id=r.staff_id AND u.tenant_id=r.tenant_id JOIN communities c ON c.id=r.community_id AND c.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id WHERE r.tenant_id=?`; const args=[tid]; if(cid){sql+=' AND r.community_id=?';args.push(cid);} if(type){sql+=' AND r.record_type=?';args.push(type);} if(/^\d{4}-\d{2}-\d{2}$/.test(from)){sql+=' AND r.recorded_at>=?';args.push(from+'T00:00:00');} if(/^\d{4}-\d{2}-\d{2}$/.test(to)){sql+=' AND r.recorded_at<?';const d=new Date(to+'T00:00:00');d.setDate(d.getDate()+1);args.push(d.toISOString().slice(0,10)+'T00:00:00');} const rows=db.prepare(sql+' ORDER BY r.recorded_at DESC LIMIT 2000').all(...args); res.json({rows});
+  const tid=tenantId(req),cid=Number(req.query?.community_id||0),type=attendanceRecordType(req.query?.record_type||''),from=String(req.query?.from||'').trim(),to=String(req.query?.to||'').trim(),shift=String(req.query?.shift||'').trim(); let sql=`SELECT r.*,u.name staff_name,u.employee_id,c.name community_name,l.name location_name,pr.name patrol_route_name,pr.time_label patrol_route_time,se.shift_code FROM attendance_records r JOIN staff_users u ON u.id=r.staff_id AND u.tenant_id=r.tenant_id JOIN communities c ON c.id=r.community_id AND c.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id LEFT JOIN patrol_routes pr ON pr.id=r.patrol_route_id AND pr.tenant_id=r.tenant_id LEFT JOIN schedule_entries se ON se.tenant_id=r.tenant_id AND se.staff_id=r.staff_id AND se.community_id=r.community_id AND se.work_date=substr(r.recorded_at,1,10) WHERE r.tenant_id=?`; const args=[tid]; if(cid){sql+=' AND r.community_id=?';args.push(cid);} if(type){sql+=' AND r.record_type=?';args.push(type);} if(shift){sql+=' AND se.shift_code=?';args.push(shift);} if(/^\d{4}-\d{2}-\d{2}$/.test(from)){sql+=' AND r.recorded_at>=?';args.push(from+'T00:00:00');} if(/^\d{4}-\d{2}-\d{2}$/.test(to)){sql+=' AND r.recorded_at<?';const d=new Date(to+'T00:00:00');d.setDate(d.getDate()+1);args.push(d.toISOString().slice(0,10)+'T00:00:00');} const rows=db.prepare(sql+' ORDER BY r.recorded_at DESC LIMIT 2000').all(...args); res.json({rows});
+});
+
+function requirePatrolSiteManager(req,res,next){
+  const u=getUser(req);
+  if(!u || !isSiteManager(u))return res.status(403).json({error:'只有駐點經理可以管理巡邏點。'});
+  const cid=Number(req.body?.community_id||req.query?.community_id||req.params?.community_id||req.session?.activeCommunityId||0);
+  if(!cid || !getUserSiteCommunityIds(u).includes(cid))return res.status(403).json({error:'您沒有這個社區的現場管理權限。'});
+  req.patrolManagerCommunityId=cid; next();
+}
+app.get('/api/staff/attendance/patrol-status',requireStaff,requirePatrolSiteManager,(req,res)=>{
+  const tid=tenantId(req),cid=req.patrolManagerCommunityId,date=/^\d{4}-\d{2}-\d{2}$/.test(String(req.query?.date||''))?String(req.query.date):new Date().toISOString().slice(0,10);
+  const records=db.prepare(`SELECT r.*,u.name staff_name,u.employee_id,l.name location_name,pr.name patrol_route_name FROM attendance_records r JOIN staff_users u ON u.id=r.staff_id AND u.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id LEFT JOIN patrol_routes pr ON pr.id=r.patrol_route_id AND pr.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.community_id=? AND r.record_type='patrol' AND substr(r.recorded_at,1,10)=? ORDER BY r.recorded_at`).all(tid,cid,date);
+  const locations=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND is_active=1 ORDER BY name").all(tid,cid).map(attendanceLocationPayload);
+  res.json({date,locations,records,summary:{scans:records.length,points:locations.length,people:[...new Set(records.map(r=>r.staff_id))].length}});
+});
+app.get('/api/staff/attendance/patrol-management',requireStaff,requirePatrolSiteManager,(req,res)=>{
+  const tid=tenantId(req),cid=req.patrolManagerCommunityId;
+  const locations=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' ORDER BY is_active DESC,name").all(tid,cid).map(attendanceLocationPayload);
+  const routes=db.prepare('SELECT * FROM patrol_routes WHERE tenant_id=? AND community_id=? ORDER BY is_active DESC,name,id').all(tid,cid).map(r=>{const pts=db.prepare(`SELECT rp.location_id,rp.sequence_no,l.name,l.address,l.qr_token,l.is_active FROM patrol_route_points rp JOIN attendance_locations l ON l.id=rp.location_id AND l.tenant_id=? WHERE rp.route_id=? ORDER BY rp.sequence_no`).all(tid,r.id);return patrolRoutePayload(r,pts);});
+  res.json({community:db.prepare("SELECT id,name FROM communities WHERE id=? AND tenant_id=?").get(cid,tid),locations,routes});
+});
+app.post('/api/staff/attendance/patrol-management/locations',requireStaff,requirePatrolSiteManager,(req,res)=>{
+  const tid=tenantId(req),cid=req.patrolManagerCommunityId,name=String(req.body?.name||'').trim(); if(!name)return res.status(400).json({error:'請輸入巡邏點名稱'});
+  const lat=req.body?.lat===''||req.body?.lat==null?null:Number(req.body.lat),lng=req.body?.lng===''||req.body?.lng==null?null:Number(req.body.lng); const token=`P-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;const t=now();
+  const info=db.prepare('INSERT INTO attendance_locations (tenant_id,community_id,location_type,name,lat,lng,radius_m,qr_token,is_active,created_at,updated_at,address,place_id) VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)').run(tid,cid,'patrol',name,Number.isFinite(lat)?lat:null,Number.isFinite(lng)?lng:null,Number(attendancePlatformRules().patrol_qr_radius_m||50),token,t,t,String(req.body?.address||'').trim().slice(0,500),'');
+  res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(info.lastInsertRowid))});
+});
+app.delete('/api/staff/attendance/patrol-management/locations/:id',requireStaff,requirePatrolSiteManager,(req,res)=>{
+  const tid=tenantId(req),id=Number(req.params.id),row=db.prepare("SELECT * FROM attendance_locations WHERE id=? AND tenant_id=? AND community_id=? AND location_type='patrol'").get(id,tid,req.patrolManagerCommunityId);if(!row)return res.status(404).json({error:'找不到巡邏點'});
+  const n=db.prepare('SELECT COUNT(*) n FROM attendance_records WHERE tenant_id=? AND location_id=?').get(tid,id)?.n||0;
+  if(Number(n)>0){db.prepare('UPDATE attendance_locations SET is_active=0,updated_at=? WHERE id=? AND tenant_id=?').run(now(),id,tid);return res.json({success:true,action:'deactivated',message:'此巡邏點已有歷史紀錄，因此改為停用，歷史資料會保留。'});}
+  db.prepare('DELETE FROM patrol_route_points WHERE location_id=?').run(id);db.prepare('DELETE FROM attendance_locations WHERE id=? AND tenant_id=?').run(id,tid);res.json({success:true,action:'deleted',message:'巡邏點已刪除。'});
 });
 
 app.get('/api/staff/attendance/bootstrap',requireStaffFiller,(req,res)=>{
@@ -1504,7 +1623,10 @@ app.get('/api/staff/attendance/bootstrap',requireStaffFiller,(req,res)=>{
   if(rules.enabled===false)return res.json({rules,locations:[],communities:[]});
   const placeholders=ids.map(()=>'?').join(',')||'0'; const communities=ids.length?db.prepare(`SELECT id,name,status FROM communities WHERE tenant_id=? AND id IN (${placeholders}) AND status='active' ORDER BY name`).all(tenantId(req),...ids):[];
   const locations=ids.length?db.prepare(`SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id IN (${placeholders}) AND is_active=1 ORDER BY community_id,location_type,name`).all(tenantId(req),...ids):[];
-  res.json({rules,communities,locations:locations.map(attendanceLocationPayload),active_community_id:Number(req.session?.activeCommunityId||0)||null});
+  const patrolIds=new Set(ids.filter(cid=>isPatrolStaff(req,cid)));
+  const routes=patrolIds.size?db.prepare(`SELECT * FROM patrol_routes WHERE tenant_id=? AND community_id IN (${[...patrolIds].map(()=>'?').join(',')}) AND is_active=1 ORDER BY community_id,name,id`).all(tenantId(req),...[...patrolIds]):[];
+  const routePayloads=routes.map(r=>{const points=db.prepare(`SELECT rp.location_id,rp.sequence_no,l.name,l.address,l.qr_token,l.is_active FROM patrol_route_points rp JOIN attendance_locations l ON l.id=rp.location_id AND l.tenant_id=? WHERE rp.route_id=? AND l.is_active=1 ORDER BY rp.sequence_no`).all(tenantId(req),r.id);return patrolRoutePayload(r,points)});
+  res.json({rules,communities,locations:locations.map(attendanceLocationPayload),routes:routePayloads,active_community_id:Number(req.session?.activeCommunityId||0)||null,patrol_access:Object.fromEntries(ids.map(cid=>[cid,isPatrolStaff(req,cid)])),can_manage_patrol:!!isSiteManager(getUser(req))});
 });
 function attendanceValidateStaffCommunity(req,communityId){return attendanceCommunityForStaff(req,communityId);}
 app.post('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{
@@ -1516,9 +1638,12 @@ app.post('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{
     const exists=db.prepare('SELECT * FROM attendance_records WHERE tenant_id=? AND staff_id=? AND client_record_id=?').get(tenantId(req),u.id,clientId); if(exists)return res.json({success:true,duplicate:true,record:exists});
     const lat=req.body?.lat==null||req.body?.lat===''?null:Number(req.body.lat),lng=req.body?.lng==null||req.body?.lng===''?null:Number(req.body.lng),accuracy=req.body?.accuracy_m==null||req.body?.accuracy_m===''?null:Number(req.body.accuracy_m);
     let location=null;
+    let patrolRouteId=null;
     if(rt==='patrol'){
       const token=String(req.body?.qr_token||'').trim(); if(!rules.patrol_qr_enabled||!token)return res.status(400).json({error:'巡邏打卡需要掃描有效 QR Code'});
       location=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND qr_token=? AND is_active=1").get(tenantId(req),cid,token); if(!location)return res.status(400).json({error:'這張 QR Code 不屬於目前案場，或巡邏點已停用'});
+      patrolRouteId=Number(req.body?.patrol_route_id||0)||null;
+      if(patrolRouteId){const route=db.prepare('SELECT id FROM patrol_routes WHERE id=? AND tenant_id=? AND community_id=? AND is_active=1').get(patrolRouteId,tenantId(req),cid);if(!route)return res.status(400).json({error:'選取的巡邏動線已不存在或已停用'});const inRoute=db.prepare('SELECT 1 FROM patrol_route_points WHERE route_id=? AND location_id=?').get(patrolRouteId,location.id);if(!inRoute)return res.status(400).json({error:'此巡邏點不在目前選取的巡邏動線內'});}
     } else {
       const lid=Number(req.body?.location_id||0); location=db.prepare("SELECT * FROM attendance_locations WHERE id=? AND tenant_id=? AND community_id=? AND location_type='attendance' AND is_active=1").get(lid,tenantId(req),cid);
       if(!location)return res.status(400).json({error:'找不到有效的出勤打卡點'});
@@ -1530,7 +1655,7 @@ app.post('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{
       }
     }
     const recordedAt=String(req.body?.recorded_at||now()), source=String(req.body?.source||'online')==='offline'?'offline':'online';
-    const info=db.prepare('INSERT INTO attendance_records (tenant_id,staff_id,community_id,location_id,record_type,qr_token,lat,lng,accuracy_m,recorded_at,received_at,source,client_record_id,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),u.id,cid,location?.id||null,rt,rt==='patrol'?String(req.body.qr_token||''):'',Number.isFinite(lat)?lat:null,Number.isFinite(lng)?lng:null,Number.isFinite(accuracy)?accuracy:null,recordedAt,now(),source,clientId,JSON.stringify({user_agent:String(req.headers['user-agent']||'').slice(0,300)}));
+    const info=db.prepare('INSERT INTO attendance_records (tenant_id,staff_id,community_id,location_id,record_type,qr_token,lat,lng,accuracy_m,recorded_at,received_at,source,client_record_id,metadata_json,patrol_route_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),u.id,cid,location?.id||null,rt,rt==='patrol'?String(req.body.qr_token||''):'',Number.isFinite(lat)?lat:null,Number.isFinite(lng)?lng:null,Number.isFinite(accuracy)?accuracy:null,recordedAt,now(),source,clientId,JSON.stringify({user_agent:String(req.headers['user-agent']||'').slice(0,300)}),patrolRouteId);
     res.json({success:true,id:info.lastInsertRowid,record:db.prepare('SELECT * FROM attendance_records WHERE id=?').get(info.lastInsertRowid)});
   }catch(e){res.status(400).json({error:e.message||'打卡紀錄寫入失敗'});}
 });
@@ -1538,17 +1663,18 @@ app.post('/api/staff/attendance/sync',requireStaffFiller,(req,res)=>{
   const rows=Array.isArray(req.body?.records)?req.body.records.slice(0,100):[]; const results=[]; for(const row of rows){
     try{ const fake={body:{...row,source:'offline'},session:req.session,headers:req.headers,path:'/api/staff/attendance/records'}; let done=false; const rr={status(n){this.code=n;return this},json(x){this.payload=x;done=true;return this}}; /* 以相同驗證邏輯重跑：直接呼叫內部函式不依賴 Express chain */
       const u=getUser(req),c=attendanceValidateStaffCommunity(req,Number(row.community_id)); if(!c)throw new Error('案場權限已失效');
-      const cid=Number(row.community_id),rt=attendanceRecordType(row.record_type),clientId=String(row.client_record_id||'').trim(); if(!clientId)throw new Error('離線紀錄缺少識別碼');
+      const cid=Number(row.community_id),rt=attendanceRecordType(row.record_type),clientId=String(row.client_record_id||'').trim(); if(rt==='patrol'&&!isPatrolStaff(req,cid))throw new Error('目前尚未開通此案場的巡邏工作權限'); if(!clientId)throw new Error('離線紀錄缺少識別碼');
       if(db.prepare('SELECT id FROM attendance_records WHERE tenant_id=? AND staff_id=? AND client_record_id=?').get(tenantId(req),u.id,clientId)){results.push({client_record_id:clientId,success:true,duplicate:true});continue;}
       const rules=attendancePlatformRules(); let location=null;
       const lat=Number.isFinite(Number(row.lat))?Number(row.lat):null,lng=Number.isFinite(Number(row.lng))?Number(row.lng):null,accuracy=Number.isFinite(Number(row.accuracy_m))?Number(row.accuracy_m):null;
-      if(rt==='patrol'){const token=String(row.qr_token||'').trim();location=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND qr_token=? AND is_active=1").get(tenantId(req),cid,token);if(!location)throw new Error('巡邏 QR 已失效或不屬於此案場');}
+      let patrolRouteId=null;
+      if(rt==='patrol'){const token=String(row.qr_token||'').trim();location=db.prepare("SELECT * FROM attendance_locations WHERE tenant_id=? AND community_id=? AND location_type='patrol' AND qr_token=? AND is_active=1").get(tenantId(req),cid,token);if(!location)throw new Error('巡邏 QR 已失效或不屬於此案場');patrolRouteId=Number(row.patrol_route_id||0)||null;if(patrolRouteId){const route=db.prepare('SELECT id FROM patrol_routes WHERE id=? AND tenant_id=? AND community_id=? AND is_active=1').get(patrolRouteId,tenantId(req),cid);if(!route)throw new Error('巡邏動線已停用');if(!db.prepare('SELECT 1 FROM patrol_route_points WHERE route_id=? AND location_id=?').get(patrolRouteId,location.id))throw new Error('此巡邏點不在選取的動線內');}}
       else {location=db.prepare("SELECT * FROM attendance_locations WHERE id=? AND tenant_id=? AND community_id=? AND location_type='attendance' AND is_active=1").get(Number(row.location_id),tenantId(req),cid);if(!location)throw new Error('出勤打卡點已失效');if(rules.gps_checkin_enabled){if(lat==null||lng==null)throw new Error('離線出勤紀錄缺少 GPS');const d=attendanceDistanceMeters(lat,lng,location.lat,location.lng);if(d==null||d>Number(location.radius_m||rules.default_checkin_radius_m))throw new Error('離線出勤紀錄超出打卡範圍');if(accuracy!=null&&accuracy>Number(rules.max_gps_accuracy_m||150))throw new Error('離線 GPS 誤差過大');}}
-      const info=db.prepare('INSERT INTO attendance_records (tenant_id,staff_id,community_id,location_id,record_type,qr_token,lat,lng,accuracy_m,recorded_at,received_at,source,client_record_id,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),u.id,cid,location?.id||null,rt,rt==='patrol'?String(row.qr_token||''):'',lat,lng,accuracy,String(row.recorded_at||now()),now(),'offline',clientId,JSON.stringify({synced:true,user_agent:String(req.headers['user-agent']||'').slice(0,300)}));results.push({client_record_id:clientId,success:true,id:info.lastInsertRowid});
+      const info=db.prepare('INSERT INTO attendance_records (tenant_id,staff_id,community_id,location_id,record_type,qr_token,lat,lng,accuracy_m,recorded_at,received_at,source,client_record_id,metadata_json,patrol_route_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(tenantId(req),u.id,cid,location?.id||null,rt,rt==='patrol'?String(row.qr_token||''):'',lat,lng,accuracy,String(row.recorded_at||now()),now(),'offline',clientId,JSON.stringify({synced:true,user_agent:String(req.headers['user-agent']||'').slice(0,300)}),patrolRouteId);results.push({client_record_id:clientId,success:true,id:info.lastInsertRowid});
     }catch(e){results.push({client_record_id:String(row.client_record_id||''),success:false,error:e.message||'同步失敗'});}
   } res.json({success:true,results});
 });
-app.get('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{const u=getUser(req),cid=Number(req.query?.community_id||0),rows=db.prepare(`SELECT r.*,c.name community_name,l.name location_name FROM attendance_records r JOIN communities c ON c.id=r.community_id AND c.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.staff_id=? ${cid?'AND r.community_id=?':''} ORDER BY r.recorded_at DESC LIMIT 100`).all(...([tenantId(req),u.id].concat(cid?[cid]:[])));res.json({rows});});
+app.get('/api/staff/attendance/records',requireStaffFiller,(req,res)=>{const u=getUser(req),cid=Number(req.query?.community_id||0),rows=db.prepare(`SELECT r.*,c.name community_name,l.name location_name,pr.name patrol_route_name,pr.time_label patrol_route_time FROM attendance_records r JOIN communities c ON c.id=r.community_id AND c.tenant_id=r.tenant_id LEFT JOIN attendance_locations l ON l.id=r.location_id AND l.tenant_id=r.tenant_id LEFT JOIN patrol_routes pr ON pr.id=r.patrol_route_id AND pr.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.staff_id=? ${cid?'AND r.community_id=?':''} ORDER BY r.recorded_at DESC LIMIT 100`).all(...([tenantId(req),u.id].concat(cid?[cid]:[])));res.json({rows});});
 
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
 const upload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,Date.now()+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>file.originalname.toLowerCase().endsWith('.docx')?cb(null,true):cb(new Error('只允許上傳 .docx 檔案'))});

@@ -546,11 +546,51 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_records_client ON attendance_records(tenant_id,staff_id,client_record_id);
   CREATE INDEX IF NOT EXISTS idx_attendance_records_tenant_date ON attendance_records(tenant_id,community_id,recorded_at);
   CREATE INDEX IF NOT EXISTS idx_attendance_records_staff_date ON attendance_records(tenant_id,staff_id,recorded_at);
+  CREATE TABLE IF NOT EXISTS patrol_routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    community_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    time_label TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_patrol_routes_tenant_community ON patrol_routes(tenant_id,community_id,is_active);
+  CREATE TABLE IF NOT EXISTS patrol_route_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    route_id INTEGER NOT NULL,
+    location_id INTEGER NOT NULL,
+    sequence_no INTEGER NOT NULL,
+    UNIQUE(route_id,location_id),
+    UNIQUE(route_id,sequence_no),
+    FOREIGN KEY (route_id) REFERENCES patrol_routes(id) ON DELETE CASCADE,
+    FOREIGN KEY (location_id) REFERENCES attendance_locations(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_patrol_route_points_route ON patrol_route_points(route_id,sequence_no);
+  CREATE TABLE IF NOT EXISTS patrol_staff_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    community_id INTEGER NOT NULL,
+    staff_id INTEGER NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id,community_id,staff_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff_users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_patrol_staff_assignments_site ON patrol_staff_assignments(tenant_id,community_id,is_active);
 `);
 
 // 相容既有資料庫：不覆蓋原有巡邏地點，只補上地址與 Google Place ID 欄位。
 addColumnIfMissing('attendance_locations', 'address', "TEXT DEFAULT ''");
 addColumnIfMissing('attendance_locations', 'place_id', "TEXT DEFAULT ''");
+addColumnIfMissing('attendance_records', 'patrol_route_id', 'INTEGER');
 
 function repairDuplicateNamedTenants() {
   const tenants = db.prepare('SELECT * FROM tenants ORDER BY id').all();
