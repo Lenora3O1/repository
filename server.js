@@ -1488,6 +1488,19 @@ app.put('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompa
   const active=req.body?.is_active===undefined?!!row.is_active:!!req.body.is_active; const address=String(req.body?.address??row.address??'').trim().slice(0,500), placeId=String(req.body?.place_id??row.place_id??'').trim().slice(0,200); db.prepare('UPDATE attendance_locations SET community_id=?,location_type=?,name=?,lat=?,lng=?,radius_m=?,is_active=?,updated_at=?,address=?,place_id=? WHERE id=? AND tenant_id=?').run(c.id,type,name,lat,lng,radius,active?1:0,now(),address,placeId,id,tenantId(req));
   res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
 });
+app.delete('/api/company/attendance/locations/:id',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
+  const id=Number(req.params.id), tid=tenantId(req);
+  const row=db.prepare('SELECT * FROM attendance_locations WHERE id=? AND tenant_id=?').get(id,tid);
+  if(!row)return res.status(404).json({error:'找不到地點'});
+  const records=db.prepare('SELECT COUNT(*) AS n FROM attendance_records WHERE tenant_id=? AND location_id=?').get(tid,id);
+  if(Number(records?.n||0)>0){
+    db.prepare('UPDATE attendance_locations SET is_active=0,updated_at=? WHERE id=? AND tenant_id=?').run(now(),id,tid);
+    return res.json({success:true,action:'deactivated',message:'此地點已有歷史紀錄，因此改為停用，歷史巡邏／出勤紀錄會保留。'});
+  }
+  db.prepare('DELETE FROM attendance_locations WHERE id=? AND tenant_id=?').run(id,tid);
+  res.json({success:true,action:'deleted',message:'地點已刪除。'});
+});
+
 app.post('/api/company/attendance/locations/:id/regenerate-qr',requireCompanyAdmin,requireCompanyPermission('attendance'),(req,res)=>{
   const id=Number(req.params.id), row=db.prepare('SELECT * FROM attendance_locations WHERE id=? AND tenant_id=?').get(id,tenantId(req)); if(!row)return res.status(404).json({error:'找不到地點'});
   const token=`P-${crypto.randomBytes(12).toString('hex').toUpperCase()}`; db.prepare('UPDATE attendance_locations SET qr_token=?,updated_at=? WHERE id=? AND tenant_id=?').run(token,now(),id,tenantId(req)); res.json({success:true,location:attendanceLocationPayload(db.prepare('SELECT * FROM attendance_locations WHERE id=?').get(id))});
