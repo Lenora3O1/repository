@@ -1293,6 +1293,14 @@ function residentParseFile(filePath){
   if(!parsed.length)throw new Error('檔案沒有可匯入的住戶資料');
   return {rows:parsed,detected:Object.keys(map),headers,mode:'table',sheets:[sheetName]};
 }
+const residentUpload=multer({
+  storage:multer.diskStorage({
+    destination:(req,file,cb)=>cb(null,RESIDENT_IMPORTS_DIR),
+    filename:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();const base=path.basename(file.originalname||'resident',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'resident';cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`)}
+  }),
+  limits:{fileSize:20*1024*1024},
+  fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.xlsx','.xls','.csv','.txt'].includes(ext)?null:new Error('住戶名冊只允許 Excel（xlsx/xls）、CSV 或 TXT'),true);}
+});
 function residentCategory(req){const c=String(req.query?.category||req.body?.category||'');if(!RESIDENT_CATEGORIES.has(c))throw new Error('住戶名冊分類無效');return c;}
 function residentAccessibleCommunity(req,cid){return !!cid&&!!getAccessibleCommunity(req,Number(cid));}
 function residentCanUpload(u){if(!u||u.role==='company_admin')return false;const vals=[u.job_level,u.job_category,u.position,...getJobCategories(u)];return vals.some(v=>String(v||'').includes('經理'))||vals.some(v=>String(v||'').includes('社區管理'));}
@@ -1308,14 +1316,6 @@ app.post('/api/staff/residents/import',requireStaffFiller,residentUpload.single(
 
 app.get('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({globalTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id IS NULL ORDER BY is_active DESC,id DESC').all(),companyTemplates:db.prepare('SELECT id,name,filename,is_active,created_at FROM templates WHERE tenant_id=? ORDER BY is_active DESC,id DESC').all(tenantId(req))}));
 const upload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,Date.now()+'-'+file.originalname.replace(/[^\\w.\\-\\u4e00-\\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>file.originalname.toLowerCase().endsWith('.docx')?cb(null,true):cb(new Error('只允許上傳 .docx 檔案'))});
-const residentUpload=multer({
-  storage:multer.diskStorage({
-    destination:(req,file,cb)=>cb(null,RESIDENT_IMPORTS_DIR),
-    filename:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();const base=path.basename(file.originalname||'resident',ext).replace(/[^\w\u4e00-\u9fa5.-]/g,'_').slice(0,80)||'resident';cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`)}
-  }),
-  limits:{fileSize:20*1024*1024},
-  fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.xlsx','.xls','.csv','.txt'].includes(ext)?null:new Error('住戶名冊只允許 Excel（xlsx/xls）、CSV 或 TXT'),true);}
-});
 const analyzerUpload=multer({storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,TEMPLATES_DIR),filename:(req,file,cb)=>cb(null,'__analysis__'+Date.now()+'-'+file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g,'_'))}),fileFilter:(req,file,cb)=>['.docx','.xlsx','.xlsm'].includes(path.extname(file.originalname).toLowerCase())?cb(null,true):cb(new Error('只允許上傳 .docx、.xlsx、.xlsm 檔案'))});
 app.post('/api/admin/template-analyze',requireSuperAdmin,analyzerUpload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});const filePath=path.join(TEMPLATES_DIR,req.file.filename);try{const result=analyzeTemplate(filePath);res.json({success:true,analysis:result});}catch(err){console.error(err);res.status(400).json({error:'模板分析失敗',detail:err.message});}finally{try{fs.unlinkSync(filePath)}catch(e){}}});
 app.post('/api/company/templates',requireCompanyAdmin,requireCompanyPermission('manage-templates'),upload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});db.prepare('INSERT INTO templates (name,filename,is_active,created_at,tenant_id) VALUES (?,?,0,?,?)').run(req.body.name||req.file.originalname,req.file.filename,now(),tenantId(req));res.json({success:true});});
