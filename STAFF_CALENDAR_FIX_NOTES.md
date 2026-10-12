@@ -29,3 +29,10 @@
 - `public/sidebar.js`：選單與釘選資料請求使用 `cache: no-store`。
 - `public/staff.html`：更新 `sidebar.js`、`app.js` 版本標記，強制瀏覽器重新取得前端程式。
 - 已執行 Node.js 語法檢查及 ZIP 完整性檢查。尚未連線正式 Zeabur 資料庫，故王小明帳號的實際 `schedule_role` 與線上顯示仍須部署後驗收；不宣稱已線上修復。
+
+
+## V2.4：修正正式入口頁的前端版本與工作空間判斷
+- 根網址 `/` 由 Express 靜態檔案服務載入 `public/index.html`，不是 `public/staff.html`。先前只更新 staff.html 的版本參數，無法讓根網址使用者取得新的前端程式。
+- 更新 `public/index.html` 的 CSS、sidebar.js、app.js、messages.js 版本參數；同步更新 `public/staff.html` 與 `public/company.html` 的版本參數。
+- `public/sidebar.js` 改用頁面 DOM 結構判斷 staff/company 工作空間，並支援直接開啟 `/staff.html`；選單請求失敗時會在 Console 留下狀態碼。
+- 這修正了可由程式碼直接證實的入口／快取缺口；仍需部署後驗證正式環境回傳的選單及帳號資料，不能僅憑靜態檢查宣稱線上已修復。

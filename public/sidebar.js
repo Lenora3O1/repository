@@ -115,12 +115,12 @@
       const menuUrl=scope==='company'?'/api/company/menu-config':'/api/staff/menu-config';
       if(scope==='staff'){
         const [mr,pr]=await Promise.all([fetch(menuUrl,{credentials:'same-origin',cache:'no-store'}),fetch('/api/staff/dashboard-pins',{credentials:'same-origin',cache:'no-store'})]);
-        if(!mr.ok)return;
+        if(!mr.ok){console.warn('Staff menu request failed',mr.status);return;}
         const md=await mr.json(); const pd=pr.ok?await pr.json():{pins:[]};
         const ids=new Set((Array.isArray(pd.pins)?pd.pins:[]).map(x=>String(x.menu_id)));
         renderItems(Array.isArray(md.items)?md.items:[],ids);
       }else{
-        const r=await fetch(menuUrl,{credentials:'same-origin',cache:'no-store'});if(!r.ok)return;const d=await r.json();renderItems(Array.isArray(d.items)?d.items:[]);
+        const r=await fetch(menuUrl,{credentials:'same-origin',cache:'no-store'});if(!r.ok){console.warn('Workspace menu request failed',scope,r.status);return;}const d=await r.json();renderItems(Array.isArray(d.items)?d.items:[]);
       }
     }catch(e){console.warn('Dynamic menu load skipped',e)}
   }
@@ -141,6 +141,15 @@
   document.querySelectorAll('[data-close-notice]').forEach(btn=>btn.addEventListener('click',()=>{const n=btn.closest('.floating-notice');if(!n)return;n.classList.add('is-closed');try{localStorage.setItem('notice-closed-'+(n.id||location.pathname),'1')}catch(e){}}));
   document.querySelectorAll('.floating-notice').forEach(n=>{try{if(localStorage.getItem('notice-closed-'+(n.id||location.pathname))==='1')n.classList.add('is-closed')}catch(e){}});
   const login=document.getElementById('loginView'),main=document.getElementById('mainView');
-  function sync(){const logged=main?getComputedStyle(main).display!=='none':(login?getComputedStyle(login).display==='none':true);document.body.classList.toggle('is-authenticated',logged);if(logged){const scope=location.pathname.includes('company.html')?'company':location.pathname.endsWith('/')||location.pathname.includes('index.html')?'staff':null;if(scope)setTimeout(()=>loadDynamicSidebar(scope),30)}}
+  function inferWorkspaceScope(){
+    // Prefer the page's actual DOM structure over its URL. The production root URL
+    // serves index.html; deployments may also open staff.html directly.
+    if(document.getElementById('companyDynamicMenu') || main) return 'company';
+    if(document.getElementById('homeView') || document.getElementById('staffHome')) return 'staff';
+    if(location.pathname.includes('company.html')) return 'company';
+    if(location.pathname.endsWith('/') || location.pathname.includes('index.html') || location.pathname.includes('staff.html')) return 'staff';
+    return null;
+  }
+  function sync(){const logged=main?getComputedStyle(main).display!=='none':(login?getComputedStyle(login).display==='none':true);document.body.classList.toggle('is-authenticated',logged);if(logged){const scope=inferWorkspaceScope();if(scope)setTimeout(()=>loadDynamicSidebar(scope),30)}}
   if(login||main){sync();const mo=new MutationObserver(sync);if(login)mo.observe(login,{attributes:true,attributeFilter:['style','class']});if(main)mo.observe(main,{attributes:true,attributeFilter:['style','class']})}
 })();
