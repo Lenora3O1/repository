@@ -383,56 +383,20 @@ function readMenuConfig(){
   if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // V5.9：平台預設與企業目錄必須完全隔離。
-  // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
-  // 之後平台管理員修改平台預設，不會回頭同步已存在公司的目錄。
-  // 「恢復平台預設」也不是刪掉企業設定改成即時繼承，而是把「目前平台預設」複製一份到該公司，
-  // 讓該公司從這一刻起再次獨立。
+  // 目錄讀取只負責讀取已儲存設定，不在讀取時自動補入／覆寫班表或出勤項目。
+  // 平台目錄由總後台明確管理；公司有已儲存的 override 時使用該 override。
+  // 避免伺服器啟動或每次 API 讀取時，將管理員已調整的目錄重新改寫。
   try{
     const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
-    let changed=false;
     for(const t of tenantRows){
       const key=String(t.id);
       if(!c.tenants[key] || typeof c.tenants[key]!=='object' || Array.isArray(c.tenants[key])){
         c.tenants[key]={};
-        changed=true;
       }
     }
-    // 平台預設是企業目錄的即時來源；只有企業實際儲存過客製目錄時才保留 override。
-    // 舊版會替每家公司自動複製一份平台快照，導致後續平台模組更新不會反映到企業。
-    // 舊快照若與目前平台目錄完全相同，安全地轉回繼承模式；有差異的快照保留，避免覆蓋企業客製內容。
-    const beforeStaff=JSON.stringify(c.staff), beforeCompany=JSON.stringify(c.company);
-    c.staff=normalizeScheduleMenu(c.staff,'staff');
-    c.company=normalizeScheduleMenu(c.company,'company');
-    c.staff=normalizeAttendanceMenu(c.staff,'staff');
-    c.company=normalizeAttendanceMenu(c.company,'company');
-    let menuChanged=beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company);
-    for(const t of tenantRows){
-      const key=String(t.id);
-      const tenantCfg=c.tenants[key];
-      for(const scope of ['staff','company']){
-        if(!Array.isArray(tenantCfg[scope])){
-          if(Object.prototype.hasOwnProperty.call(tenantCfg,scope)){
-            delete tenantCfg[scope];
-            menuChanged=true;
-          }
-          continue; // 沒有 override 就即時沿用平台預設
-        }
-        const normalized=normalizeAttendanceMenu(normalizeScheduleMenu(tenantCfg[scope],scope),scope);
-        if(JSON.stringify(normalized)===JSON.stringify(c[scope]||[])){
-          // 舊版「恢復預設」是複製快照；內容相同時改成真正繼承，未來平台更新才能同步。
-          delete tenantCfg[scope];
-          menuChanged=true;
-        }else{
-          if(JSON.stringify(tenantCfg[scope])!==JSON.stringify(normalized)) menuChanged=true;
-          tenantCfg[scope]=normalized;
-        }
-      }
-    }
-    if(c._menuInheritanceVersion!==1){c._menuInheritanceVersion=1;menuChanged=true;}
-    c._schedulePlatformVersion=2;
-    if(changed||menuChanged) writeMenuConfig(c);
-  }catch(e){ console.error('menu tenant snapshot migration error',e); }
+  }catch(e){
+    console.error('menu tenant config validation error',e);
+  }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -526,23 +490,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   let items=c[scope]||[];
   if(c.tenants && tenantIdValue && Array.isArray(c.tenants[String(tenantIdValue)]?.[scope])) items=c.tenants[String(tenantIdValue)][scope];
   items=items.filter(x=>x.enabled!==false);
-  // 舊公司的個別目錄快照可能早於班表模組建立，導致平台已經有班表但現場目錄完全沒有。
-  // 對具有案場派駐且班表身分有效的現場人員，強制補齊可讀班表入口，避免被舊快照或自訂目錄意外藏掉。
-  if(scope==='staff' && staffUser && staffUser.role!=='company_admin' && hasSiteAccess(staffUser)){
-    const sr=scheduleMenuRole(tenantIdValue,staffUser);
-    if(['admin','security','mobile'].includes(sr)){
-      const scheduleIds=new Set(['staff-schedule','staff-schedule-community','staff-schedule-self-select','staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime']);
-      const oldParent=items.find(x=>String(x.id)==='staff-schedule');
-      const parent={id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true,...(oldParent||{})};
-      const community={id:'staff-schedule-community',parentId:'staff-schedule',icon:'↳',label:'案場全班班表',action:'staff-schedule-community',enabled:true};
-      const selfSelect={id:'staff-schedule-self-select',parentId:'staff-schedule',icon:'↳',label:'自選休假',action:'staff-schedule-self-select',enabled:true};
-      const kept=items.filter(x=>!scheduleIds.has(String(x.id)) && !/^staff-schedule(?:-|$)/.test(String(x.action||'')));
-      const firstScheduleIndex=items.findIndex(x=>scheduleIds.has(String(x.id)) || /^staff-schedule(?:-|$)/.test(String(x.action||'')));
-      const insertAt=firstScheduleIndex>=0?items.slice(0,firstScheduleIndex).filter(x=>!scheduleIds.has(String(x.id))).length:kept.length;
-      kept.splice(insertAt,0,parent,community,selfSelect);
-      items=kept;
-    }
-  }
+  // 不在現場目錄 API 中強制插入班表項目；顯示哪些項目由已儲存的目錄設定決定。
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectivePermissions(staffUser));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
