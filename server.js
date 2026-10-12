@@ -536,21 +536,21 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectivePermissions(staffUser));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
+    // 必須與上方補齊班表入口時使用同一個班表身分來源；舊帳號可能已有 profile，
+    // 但人員資料的職務欄位尚未同步，若只看 scheduleDefaultRole 會把剛補上的選單又濾掉。
+    const staffScheduleRole=scope==='staff'?(scheduleGetProfile(tenantIdValue,staffUser.id)?.schedule_role||scheduleDefaultRole(staffUser)):'';
     items=items.filter(item=>{
       const key=menuPermissionKey(item,scope);
       if(!key) return true;
       if(!allowedKeys.has(key)) return false;
       // 經理不論內勤或駐點，都可以進入案場 SOP；上傳權限由 SOP API 再次驗證。
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
-      if(scope==='staff' && key==='schedule' && ['admin','security','mobile'].includes(scheduleDefaultRole(staffUser))) return true;
+      if(scope==='staff' && key==='schedule' && ['admin','security','mobile'].includes(staffScheduleRole)) return true;
       if(scope==='staff' && key==='attendance' && hasSiteAccess(staffUser)) return true;
       if(scope==='staff' && key==='residents') return true;
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
-    if(scope==='staff'){
-      const role=scheduleDefaultRole(staffUser);
-      if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
-    }
+    if(scope==='staff' && staffScheduleRole!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
   }
   return items;
 }
