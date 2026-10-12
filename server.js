@@ -516,6 +516,23 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   let items=c[scope]||[];
   if(c.tenants && tenantIdValue && Array.isArray(c.tenants[String(tenantIdValue)]?.[scope])) items=c.tenants[String(tenantIdValue)][scope];
   items=items.filter(x=>x.enabled!==false);
+  // 舊公司的個別目錄快照可能早於班表模組建立，導致平台已經有班表但現場目錄完全沒有。
+  // 對具有案場派駐且班表身分有效的現場人員，強制補齊可讀班表入口，避免被舊快照或自訂目錄意外藏掉。
+  if(scope==='staff' && staffUser && staffUser.role!=='company_admin' && hasSiteAccess(staffUser)){
+    const sr=scheduleGetProfile(tenantIdValue,staffUser.id)?.schedule_role||scheduleDefaultRole(staffUser);
+    if(['admin','security','mobile'].includes(sr)){
+      const scheduleIds=new Set(['staff-schedule','staff-schedule-community','staff-schedule-self-select','staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime']);
+      const oldParent=items.find(x=>String(x.id)==='staff-schedule');
+      const parent={id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true,...(oldParent||{})};
+      const community={id:'staff-schedule-community',parentId:'staff-schedule',icon:'↳',label:'案場全班班表',action:'staff-schedule-community',enabled:true};
+      const selfSelect={id:'staff-schedule-self-select',parentId:'staff-schedule',icon:'↳',label:'自選休假',action:'staff-schedule-self-select',enabled:true};
+      const kept=items.filter(x=>!scheduleIds.has(String(x.id)) && !/^staff-schedule(?:-|$)/.test(String(x.action||'')));
+      const firstScheduleIndex=items.findIndex(x=>scheduleIds.has(String(x.id)) || /^staff-schedule(?:-|$)/.test(String(x.action||'')));
+      const insertAt=firstScheduleIndex>=0?items.slice(0,firstScheduleIndex).filter(x=>!scheduleIds.has(String(x.id))).length:kept.length;
+      kept.splice(insertAt,0,parent,community,selfSelect);
+      items=kept;
+    }
+  }
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectivePermissions(staffUser));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
@@ -2082,15 +2099,23 @@ app.get('/api/staff/schedule/community-view',requireStaffFiller,(req,res)=>{
   const entries=db.prepare(`SELECT e.*,u.name staff_name,u.employee_id,c.name community_name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id LEFT JOIN communities c ON c.id=e.community_id AND c.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.month=? AND e.community_id=? ORDER BY e.work_date,u.name`).all(tenantId(req),month,selected);
   const profile=scheduleGetProfile(tenantId(req),u.id);
   const selfOffDates=db.prepare("SELECT work_date FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").all(tenantId(req),month,u.id).map(x=>x.work_date);
-  const conflicts=db.prepare("SELECT work_date,COUNT(DISTINCT staff_id) count,GROUP_CONCAT(DISTINCT staff_id) staff_ids FROM schedule_entries WHERE tenant_id=? AND month=? AND community_id=? AND shift_code='off' GROUP BY work_date").all(tenantId(req),month,selected);
-  res.json({month,communities,selected_community_id:selected,staff,entries,profile,self_off_dates:selfOffDates,off_conflicts:conflicts});
+  // 撞假只計算「其他人」；本人既有休假不應把自己也算成撞假。
+  const conflicts=db.prepare("SELECT work_date,COUNT(DISTINCT staff_id) count,GROUP_CONCAT(DISTINCT staff_id) staff_ids FROM schedule_entries WHERE tenant_id=? AND month=? AND community_id=? AND shift_code='off' AND staff_id<>? GROUP BY work_date").all(tenantId(req),month,selected,u.id);
+  const rules=schedulePlatformRules();
+  const managerRotation=profile?.schedule_role==='admin' && String(rules.admin?.manager?.mode||'')==='rotation';
+  const selfSelectEnabled=['security','mobile'].includes(profile?.schedule_role) || managerRotation;
+  const effectiveSelfSelectDays=managerRotation ? Math.max(Number(profile?.self_select_days||0),Number(profile?.rest_days||0)) : Number(profile?.self_select_days||0);
+  res.json({month,communities,selected_community_id:selected,staff,entries,profile:{...profile,self_select_days:effectiveSelfSelectDays},self_select_enabled:selfSelectEnabled,self_off_dates:selfOffDates,off_conflicts:conflicts});
 });
 
 // 現場人員：機動／保全的自選休假與自己的班表資料，後端先備妥；前台介面可獨立接上，不會看到行政資料。
 app.get('/api/staff/schedule/month',requireStaffFiller,(req,res)=>{const month=scheduleMonth(req.query?.month);const u=getUser(req);const p=scheduleGetProfile(tenantId(req),u.id);if(!p)return res.status(404).json({error:'尚未設定班表身分'});const category=p.schedule_role;const rows=db.prepare('SELECT e.*,c.name community_name FROM schedule_entries e LEFT JOIN communities c ON c.id=e.community_id WHERE e.tenant_id=? AND e.month=? AND e.staff_id=? ORDER BY e.work_date').all(tenantId(req),month,u.id);res.json({month,category,profile:p,entries:rows,problems:scheduleValidateEntries(tenantId(req),month).filter(x=>x.staff_id===u.id)});});
 app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
-  const u=getUser(req),p=scheduleGetProfile(tenantId(req),u.id);
-  if(!p||!['security','mobile'].includes(p.schedule_role))return res.status(403).json({error:'目前只有保全／機動可使用自選休假'});
+  const u=getUser(req),p=scheduleGetProfile(tenantId(req),u.id),rules=schedulePlatformRules();
+  const managerRotation=p?.schedule_role==='admin' && String(rules.admin?.manager?.mode||'')==='rotation';
+  const selfSelectEnabled=!!p && (['security','mobile'].includes(p.schedule_role)||managerRotation);
+  const effectiveSelfSelectDays=managerRotation?Math.max(Number(p?.self_select_days||0),Number(p?.rest_days||0)):Number(p?.self_select_days||0);
+  if(!selfSelectEnabled)return res.status(403).json({error:'目前排班規則未開放此職務自選休假；若經理需與秘書輪排，請先將平台經理排休方式設為「輪排休」。'});
   const month=scheduleMonth(req.body?.month),date=String(req.body?.work_date||'');
   if(!scheduleWorkdays(month).includes(date))throw new Error('日期不在所選月份');
   const ids=getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);
@@ -2099,7 +2124,7 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
   const used=db.prepare("SELECT COUNT(DISTINCT work_date) c FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").get(tenantId(req),month,u.id).c;
   const existingSelf=db.prepare("SELECT 1 FROM schedule_entries WHERE tenant_id=? AND work_date=? AND staff_id=? AND shift_code='off' AND source='self-select' LIMIT 1").get(tenantId(req),date,u.id);
   if(existingSelf)throw new Error('您已選擇這一天休假。');
-  if(used>=Number(p.self_select_days||2))throw new Error(`本月最多可自選 ${p.self_select_days||2} 天`);
+  if(used>=effectiveSelfSelectDays)throw new Error(`本月最多可自選 ${effectiveSelfSelectDays} 天`);
   const collision=db.prepare("SELECT u.name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.work_date=? AND e.community_id=? AND e.shift_code='off' AND e.staff_id<>? LIMIT 1").get(tenantId(req),date,requestedCommunity,u.id);
   if(collision)throw new Error(`這一天 ${collision.name} 已排休，為避免案場撞假，請選擇其他日期。`);
   scheduleUpsertEntry(tenantId(req),{staff_id:u.id,community_id:requestedCommunity,work_date:date,category:p.schedule_role,shift_code:'off',source:'self-select',note:'人員自選休假'},u.id);

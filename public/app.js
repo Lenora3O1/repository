@@ -293,7 +293,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
   const data=await api('/api/staff/schedule/community-view?'+query.toString());
   const communities=data.communities||[], selected=String(data.selected_community_id||'');
   const profile=data.profile||{}; const entries=data.entries||[], staff=data.staff||[];
-  const selfAllowed=['security','mobile'].includes(profile.schedule_role);
+  const selfAllowed=Boolean(data.self_select_enabled) || ['security','mobile'].includes(profile.schedule_role);
   const selfDates=new Set(data.self_off_dates||[]);
   const offByDate=new Map((data.off_conflicts||[]).map(x=>[x.work_date,Number(x.count||0)]));
   const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);
