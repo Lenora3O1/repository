@@ -142,6 +142,12 @@
   document.querySelectorAll('.floating-notice').forEach(n=>{try{if(localStorage.getItem('notice-closed-'+(n.id||location.pathname))==='1')n.classList.add('is-closed')}catch(e){}});
   const login=document.getElementById('loginView'),main=document.getElementById('mainView');
   function inferWorkspaceScope(){
+    // The system-owner admin page also has #mainView and #loginView. It owns a
+    // separate static navigation and must never be treated as the company workspace.
+    // Keep the shared sidebar loader scoped to staff/company pages only.
+    if(location.pathname === '/admin' || location.pathname === '/admin.html' ||
+       document.getElementById('loginForm') ||
+       document.querySelector('#appSidebar .nav-tabs [data-tab]')) return null;
     // Prefer the page's actual DOM structure over its URL. The production root URL
     // serves index.html; deployments may also open staff.html directly.
     if(document.getElementById('companyDynamicMenu') || main) return 'company';
