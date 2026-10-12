@@ -536,21 +536,26 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectivePermissions(staffUser));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
-    // 必須與上方補齊班表入口時使用同一個班表身分來源；舊帳號可能已有 profile，
-    // 但人員資料的職務欄位尚未同步，若只看 scheduleDefaultRole 會把剛補上的選單又濾掉。
-    const staffScheduleRole=scope==='staff'?(scheduleGetProfile(tenantIdValue,staffUser.id)?.schedule_role||scheduleDefaultRole(staffUser)):'';
     items=items.filter(item=>{
       const key=menuPermissionKey(item,scope);
       if(!key) return true;
       if(!allowedKeys.has(key)) return false;
       // 經理不論內勤或駐點，都可以進入案場 SOP；上傳權限由 SOP API 再次驗證。
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
-      if(scope==='staff' && key==='schedule' && ['admin','security','mobile'].includes(staffScheduleRole)) return true;
+      // 班表是現場勤務模組：以實際班表身分（含 schedule_profiles）及有效案場派駐為準，
+      // 不可因舊帳號的 permissions 快照缺少 schedule，或主檔職務與班表身分不同步而把入口過濾掉。
+      if(scope==='staff' && key==='schedule' && hasSiteAccess(staffUser)){
+        const scheduleRole=scheduleGetProfile(tenantIdValue,staffUser.id)?.schedule_role||scheduleDefaultRole(staffUser);
+        if(['admin','security','mobile'].includes(scheduleRole)) return true;
+      }
       if(scope==='staff' && key==='attendance' && hasSiteAccess(staffUser)) return true;
       if(scope==='staff' && key==='residents') return true;
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
-    if(scope==='staff' && staffScheduleRole!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
+    if(scope==='staff'){
+      const role=scheduleDefaultRole(staffUser);
+      if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
+    }
   }
   return items;
 }
@@ -2121,13 +2126,16 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
   const ids=getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);
   const requestedCommunity=Number(req.body?.community_id||ids[0]||0);
   if(!ids.includes(requestedCommunity))throw new Error('您沒有這個案場的排班權限');
-  const used=db.prepare("SELECT COUNT(DISTINCT work_date) c FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").get(tenantId(req),month,u.id).c;
-  const existingSelf=db.prepare("SELECT 1 FROM schedule_entries WHERE tenant_id=? AND work_date=? AND staff_id=? AND shift_code='off' AND source='self-select' LIMIT 1").get(tenantId(req),date,u.id);
-  if(existingSelf)throw new Error('您已選擇這一天休假。');
-  if(used>=effectiveSelfSelectDays)throw new Error(`本月最多可自選 ${effectiveSelfSelectDays} 天`);
-  const collision=db.prepare("SELECT u.name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.work_date=? AND e.community_id=? AND e.shift_code='off' AND e.staff_id<>? LIMIT 1").get(tenantId(req),date,requestedCommunity,u.id);
-  if(collision)throw new Error(`這一天 ${collision.name} 已排休，為避免案場撞假，請選擇其他日期。`);
-  scheduleUpsertEntry(tenantId(req),{staff_id:u.id,community_id:requestedCommunity,work_date:date,category:p.schedule_role,shift_code:'off',source:'self-select',note:'人員自選休假'},u.id);
+  // 檢查與寫入放在同一個 SQLite 交易中，避免多人同時送出時發生檢查／儲存競態。
+  db.transaction(()=>{
+    const used=db.prepare("SELECT COUNT(DISTINCT work_date) c FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").get(tenantId(req),month,u.id).c;
+    const existingSelf=db.prepare("SELECT 1 FROM schedule_entries WHERE tenant_id=? AND work_date=? AND staff_id=? AND shift_code='off' AND source='self-select' LIMIT 1").get(tenantId(req),date,u.id);
+    if(existingSelf)throw new Error('您已選擇這一天休假。');
+    if(used>=effectiveSelfSelectDays)throw new Error(`本月最多可自選 ${effectiveSelfSelectDays} 天`);
+    const collision=db.prepare("SELECT u.name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.work_date=? AND e.community_id=? AND e.shift_code='off' AND e.staff_id<>? LIMIT 1").get(tenantId(req),date,requestedCommunity,u.id);
+    if(collision)throw new Error(`這一天 ${collision.name} 已排休，為避免案場撞假，請選擇其他日期。`);
+    scheduleUpsertEntry(tenantId(req),{staff_id:u.id,community_id:requestedCommunity,work_date:date,category:p.schedule_role,shift_code:'off',source:'self-select',note:'人員自選休假'},u.id);
+  })();
   res.json({success:true});
 }catch(e){res.status(400).json({error:e.message||'自選休假失敗'});}});
 
