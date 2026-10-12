@@ -1001,17 +1001,32 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   if(!name||!adminEmployeeId||!adminName||adminPassword.length<4)return res.status(400).json({error:'請完整填寫公司名稱、公司管理員員編、姓名與至少 4 碼密碼'});
   if(code && db.prepare('SELECT id FROM tenants WHERE code=?').get(code))return res.status(400).json({error:'公司代碼已存在'});
   if(db.prepare('SELECT id FROM tenants WHERE name=?').get(name))return res.status(400).json({error:'已有同名公司。請直接使用既有公司，不要重新建立相同公司。'});
+  const requested=req.body?.schedule_defaults&&typeof req.body.schedule_defaults==='object'?req.body.schedule_defaults:{};
+  const followPlatform=requested.follow_platform!==false;
+  const clamp=(v,def,min=0,max=31)=>Math.max(min,Math.min(max,Number.isFinite(Number(v))?Number(v):def));
+  const validMode=v=>['red_holiday','rotation','fixed_monthly'].includes(String(v))?String(v):'rotation';
+  const platformSchedule=readPlatformRules().schedule;
+  const scheduleDefaults={
+    admin:{manager:{mode:validMode(requested.admin?.manager?.mode??platformSchedule.admin.manager.mode),rest_days:clamp(requested.admin?.manager?.rest_days,platformSchedule.admin.manager.rest_days)},secretary:{mode:validMode(requested.admin?.secretary?.mode??platformSchedule.admin.secretary.mode),rest_days:clamp(requested.admin?.secretary?.rest_days,platformSchedule.admin.secretary.rest_days)}},
+    security:{rest_days:clamp(requested.security?.rest_days,platformSchedule.security.rest_days),self_select_days:clamp(requested.security?.self_select_days,platformSchedule.security.self_select_days),max_consecutive:clamp(requested.security?.max_consecutive,platformSchedule.security.max_consecutive,1),shift:['day','night'].includes(String(requested.security?.shift??platformSchedule.security.shift))?String(requested.security?.shift??platformSchedule.security.shift):'day'},
+    mobile:{rest_days:clamp(requested.mobile?.rest_days,platformSchedule.mobile.rest_days),self_select_days:clamp(requested.mobile?.self_select_days,platformSchedule.mobile.self_select_days),max_consecutive:clamp(requested.mobile?.max_consecutive,platformSchedule.mobile.max_consecutive,1)}
+  };
   const finalCode=code||`company-${Date.now()}`; const t=now(); const tx=db.transaction(()=>{
     const info=db.prepare('INSERT INTO tenants (name,code,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(name,finalCode,'active',t,t);
     const tid=info.lastInsertRowid;
-    // 新公司建立當下就複製一份平台目錄，之後平台預設的變更不會同步到這家公司。
+    // 新公司建立當下複製目錄；班表規則則明確保存「跟隨平台」或「公司自訂」模式。
     const menuNow=readMenuConfig();
     menuNow.tenants=menuNow.tenants||{};
     menuNow.tenants[String(tid)]={staff:(menuNow.staff||[]).map(x=>({...x})),company:(menuNow.company||[]).map(x=>({...x}))};
     writeMenuConfig(menuNow);
     const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
     db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tid,'請建立第一個社區','active',t,t);
-    return {tenantId:tid,userId:u.lastInsertRowid};
+    const saveRule=db.prepare('INSERT INTO schedule_rules (tenant_id,community_id,category,config_json,created_at,updated_at) VALUES (?,NULL,?,?,?,?) ON CONFLICT(tenant_id,community_id,category) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at');
+    const usePlatform={use_platform_defaults:followPlatform};
+    saveRule.run(tid,'admin',JSON.stringify({...scheduleDefaults.admin,...usePlatform}),t,t);
+    saveRule.run(tid,'security',JSON.stringify({...scheduleDefaults.security,...usePlatform}),t,t);
+    saveRule.run(tid,'mobile',JSON.stringify({...scheduleDefaults.mobile,...usePlatform}),t,t);
+    return {tenantId:tid,userId:u.lastInsertRowid,schedule_defaults:{follow_platform:followPlatform,...scheduleDefaults}};
   });
   try{res.json({success:true,...tx()});}catch(e){res.status(500).json({error:'建立公司失敗，請確認資料是否重複'});}
 });
@@ -1714,11 +1729,14 @@ const SCHEDULE_MENU_ITEMS = PLATFORM_COMPANY_SCHEDULE_MENU;
 
 function schedulePlatformRules(){ return readPlatformRules().schedule; }
 function scheduleEffectiveRule(tenantIdValue, communityId, category){
-  const platform=schedulePlatformRules();
-  const base=category==='admin'?platform.admin:(platform[category]||{});
-  const local=scheduleGetRule(tenantIdValue,communityId,category).config||{};
-  if(category==='admin') return {manager:{...platform.admin.manager,...(local.manager||{})},secretary:{...platform.admin.secretary,...(local.secretary||{})}};
-  return {...base,...local};
+  // scheduleGetRule 已負責平台／公司預設／社區覆寫的優先順序，排班引擎一律使用其有效結果。
+  const effective={...(scheduleGetRule(tenantIdValue,communityId,category).config||{})};
+  // 平台總連續工作天數是全平台安全上限；公司可採更嚴格限制，不可放寬超過母規則。
+  if(category==='security'||category==='mobile'){
+    const ceiling=Math.max(1,Number(schedulePlatformRules().max_consecutive||6));
+    effective.max_consecutive=Math.min(ceiling,Math.max(1,Number(effective.max_consecutive||ceiling)));
+  }
+  return effective;
 }
 function scheduleEnsureSchema(){
   db.exec(`
@@ -1884,21 +1902,22 @@ function scheduleRuleUsesPlatform(category,config){
 }
 function scheduleGetRule(tenantIdValue,communityId,category){
   const platform=schedulePlatformRules();
-  const r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS ? AND category=?').get(tenantIdValue,communityId??null,category);
-  if(!r){
-    const config=category==='security'?{...platform.security,use_platform_defaults:true}:category==='mobile'?{...platform.mobile,use_platform_defaults:true}:{manager:{...platform.admin.manager,red_dates:[]},secretary:{...platform.admin.secretary,red_dates:[]},use_platform_defaults:true};
-    return {tenant_id:tenantIdValue,community_id:communityId??null,category,config};
-  }
+  let r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS ? AND category=?').get(tenantIdValue,communityId??null,category);
+  // 若社區尚未自訂規則，沿用公司開通時設定的公司層級預設；沒有公司預設才回到平台母規則。
+  if(!r && communityId!==null && communityId!==undefined) r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS NULL AND category=? ORDER BY id DESC LIMIT 1').get(tenantIdValue,category);
+  const platformConfig=category==='admin'?{manager:{...platform.admin.manager,red_dates:[]},secretary:{...platform.admin.secretary,red_dates:[]}}:{...(platform[category]||{})};
+  if(!r) return {tenant_id:tenantIdValue,community_id:communityId??null,category,config:{...platformConfig,use_platform_defaults:true}};
   let local=scheduleJson(r.config_json,{});
-  let uses=scheduleRuleUsesPlatform(category,local);
+  const uses=scheduleRuleUsesPlatform(category,local);
   if(local.use_platform_defaults===undefined){
     local={...local,use_platform_defaults:uses};
     try{db.prepare('UPDATE schedule_rules SET config_json=?,updated_at=? WHERE id=?').run(JSON.stringify(local),now(),r.id);}catch{}
   }
-  if(!uses) return {...r,config:local};
-  if(category==='admin') return {...r,config:{manager:{...platform.admin.manager,...(local.manager||{}),red_dates:(local.manager?.red_dates||[])},secretary:{...platform.admin.secretary,...(local.secretary||{}),red_dates:(local.secretary?.red_dates||[])},use_platform_defaults:true}};
-  return {...r,config:{...platform[category],...local,use_platform_defaults:true}};
+  if(uses) return {...r,community_id:communityId??r.community_id,config:{...platformConfig,use_platform_defaults:true}};
+  if(category==='admin') return {...r,community_id:communityId??r.community_id,config:{manager:{...platform.admin.manager,...(local.manager||{})},secretary:{...platform.admin.secretary,...(local.secretary||{})},use_platform_defaults:false}};
+  return {...r,community_id:communityId??r.community_id,config:{...platformConfig,...local,use_platform_defaults:false}};
 }
+
 function scheduleSetRule(tenantIdValue,communityId,category,config){
   if(!['admin','security','mobile'].includes(category))throw new Error('班表類別不正確');
   if(communityId!==null && communityId!==undefined){const c=db.prepare('SELECT id FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(Number(communityId),tenantIdValue);if(!c)throw new Error('找不到本公司的啟用社區');}
