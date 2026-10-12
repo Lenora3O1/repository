@@ -36,3 +36,13 @@
 - 更新 `public/index.html` 的 CSS、sidebar.js、app.js、messages.js 版本參數；同步更新 `public/staff.html` 與 `public/company.html` 的版本參數。
 - `public/sidebar.js` 改用頁面 DOM 結構判斷 staff/company 工作空間，並支援直接開啟 `/staff.html`；選單請求失敗時會在 Console 留下狀態碼。
 - 這修正了可由程式碼直接證實的入口／快取缺口；仍需部署後驗證正式環境回傳的選單及帳號資料，不能僅憑靜態檢查宣稱線上已修復。
+
+
+## V2.6：平台預設目錄真正繼承（staff/company）
+
+- `server.js`：停止啟動時替所有企業自動建立平台目錄快照。沒有企業 override 的工作空間會直接使用最新平台預設；儲存企業客製時才建立 override。
+- `server.js`：舊版企業目錄若與目前平台目錄完全相同，遷移為繼承模式；有差異的既有客製目錄保留，避免覆蓋企業自訂內容。
+- `server.js`：建立新公司時不再複製平台目錄快照；「恢復平台預設」改為移除該 scope 的 override，讓後續平台更新能同步。
+- `public/admin.js`：只更新目錄客製設定的說明與「恢復平台預設」確認文字；沒有修改總後台版面、`public/admin.js` 以外的總後台功能或樣式。
+- `public/admin.html`：只更新目錄設定程式 `admin.js` 的版本標記；沒有修改總後台選單結構、版面或樣式。
+- 未打包正式資料庫；語法與 ZIP 完整性需在打包後再驗證。

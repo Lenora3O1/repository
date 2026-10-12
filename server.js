@@ -393,33 +393,43 @@ function readMenuConfig(){
     let changed=false;
     for(const t of tenantRows){
       const key=String(t.id);
-      if(!c.tenants[key] || typeof c.tenants[key]!=='object') c.tenants[key]={};
-      for(const scope of ['staff','company']){
-        if(!Array.isArray(c.tenants[key][scope])){
-          c.tenants[key][scope]=(c[scope]||[]).map(x=>({...x}));
-          changed=true;
-        }
+      if(!c.tenants[key] || typeof c.tenants[key]!=='object' || Array.isArray(c.tenants[key])){
+        c.tenants[key]={};
+        changed=true;
       }
     }
-    // 目錄完全由平台總後台／各公司既有目錄配置控制；此處不自動新增或修改任何 SOP 目錄。
-    // 班表例外：目前仍在產品測試期，班表已正式成為平台標準模組；每次啟動都
-    // 將平台預設與既有公司中的班表項目標準化，確保不會重複或缺漏。
+    // 平台預設是企業目錄的即時來源；只有企業實際儲存過客製目錄時才保留 override。
+    // 舊版會替每家公司自動複製一份平台快照，導致後續平台模組更新不會反映到企業。
+    // 舊快照若與目前平台目錄完全相同，安全地轉回繼承模式；有差異的快照保留，避免覆蓋企業客製內容。
     const beforeStaff=JSON.stringify(c.staff), beforeCompany=JSON.stringify(c.company);
     c.staff=normalizeScheduleMenu(c.staff,'staff');
     c.company=normalizeScheduleMenu(c.company,'company');
-    const beforeAttendanceStaff=JSON.stringify(c.staff), beforeAttendanceCompany=JSON.stringify(c.company);
     c.staff=normalizeAttendanceMenu(c.staff,'staff');
     c.company=normalizeAttendanceMenu(c.company,'company');
-    let menuChanged=(beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company)||beforeAttendanceStaff!==JSON.stringify(c.staff)||beforeAttendanceCompany!==JSON.stringify(c.company));
+    let menuChanged=beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company);
     for(const t of tenantRows){
       const key=String(t.id);
-      c.tenants[key]=c.tenants[key]||{};
-      const nextStaff=normalizeAttendanceMenu(normalizeScheduleMenu(c.tenants[key].staff||c.staff,'staff'),'staff');
-      const nextCompany=normalizeAttendanceMenu(normalizeScheduleMenu(c.tenants[key].company||c.company,'company'),'company');
-      if(JSON.stringify(c.tenants[key].staff||[])!==JSON.stringify(nextStaff)||JSON.stringify(c.tenants[key].company||[])!==JSON.stringify(nextCompany)) menuChanged=true;
-      c.tenants[key].staff=nextStaff;
-      c.tenants[key].company=nextCompany;
+      const tenantCfg=c.tenants[key];
+      for(const scope of ['staff','company']){
+        if(!Array.isArray(tenantCfg[scope])){
+          if(Object.prototype.hasOwnProperty.call(tenantCfg,scope)){
+            delete tenantCfg[scope];
+            menuChanged=true;
+          }
+          continue; // 沒有 override 就即時沿用平台預設
+        }
+        const normalized=normalizeAttendanceMenu(normalizeScheduleMenu(tenantCfg[scope],scope),scope);
+        if(JSON.stringify(normalized)===JSON.stringify(c[scope]||[])){
+          // 舊版「恢復預設」是複製快照；內容相同時改成真正繼承，未來平台更新才能同步。
+          delete tenantCfg[scope];
+          menuChanged=true;
+        }else{
+          if(JSON.stringify(tenantCfg[scope])!==JSON.stringify(normalized)) menuChanged=true;
+          tenantCfg[scope]=normalized;
+        }
+      }
     }
+    if(c._menuInheritanceVersion!==1){c._menuInheritanceVersion=1;menuChanged=true;}
     c._schedulePlatformVersion=2;
     if(changed||menuChanged) writeMenuConfig(c);
   }catch(e){ console.error('menu tenant snapshot migration error',e); }
@@ -668,10 +678,10 @@ app.post('/api/admin/menu-config/reset',requireSuperAdmin,(req,res)=>{
     if(!tenant)return res.status(404).json({error:'找不到公司'});
     c.tenants=c.tenants||{};
     c.tenants[String(tid)]=c.tenants[String(tid)]||{};
-    // 恢復平台預設＝複製「此刻的平台預設」到該公司，之後仍與平台獨立。
-    c.tenants[String(tid)][scope]=(c[scope]||[]).map(x=>({...x}));
+    // 恢復平台預設＝移除企業 override，讓這個工作空間持續繼承平台預設；未來平台模組更新會自動反映。
+    delete c.tenants[String(tid)][scope];
     writeMenuConfig(c);
-    res.json({success:true,items:c.tenants[String(tid)][scope]});
+    res.json({success:true,inherits_platform:true,items:(c[scope]||[]).map(x=>({...x}))});
   }catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
 });
 
@@ -1030,10 +1040,10 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   const finalCode=code||`company-${Date.now()}`; const t=now(); const tx=db.transaction(()=>{
     const info=db.prepare('INSERT INTO tenants (name,code,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(name,finalCode,'active',t,t);
     const tid=info.lastInsertRowid;
-    // 新公司建立當下就複製一份平台目錄，之後平台預設的變更不會同步到這家公司。
+    // 新公司預設繼承平台目錄；只有在總後台儲存企業客製目錄時才建立 override。
     const menuNow=readMenuConfig();
     menuNow.tenants=menuNow.tenants||{};
-    menuNow.tenants[String(tid)]={staff:(menuNow.staff||[]).map(x=>({...x})),company:(menuNow.company||[]).map(x=>({...x}))};
+    menuNow.tenants[String(tid)]={};
     writeMenuConfig(menuNow);
     const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
     db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tid,'請建立第一個社區','active',t,t);
