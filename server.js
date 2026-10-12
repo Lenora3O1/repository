@@ -519,7 +519,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   // 舊公司的個別目錄快照可能早於班表模組建立，導致平台已經有班表但現場目錄完全沒有。
   // 對具有案場派駐且班表身分有效的現場人員，強制補齊可讀班表入口，避免被舊快照或自訂目錄意外藏掉。
   if(scope==='staff' && staffUser && staffUser.role!=='company_admin' && hasSiteAccess(staffUser)){
-    const sr=scheduleGetProfile(tenantIdValue,staffUser.id)?.schedule_role||scheduleDefaultRole(staffUser);
+    const sr=scheduleMenuRole(tenantIdValue,staffUser);
     if(['admin','security','mobile'].includes(sr)){
       const scheduleIds=new Set(['staff-schedule','staff-schedule-community','staff-schedule-self-select','staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime']);
       const oldParent=items.find(x=>String(x.id)==='staff-schedule');
@@ -545,7 +545,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       // 班表是現場勤務模組：以實際班表身分（含 schedule_profiles）及有效案場派駐為準，
       // 不可因舊帳號的 permissions 快照缺少 schedule，或主檔職務與班表身分不同步而把入口過濾掉。
       if(scope==='staff' && key==='schedule' && hasSiteAccess(staffUser)){
-        const scheduleRole=scheduleGetProfile(tenantIdValue,staffUser.id)?.schedule_role||scheduleDefaultRole(staffUser);
+        const scheduleRole=scheduleMenuRole(tenantIdValue,staffUser);
         if(['admin','security','mobile'].includes(scheduleRole)) return true;
       }
       if(scope==='staff' && key==='attendance' && hasSiteAccess(staffUser)) return true;
@@ -553,7 +553,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
     if(scope==='staff'){
-      const role=scheduleDefaultRole(staffUser);
+      const role=scheduleMenuRole(tenantIdValue,staffUser);
       if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
     }
   }
@@ -627,8 +627,10 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
 app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   const u=getUser(req);
   let items=resolveMenu('staff',tenantId(req),u);
-  const role=scheduleGetProfile(tenantId(req),u.id)?.schedule_role||scheduleDefaultRole(u);
+  const role=scheduleMenuRole(tenantId(req),u);
   if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
+  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma','no-cache');
   res.json({scope:'staff',items});
 });
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
@@ -1842,11 +1844,18 @@ function scheduleDaysInMonth(month){const [y,m]=scheduleMonth(month).split('-').
 function scheduleDate(month,day){return `${scheduleMonth(month)}-${String(day).padStart(2,'0')}`;}
 function scheduleWorkdays(month){return Array.from({length:scheduleDaysInMonth(month)},(_,i)=>scheduleDate(month,i+1));}
 function scheduleDefaultRole(u){
-  const jobs=getJobCategories(u); const text=jobs.join('、');
+  const jobs=getJobCategories(u);
   if(jobs.includes('機動')) return 'mobile';
   if(jobs.includes('保全')) return 'security';
-  if(jobs.includes('秘書')||jobs.includes('社區管理')||u?.job_level==='經理') return 'admin';
+  if(jobs.includes('秘書')||jobs.includes('社區管理')||u?.job_level==='經理'||String(u?.position||'').includes('經理')) return 'admin';
   return '';
+}
+// 舊版或人工匯入的 schedule_profiles 可能留下非標準角色（例如 manager/secretary）。
+// 不可因為欄位「非空」就把它當成有效角色，否則既有班表目錄會被權限過濾掉。
+function scheduleMenuRole(tenantIdValue, staffUser){
+  const stored=String(scheduleGetProfile(tenantIdValue,staffUser?.id)?.schedule_role||'').trim();
+  if(['admin','security','mobile'].includes(stored)) return stored;
+  return scheduleDefaultRole(staffUser);
 }
 function scheduleSyncProfileFromStaff(tenantIdValue,staffId){
   const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(Number(staffId),tenantIdValue);
@@ -1871,7 +1880,14 @@ function scheduleSyncProfileFromStaff(tenantIdValue,staffId){
 
 function scheduleGetProfile(tenantIdValue,staffId){
   let p=db.prepare('SELECT * FROM schedule_profiles WHERE tenant_id=? AND staff_id=?').get(tenantIdValue,staffId);
-  if(p) return {...p,community_ids:scheduleArray(p.community_ids_json)};
+  if(p){
+    // 相容舊版／匯入資料：只接受目前支援的三種班表角色；未知值回退到人員主檔職務推算。
+    // 避免非空但無效的 schedule_role（例如 manager/secretary）讓目錄與經理 API 同時拒絕使用者。
+    const validRole=['admin','security','mobile'].includes(String(p.schedule_role||''));
+    const u=validRole?null:db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1').get(staffId,tenantIdValue);
+    const role=validRole?p.schedule_role:(u?scheduleDefaultRole(u):'');
+    return {...p,schedule_role:role,community_ids:scheduleArray(p.community_ids_json)};
+  }
   const u=db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1').get(staffId,tenantIdValue);
   if(!u) return null;
   const role=scheduleDefaultRole(u);
