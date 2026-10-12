@@ -1001,32 +1001,17 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   if(!name||!adminEmployeeId||!adminName||adminPassword.length<4)return res.status(400).json({error:'請完整填寫公司名稱、公司管理員員編、姓名與至少 4 碼密碼'});
   if(code && db.prepare('SELECT id FROM tenants WHERE code=?').get(code))return res.status(400).json({error:'公司代碼已存在'});
   if(db.prepare('SELECT id FROM tenants WHERE name=?').get(name))return res.status(400).json({error:'已有同名公司。請直接使用既有公司，不要重新建立相同公司。'});
-  const requested=req.body?.schedule_defaults&&typeof req.body.schedule_defaults==='object'?req.body.schedule_defaults:{};
-  const followPlatform=requested.follow_platform!==false;
-  const clamp=(v,def,min=0,max=31)=>Math.max(min,Math.min(max,Number.isFinite(Number(v))?Number(v):def));
-  const validMode=v=>['red_holiday','rotation','fixed_monthly'].includes(String(v))?String(v):'rotation';
-  const platformSchedule=readPlatformRules().schedule;
-  const scheduleDefaults={
-    admin:{manager:{mode:validMode(requested.admin?.manager?.mode??platformSchedule.admin.manager.mode),rest_days:clamp(requested.admin?.manager?.rest_days,platformSchedule.admin.manager.rest_days)},secretary:{mode:validMode(requested.admin?.secretary?.mode??platformSchedule.admin.secretary.mode),rest_days:clamp(requested.admin?.secretary?.rest_days,platformSchedule.admin.secretary.rest_days)}},
-    security:{rest_days:clamp(requested.security?.rest_days,platformSchedule.security.rest_days),self_select_days:clamp(requested.security?.self_select_days,platformSchedule.security.self_select_days),max_consecutive:clamp(requested.security?.max_consecutive,platformSchedule.security.max_consecutive,1),shift:['day','night'].includes(String(requested.security?.shift??platformSchedule.security.shift))?String(requested.security?.shift??platformSchedule.security.shift):'day'},
-    mobile:{rest_days:clamp(requested.mobile?.rest_days,platformSchedule.mobile.rest_days),self_select_days:clamp(requested.mobile?.self_select_days,platformSchedule.mobile.self_select_days),max_consecutive:clamp(requested.mobile?.max_consecutive,platformSchedule.mobile.max_consecutive,1)}
-  };
   const finalCode=code||`company-${Date.now()}`; const t=now(); const tx=db.transaction(()=>{
     const info=db.prepare('INSERT INTO tenants (name,code,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(name,finalCode,'active',t,t);
     const tid=info.lastInsertRowid;
-    // 新公司建立當下複製目錄；班表規則則明確保存「跟隨平台」或「公司自訂」模式。
+    // 新公司建立當下就複製一份平台目錄，之後平台預設的變更不會同步到這家公司。
     const menuNow=readMenuConfig();
     menuNow.tenants=menuNow.tenants||{};
     menuNow.tenants[String(tid)]={staff:(menuNow.staff||[]).map(x=>({...x})),company:(menuNow.company||[]).map(x=>({...x}))};
     writeMenuConfig(menuNow);
     const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
     db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tid,'請建立第一個社區','active',t,t);
-    const saveRule=db.prepare('INSERT INTO schedule_rules (tenant_id,community_id,category,config_json,created_at,updated_at) VALUES (?,NULL,?,?,?,?) ON CONFLICT(tenant_id,community_id,category) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at');
-    const usePlatform={use_platform_defaults:followPlatform};
-    saveRule.run(tid,'admin',JSON.stringify({...scheduleDefaults.admin,...usePlatform}),t,t);
-    saveRule.run(tid,'security',JSON.stringify({...scheduleDefaults.security,...usePlatform}),t,t);
-    saveRule.run(tid,'mobile',JSON.stringify({...scheduleDefaults.mobile,...usePlatform}),t,t);
-    return {tenantId:tid,userId:u.lastInsertRowid,schedule_defaults:{follow_platform:followPlatform,...scheduleDefaults}};
+    return {tenantId:tid,userId:u.lastInsertRowid};
   });
   try{res.json({success:true,...tx()});}catch(e){res.status(500).json({error:'建立公司失敗，請確認資料是否重複'});}
 });
@@ -1729,14 +1714,11 @@ const SCHEDULE_MENU_ITEMS = PLATFORM_COMPANY_SCHEDULE_MENU;
 
 function schedulePlatformRules(){ return readPlatformRules().schedule; }
 function scheduleEffectiveRule(tenantIdValue, communityId, category){
-  // scheduleGetRule 已負責平台／公司預設／社區覆寫的優先順序，排班引擎一律使用其有效結果。
-  const effective={...(scheduleGetRule(tenantIdValue,communityId,category).config||{})};
-  // 平台總連續工作天數是全平台安全上限；公司可採更嚴格限制，不可放寬超過母規則。
-  if(category==='security'||category==='mobile'){
-    const ceiling=Math.max(1,Number(schedulePlatformRules().max_consecutive||6));
-    effective.max_consecutive=Math.min(ceiling,Math.max(1,Number(effective.max_consecutive||ceiling)));
-  }
-  return effective;
+  const platform=schedulePlatformRules();
+  const base=category==='admin'?platform.admin:(platform[category]||{});
+  const local=scheduleGetRule(tenantIdValue,communityId,category).config||{};
+  if(category==='admin') return {manager:{...platform.admin.manager,...(local.manager||{})},secretary:{...platform.admin.secretary,...(local.secretary||{})}};
+  return {...base,...local};
 }
 function scheduleEnsureSchema(){
   db.exec(`
@@ -1902,22 +1884,21 @@ function scheduleRuleUsesPlatform(category,config){
 }
 function scheduleGetRule(tenantIdValue,communityId,category){
   const platform=schedulePlatformRules();
-  let r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS ? AND category=?').get(tenantIdValue,communityId??null,category);
-  // 若社區尚未自訂規則，沿用公司開通時設定的公司層級預設；沒有公司預設才回到平台母規則。
-  if(!r && communityId!==null && communityId!==undefined) r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS NULL AND category=? ORDER BY id DESC LIMIT 1').get(tenantIdValue,category);
-  const platformConfig=category==='admin'?{manager:{...platform.admin.manager,red_dates:[]},secretary:{...platform.admin.secretary,red_dates:[]}}:{...(platform[category]||{})};
-  if(!r) return {tenant_id:tenantIdValue,community_id:communityId??null,category,config:{...platformConfig,use_platform_defaults:true}};
+  const r=db.prepare('SELECT * FROM schedule_rules WHERE tenant_id=? AND community_id IS ? AND category=?').get(tenantIdValue,communityId??null,category);
+  if(!r){
+    const config=category==='security'?{...platform.security,use_platform_defaults:true}:category==='mobile'?{...platform.mobile,use_platform_defaults:true}:{manager:{...platform.admin.manager,red_dates:[]},secretary:{...platform.admin.secretary,red_dates:[]},use_platform_defaults:true};
+    return {tenant_id:tenantIdValue,community_id:communityId??null,category,config};
+  }
   let local=scheduleJson(r.config_json,{});
-  const uses=scheduleRuleUsesPlatform(category,local);
+  let uses=scheduleRuleUsesPlatform(category,local);
   if(local.use_platform_defaults===undefined){
     local={...local,use_platform_defaults:uses};
     try{db.prepare('UPDATE schedule_rules SET config_json=?,updated_at=? WHERE id=?').run(JSON.stringify(local),now(),r.id);}catch{}
   }
-  if(uses) return {...r,community_id:communityId??r.community_id,config:{...platformConfig,use_platform_defaults:true}};
-  if(category==='admin') return {...r,community_id:communityId??r.community_id,config:{manager:{...platform.admin.manager,...(local.manager||{})},secretary:{...platform.admin.secretary,...(local.secretary||{})},use_platform_defaults:false}};
-  return {...r,community_id:communityId??r.community_id,config:{...platformConfig,...local,use_platform_defaults:false}};
+  if(!uses) return {...r,config:local};
+  if(category==='admin') return {...r,config:{manager:{...platform.admin.manager,...(local.manager||{}),red_dates:(local.manager?.red_dates||[])},secretary:{...platform.admin.secretary,...(local.secretary||{}),red_dates:(local.secretary?.red_dates||[])},use_platform_defaults:true}};
+  return {...r,config:{...platform[category],...local,use_platform_defaults:true}};
 }
-
 function scheduleSetRule(tenantIdValue,communityId,category,config){
   if(!['admin','security','mobile'].includes(category))throw new Error('班表類別不正確');
   if(communityId!==null && communityId!==undefined){const c=db.prepare('SELECT id FROM communities WHERE id=? AND tenant_id=? AND status=\'active\'').get(Number(communityId),tenantIdValue);if(!c)throw new Error('找不到本公司的啟用社區');}
@@ -1968,6 +1949,17 @@ const SCHEDULE_HOLIDAY_FALLBACK={
   2026:['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-02-19','2026-02-20','2026-02-27','2026-02-28','2026-04-03','2026-04-04','2026-04-05','2026-04-06','2026-05-01','2026-06-19','2026-09-25','2026-09-28','2026-10-09','2026-10-10','2026-10-25','2026-10-26','2026-12-25'],
   2027:['2027-01-01','2027-02-04','2027-02-05','2027-02-06','2027-02-07','2027-02-08','2027-02-09','2027-02-10','2027-02-28','2027-03-01','2027-04-04','2027-04-05','2027-04-06','2027-04-30','2027-05-01','2027-06-09','2027-09-15','2027-09-28','2027-10-10','2027-10-11','2027-10-25','2027-12-24','2027-12-25','2027-12-31']
 };
+function scheduleFallbackRedDates(year){
+  const y=Number(year);
+  const dates=new Set(SCHEDULE_HOLIDAY_FALLBACK[y]||[]);
+  // Government calendar red days include weekends as well as statutory and make-up holidays.
+  const d=new Date(Date.UTC(y,0,1));
+  while(d.getUTCFullYear()===y){
+    if(d.getUTCDay()===0||d.getUTCDay()===6) dates.add(d.toISOString().slice(0,10));
+    d.setUTCDate(d.getUTCDate()+1);
+  }
+  return [...dates].sort();
+}
 async function scheduleTaiwanHolidayDates(year){
   const y=Number(year); if(SCHEDULE_HOLIDAY_CACHE.has(y)) return SCHEDULE_HOLIDAY_CACHE.get(y);
   try{
@@ -1975,10 +1967,12 @@ async function scheduleTaiwanHolidayDates(year){
     if(!r.ok) throw new Error(`holiday API HTTP ${r.status}`);
     const data=await r.json();
     const records=Array.isArray(data)?data:(Array.isArray(data?.result?.records)?data.result.records:[]);
-    const dates=[...new Set(records.filter(x=>Number(x?.year||String(x?.date||'').slice(0,4))===y && String(x?.isholiday??x?.isHoliday??'').trim()==='是' && !/週末|周末|例假|休息日/i.test(String(x?.holidaycategory||x?.holidayCategory||''))).map(x=>String(x?.date||'').slice(0,10)).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)))].sort();
+    // Do not exclude weekends: "見紅休" follows every red day on Taiwan's calendar,
+    // including Saturdays/Sundays, statutory holidays and substitute holidays.
+    const dates=[...new Set(records.filter(x=>Number(x?.year||String(x?.date||'').slice(0,4))===y && ['是','true','1'].includes(String(x?.isholiday??x?.isHoliday??'').trim().toLowerCase())).map(x=>String(x?.date||'').slice(0,10)).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)))].sort();
     if(dates.length){SCHEDULE_HOLIDAY_CACHE.set(y,dates);return dates;}
     throw new Error('holiday API returned no holiday records');
-  }catch(e){const fallback=SCHEDULE_HOLIDAY_FALLBACK[y]||[];SCHEDULE_HOLIDAY_CACHE.set(y,fallback);return fallback;}
+  }catch(e){const fallback=scheduleFallbackRedDates(y);SCHEDULE_HOLIDAY_CACHE.set(y,fallback);return fallback;}
 }
 function schedulePickRestDays(days,totalRest,preferredDates=new Set(),maxConsecutive=6){
   const off=new Set([...preferredDates].filter(d=>days.includes(d)));
@@ -2013,7 +2007,7 @@ async function scheduleGenerate(tenantIdValue,month,category,communityId,created
     let ci=0;
     for(const d of days){const isOff=off.has(d);let cid=targetCommunity;if(category==='mobile'&&!isOff){cid=cids[ci%cids.length];ci++;}if(category==='mobile'&&isOff)cid=cids.length?cids[Math.max(0,(ci-1)%cids.length)]:null;const shift=category==='security'?(p.default_shift||rule.shift||'day'):'work';scheduleUpsertEntry(tenantIdValue,{staff_id:person.id,community_id:cid,work_date:d,category,shift_code:isOff?'off':shift,source:'auto'},createdBy);created++;}
   }
-  return {created,problems:scheduleValidateEntries(tenantIdValue,month),holiday_dates:holidayDates,holiday_source:'台灣政府辦公日曆資料；若資料服務暫時不可用則使用內建年度備援',platform_rules:schedulePlatformRules()};
+  return {created,problems:scheduleValidateEntries(tenantIdValue,month),holiday_dates:holidayDates,holiday_source:'台灣政府辦公日曆紅字日期（含週末、國定假日及補假）；資料服務不可用時使用年度備援',platform_rules:schedulePlatformRules()};
 }
 
 const _scheduleOriginalCompanyMenuConfig = app._scheduleOriginalCompanyMenuConfig;
