@@ -285,8 +285,49 @@ function showWorkspaceError(label,err){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
   el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label||'工作功能')}</div><h1>目前無法開啟</h1><p>${escapeHtml(err?.message||'系統暫時無法取得資料。')}</p><button type="button" class="secondary" onclick="location.reload()">重新整理</button></div>`;
 }
+async function loadStaffSchedulePage(mode='community',label='案場全班班表',monthOverride='',communityOverride=''){
+  const el=$('staffHome'); if(!el)return;
+  showWorkspaceLoading(mode==='self'?'自選休假':'案場全班班表');
+  const month=monthOverride||new Date().toISOString().slice(0,7);
+  const query=new URLSearchParams({month}); if(communityOverride)query.set('community_id',communityOverride);
+  const data=await api('/api/staff/schedule/community-view?'+query.toString());
+  const communities=data.communities||[], selected=String(data.selected_community_id||'');
+  const profile=data.profile||{}; const entries=data.entries||[], staff=data.staff||[];
+  const selfAllowed=Boolean(data.self_select_enabled) || ['security','mobile'].includes(profile.schedule_role);
+  const selfDates=new Set(data.self_off_dates||[]);
+  const offByDate=new Map((data.off_conflicts||[]).map(x=>[x.work_date,Number(x.count||0)]));
+  const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);
+  const rosterByDay=new Map(); for(const e of entries){const key=e.work_date;if(!rosterByDay.has(key))rosterByDay.set(key,new Map());rosterByDay.get(key).set(String(e.staff_id),e);}
+  const communityOptions=communities.map(c=>`<option value="${c.id}" ${String(c.id)===selected?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+  const controls=`<div class="staff-schedule-controls"><label>月份<input type="month" id="staffScheduleMonth" value="${escapeHtml(month)}"></label><label>案場<select id="staffScheduleCommunity">${communityOptions||'<option value="">目前沒有已派駐案場</option>'}</select></label><button type="button" id="staffScheduleRefresh">查詢班表</button></div>`;
+  if(!communities.length){el.innerHTML=`<div class="panel staff-schedule-page"><h1>📅 ${mode==='self'?'自選休假':'案場全班班表'}</h1><p>目前帳號沒有可查看的已派駐案場，請聯絡公司管理人員確認人員派駐設定。</p></div>`;return;}
+  const rosterHead=`<tr><th class="staff-schedule-date-col">日期</th>${staff.map(u=>`<th>${escapeHtml(u.name)}${u.position?`<small>${escapeHtml(u.position)}</small>`:''}</th>`).join('')}</tr>`;
+  const rows=days.map(date=>{
+    const dateEntries=rosterByDay.get(date)||new Map();
+    const d=new Date(date+'T12:00:00'); const weekday=['日','一','二','三','四','五','六'][d.getDay()];
+    const count=offByDate.get(date)||0; const alreadySelf=selfDates.has(date);
+    const cells=staff.map(u=>{const e=dateEntries.get(String(u.id));if(!e)return '<td class="staff-schedule-empty">—</td>';const code=String(e.shift_code||'work');const off=code==='off';const label=off?'休':({'day':'日班','night':'夜班','work':'上班'}[code]||code);return `<td class="${off?'staff-schedule-off':'staff-schedule-work'}" title="${escapeHtml(e.note||'')}">${escapeHtml(label)}${e.source==='self-select'?'<small>自選</small>':''}</td>`;}).join('');
+    let actionCell='';
+    if(mode==='self'&&selfAllowed){const disabled=alreadySelf||count>0||Number(profile.self_select_days||0)<=0;const reason=alreadySelf?'已選擇':count>0?'案場有人休假，避免撞假':Number(profile.self_select_days||0)<=0?'未開放自選':'可選';actionCell=`<td class="staff-schedule-self-cell"><button type="button" data-self-date="${date}" ${disabled?'disabled':''} title="${escapeHtml(reason)}">${alreadySelf?'已選休':count>0?'撞假不可選':'選這天休'}</button></td>`;}
+    return `<tr><th class="staff-schedule-date-col">${date}<small>星期${weekday}</small></th>${cells}${actionCell}</tr>`;
+  }).join('');
+  const selfHeader=mode==='self'&&selfAllowed?'<th>自選休假</th>':'';
+  const used=selfDates.size, limit=Number(profile.self_select_days||0);
+  const selfNote=mode==='self'?`<div class="staff-schedule-note">${selfAllowed?`本月已自選 <strong>${used}</strong>／${limit} 天。只有當天案場沒有其他人排休時才能選擇；若撞假，按鈕會停用，後端也會再次檢查。`:'目前職務不開放自選休假；仍可查看案場全班班表。'}</div>`:'';
+  el.innerHTML=`<style>.staff-schedule-page{padding:22px}.staff-schedule-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:16px 0}.staff-schedule-controls label{display:grid;gap:6px;color:#587066;font-size:13px}.staff-schedule-controls input,.staff-schedule-controls select{min-width:170px;padding:10px;border:1px solid #cbded7;border-radius:9px;background:white}.staff-schedule-page button{padding:9px 12px;border:1px solid #b7d3c7;border-radius:8px;background:#edf7f1;color:#155a42;font-weight:700}.staff-schedule-page button:disabled{background:#f2f3f2;border-color:#e0e4e1;color:#9b4d4d;cursor:not-allowed}.staff-schedule-note{margin:10px 0 16px;padding:12px;background:#fff7e5;border:1px solid #efd99c;border-radius:9px;line-height:1.7}.staff-schedule-table-wrap{overflow:auto;max-height:65vh;border:1px solid #e0e9e4;border-radius:10px}.staff-schedule-table{border-collapse:separate;border-spacing:0;min-width:100%;white-space:nowrap}.staff-schedule-table th,.staff-schedule-table td{padding:9px 10px;border-right:1px solid #e7ece9;border-bottom:1px solid #e7ece9;text-align:center}.staff-schedule-table thead th{position:sticky;top:0;background:#f1f7f3;z-index:3}.staff-schedule-table th small,.staff-schedule-table td small{display:block;font-size:11px;color:#718179;margin-top:3px}.staff-schedule-table .staff-schedule-date-col{position:sticky;left:0;z-index:2;background:#f8fbf9;text-align:left}.staff-schedule-table thead .staff-schedule-date-col{z-index:4}.staff-schedule-work{background:#eef8f2;color:#185b42}.staff-schedule-off{background:#fff0ef;color:#a33131;font-weight:800}.staff-schedule-empty{color:#b2bbb6}.staff-schedule-self-cell{min-width:100px}</style><div class="panel staff-schedule-page"><div class="eyebrow">📅 現場勤務</div><h1>${mode==='self'?'自選休假':'案場全班班表'}</h1><p class="hint">可查看您有權限的案場全體人員班表；休假安排會即時顯示，避免同一天多人撞假。</p>${controls}${selfNote}<div class="staff-schedule-table-wrap"><table class="staff-schedule-table"><thead>${rosterHead.replace('</tr>',`${selfHeader}</tr>`)}</thead><tbody>${rows||'<tr><td colspan="2">本月尚無班表資料。</td></tr>'}</tbody></table></div><p class="hint">「—」代表目前尚未建立該人員當日班別；班表由公司排定後會顯示在這裡。</p></div>`;
+  const refresh=()=>loadStaffSchedulePage(mode,'班表',$('staffScheduleMonth')?.value||month,$('staffScheduleCommunity')?.value||selected).catch(err=>showWorkspaceError('班表',err));
+  $('staffScheduleRefresh')?.addEventListener('click',refresh);
+  $('staffScheduleMonth')?.addEventListener('change',refresh);
+  $('staffScheduleCommunity')?.addEventListener('change',refresh);
+  el.querySelectorAll('[data-self-date]').forEach(btn=>btn.addEventListener('click',async()=>{const date=btn.dataset.selfDate;btn.disabled=true;try{await api('/api/staff/schedule/self-select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({month,work_date:date,community_id:Number(selected)})});await loadStaffSchedulePage('self','自選休假',month,selected);}catch(err){alert(err.message||'自選休假失敗');btn.disabled=false;}}));
+}
+
 async function handleWorkspaceMenu(e){
   const {action,label}=e.detail||{};
+  if(['staff-schedule','staff-schedule-community','staff-schedule-self-select'].includes(action)){
+    try{await loadStaffSchedulePage(action==='staff-schedule-self-select'?'self':'community',label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
+    return;
+  }
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
   if(action==='todo'){
     await loadTodoPage();
@@ -309,6 +350,11 @@ async function handleWorkspaceMenu(e){
   if(['residents-contact','residents-owners','residents-tenants'].includes(action)){
     showWorkspaceLoading(label||'住戶名冊');
     try{if(!window.ResidentRosterModule) throw new Error('住戶名冊模組尚未載入，請重新整理頁面'); await window.ResidentRosterModule.render(action,label||'住戶名冊');}catch(err){showWorkspaceError(label||'住戶名冊',err);}
+    return;
+  }
+  if(action==='staff-attendance'){
+    showWorkspaceLoading(label||'出勤與巡邏');
+    try{if(!window.AttendanceStaffModule) throw new Error('出勤與巡邏模組尚未載入，請重新整理頁面'); await window.AttendanceStaffModule.render();}catch(err){showWorkspaceError(label||'出勤與巡邏',err);}
     return;
   }
   showWorkspacePlaceholder(label||'工作功能');
