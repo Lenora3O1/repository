@@ -375,28 +375,18 @@ function defaultMenuConfig(){
 function readMenuConfig(){
   if(!fs.existsSync(MENU_CONFIG_PATH)) fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(defaultMenuConfig(),null,2),'utf-8');
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
-  c.staff=Array.isArray(c.staff)?c.staff:[]; c.company=Array.isArray(c.company)?c.company:[];
+  c.staff=Array.isArray(c.staff)?c.staff:[];
+  c.company=Array.isArray(c.company)?c.company:[];
   const seedConfig=defaultMenuConfig();
   if(!Array.isArray(c.admin)) c.admin=Array.isArray(seedConfig.admin)?seedConfig.admin.map(x=>({...x})):DEFAULT_ADMIN_MENU.map(x=>({...x}));
-  // 平台規則中心標準化：保留既有目錄，只在缺少時補上出勤與巡邏規則。
+  // 保留平台規則中心必要入口，但不在一般讀取時重寫 staff/company 目錄。
   if(!c.admin.some(x=>String(x.id)==='platform-rules')) c.admin.push({...DEFAULT_ADMIN_MENU[0]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
-  c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // 目錄讀取只負責讀取已儲存設定，不在讀取時自動補入／覆寫班表或出勤項目。
-  // 平台目錄由總後台明確管理；公司有已儲存的 override 時使用該 override。
-  // 避免伺服器啟動或每次 API 讀取時，將管理員已調整的目錄重新改寫。
-  try{
-    const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
-    for(const t of tenantRows){
-      const key=String(t.id);
-      if(!c.tenants[key] || typeof c.tenants[key]!=='object' || Array.isArray(c.tenants[key])){
-        c.tenants[key]={};
-      }
-    }
-  }catch(e){
-    console.error('menu tenant config validation error',e);
-  }
+  c.tenants=(c.tenants&&typeof c.tenants==='object'&&!Array.isArray(c.tenants))?c.tenants:{};
+  // 重要：讀取設定不得自動標準化、覆蓋或刪除平台／企業目錄。
+  // 企業有 override 時保留原值；沒有 override 時由 resolveMenu 即時繼承平台設定。
+  // 舊資料遷移必須使用明確、可備份的遷移程序，不能在每次讀取 API 時執行。
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -490,7 +480,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   let items=c[scope]||[];
   if(c.tenants && tenantIdValue && Array.isArray(c.tenants[String(tenantIdValue)]?.[scope])) items=c.tenants[String(tenantIdValue)][scope];
   items=items.filter(x=>x.enabled!==false);
-  // 不在現場目錄 API 中強制插入班表項目；顯示哪些項目由已儲存的目錄設定決定。
+  // 不再強制插入班表項目；現場目錄以平台／企業已儲存的設定為準。
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectivePermissions(staffUser));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
