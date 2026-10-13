@@ -330,7 +330,10 @@ const PLATFORM_COMPANY_SCHEDULE_MENU = [
   {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}
 ];
 const PLATFORM_STAFF_ATTENDANCE_MENU = [
-  {id:'staff-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'staff-attendance',enabled:true}
+  {id:'staff-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'staff-attendance',enabled:true},
+  {id:'staff-attendance-checkin',parentId:'staff-attendance',icon:'↳',label:'出勤打卡',action:'staff-attendance-checkin',enabled:true},
+  {id:'staff-patrol',parentId:'staff-attendance',icon:'↳',label:'巡邏巡檢',action:'staff-patrol',enabled:true},
+  {id:'staff-patrol-records',parentId:'staff-attendance',icon:'↳',label:'巡邏紀錄',action:'staff-patrol-records',enabled:true}
 ];
 const PLATFORM_COMPANY_ATTENDANCE_MENU = [
   {id:'company-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'attendance',enabled:true},
@@ -342,7 +345,7 @@ const PLATFORM_COMPANY_ATTENDANCE_MENU = [
 function isAttendanceMenuItem(item, scope){
   const id=String(item?.id||'').trim(), action=String(item?.action||'').trim(), label=String(item?.label||'').trim();
   if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||['出勤與巡邏','出勤打卡','出勤紀錄','巡邏管理','巡邏紀錄'].includes(label);
-  return id==='staff-attendance'||action==='staff-attendance'||label==='出勤與巡邏';
+  return id==='staff-attendance'||id==='staff-attendance-checkin'||id==='staff-patrol'||id==='staff-patrol-records'||action==='staff-attendance'||action==='staff-attendance-checkin'||action==='staff-patrol'||action==='staff-patrol-records'||label==='出勤與巡邏'||label==='出勤打卡'||label==='巡邏巡檢'||label==='巡邏紀錄';
 }
 function normalizeAttendanceMenu(items, scope){
   const source=Array.isArray(items)?items:[];
@@ -383,11 +386,9 @@ function readMenuConfig(){
   if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // V5.9：平台預設與企業目錄必須完全隔離。
-  // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
-  // 之後平台管理員修改平台預設，不會回頭同步已存在公司的目錄。
-  // 「恢復平台預設」也不是刪掉企業設定改成即時繼承，而是把「目前平台預設」複製一份到該公司，
-  // 讓該公司從這一刻起再次獨立。
+  // 平台預設是所有未客製公司的目錄來源。
+  // 只有明確儲存企業客製設定時才建立 tenants[id][scope] 覆寫。
+  // 不可在讀取設定時自動替公司建立平台快照，否則平台目錄更新無法傳遞到現場工作台。
   try{
     // 平台預設是未客製企業的唯一來源；讀取設定時不得替每家公司自動建立快照。
     // 只有管理員透過企業客製化「儲存這家公司設定」時，才會建立 c.tenants[id][scope]。
@@ -415,7 +416,7 @@ function readMenuConfig(){
     }
     c._schedulePlatformVersion=3;
     if(menuChanged) writeMenuConfig(c);
-  }catch(e){ console.error('menu tenant snapshot migration error',e); }
+  }catch(e){ console.error('menu config normalization error',e); }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -596,16 +597,29 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
 });
 // ===== 動態工作目錄 =====
 app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
+  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma','no-cache');
+  res.set('Expires','0');
   const u=getUser(req);
   let items=resolveMenu('staff',tenantId(req),u);
   const role=scheduleGetProfile(tenantId(req),u.id)?.schedule_role||scheduleDefaultRole(u);
   if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
   res.json({scope:'staff',items});
 });
-app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
+app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{
+  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma','no-cache');
+  res.set('Expires','0');
+  res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))});
+});
 // 公司後台編輯現場人員權限時，必須讀取同一家公司的「社區駐點」目錄。
 // 不可從公司登入工作階段呼叫受 requireStaff 保護的 /api/staff/menu-config，否則會落入前端硬編碼備援清單。
-app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null)}));
+app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>{
+  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma','no-cache');
+  res.set('Expires','0');
+  res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null)});
+});
 app.get('/admin', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/admin.html', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
