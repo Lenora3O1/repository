@@ -114,13 +114,13 @@
     try{
       const menuUrl=scope==='company'?'/api/company/menu-config':'/api/staff/menu-config';
       if(scope==='staff'){
-        const [mr,pr]=await Promise.all([fetch(menuUrl,{credentials:'same-origin'}),fetch('/api/staff/dashboard-pins',{credentials:'same-origin'})]);
+        const [mr,pr]=await Promise.all([fetch(menuUrl,{credentials:'same-origin',cache:'no-store'}),fetch('/api/staff/dashboard-pins',{credentials:'same-origin',cache:'no-store'})]);
         if(!mr.ok)return;
         const md=await mr.json(); const pd=pr.ok?await pr.json():{pins:[]};
         const ids=new Set((Array.isArray(pd.pins)?pd.pins:[]).map(x=>String(x.menu_id)));
         renderItems(Array.isArray(md.items)?md.items:[],ids);
       }else{
-        const r=await fetch(menuUrl,{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();renderItems(Array.isArray(d.items)?d.items:[]);
+        const r=await fetch(menuUrl,{credentials:'same-origin',cache:'no-store'});if(!r.ok)return;const d=await r.json();renderItems(Array.isArray(d.items)?d.items:[]);
       }
     }catch(e){console.warn('Dynamic menu load skipped',e)}
   }
