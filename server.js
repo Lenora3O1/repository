@@ -383,38 +383,39 @@ function readMenuConfig(){
   if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // 平台預設是公司的繼承來源；只有明確設定且與平台預設不同的目錄才視為企業客製覆寫。
-  // 不再替每家公司自動建立快照，避免平台預設更新後現場人員仍讀取舊快照。
+  // V5.9：平台預設與企業目錄必須完全隔離。
+  // 每家公司都保存自己的目錄快照；建立公司時／第一次升級既有公司時複製當下平台預設。
+  // 之後平台管理員修改平台預設，不會回頭同步已存在公司的目錄。
+  // 「恢復平台預設」也不是刪掉企業設定改成即時繼承，而是把「目前平台預設」複製一份到該公司，
+  // 讓該公司從這一刻起再次獨立。
   try{
-    const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
-    let changed=false;
-    for(const t of tenantRows){
-      const key=String(t.id);
-      if(!c.tenants[key] || typeof c.tenants[key]!=='object') { c.tenants[key]={}; changed=true; }
-    }
+    // 平台預設是未客製企業的唯一來源；讀取設定時不得替每家公司自動建立快照。
+    // 只有管理員透過企業客製化「儲存這家公司設定」時，才會建立 c.tenants[id][scope]。
+    // 否則平台目錄更新後，既有公司也必須能繼續繼承最新平台預設。
     const beforeStaff=JSON.stringify(c.staff), beforeCompany=JSON.stringify(c.company);
     c.staff=normalizeScheduleMenu(c.staff,'staff');
     c.company=normalizeScheduleMenu(c.company,'company');
     c.staff=normalizeAttendanceMenu(c.staff,'staff');
     c.company=normalizeAttendanceMenu(c.company,'company');
     let menuChanged=beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company);
-    for(const t of tenantRows){
-      const key=String(t.id), tenantConfig=c.tenants[key]||{};
-      for(const scope of ['staff','company']){
-        if(!Array.isArray(tenantConfig[scope])) continue; // 沒有覆寫：持續繼承最新平台預設
-        const next=normalizeAttendanceMenu(normalizeScheduleMenu(tenantConfig[scope],scope),scope);
-        if(JSON.stringify(tenantConfig[scope])!==JSON.stringify(next)) menuChanged=true;
-        // 舊版本建立的快照若與目前平台預設相同，可安全轉成繼承；不同則保留客製內容。
-        if(JSON.stringify(next)===JSON.stringify(c[scope])){
-          delete tenantConfig[scope];
-          menuChanged=true;
-        }else tenantConfig[scope]=next;
+
+    // 只標準化明確存在的企業覆寫；絕不把平台預設複製成企業覆寫。
+    for(const [key,tenantConfig] of Object.entries(c.tenants)){
+      if(!tenantConfig || typeof tenantConfig!=='object') continue;
+      if(Array.isArray(tenantConfig.staff)){
+        const next=normalizeAttendanceMenu(normalizeScheduleMenu(tenantConfig.staff,'staff'),'staff');
+        if(JSON.stringify(tenantConfig.staff)!==JSON.stringify(next)) menuChanged=true;
+        tenantConfig.staff=next;
       }
-      c.tenants[key]=tenantConfig;
+      if(Array.isArray(tenantConfig.company)){
+        const next=normalizeAttendanceMenu(normalizeScheduleMenu(tenantConfig.company,'company'),'company');
+        if(JSON.stringify(tenantConfig.company)!==JSON.stringify(next)) menuChanged=true;
+        tenantConfig.company=next;
+      }
     }
-    c._schedulePlatformVersion=2;
-    if(changed||menuChanged) writeMenuConfig(c);
-  }catch(e){ console.error('menu tenant inheritance migration error',e); }
+    c._schedulePlatformVersion=3;
+    if(menuChanged) writeMenuConfig(c);
+  }catch(e){ console.error('menu tenant snapshot migration error',e); }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -602,6 +603,9 @@ app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   res.json({scope:'staff',items});
 });
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))}));
+// 公司後台編輯現場人員權限時，必須讀取同一家公司的「社區駐點」目錄。
+// 不可從公司登入工作階段呼叫受 requireStaff 保護的 /api/staff/menu-config，否則會落入前端硬編碼備援清單。
+app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null)}));
 app.get('/admin', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/admin.html', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
@@ -635,11 +639,13 @@ app.post('/api/admin/menu-config/reset',requireSuperAdmin,(req,res)=>{
     const tenant=db.prepare('SELECT id FROM tenants WHERE id=?').get(tid);
     if(!tenant)return res.status(404).json({error:'找不到公司'});
     c.tenants=c.tenants||{};
-    c.tenants[String(tid)]=c.tenants[String(tid)]||{};
-    // 恢復平台預設＝移除該公司的覆寫，之後持續繼承最新平台預設。
-    delete c.tenants[String(tid)][scope];
+    if(c.tenants[String(tid)] && typeof c.tenants[String(tid)]==='object'){
+      // 恢復平台預設＝移除該公司此工作空間的覆寫，讓 resolveMenu 即時繼承平台預設。
+      delete c.tenants[String(tid)][scope];
+      if(!Object.keys(c.tenants[String(tid)]).length) delete c.tenants[String(tid)];
+    }
     writeMenuConfig(c);
-    res.json({success:true,items:(c[scope]||[]).map(x=>({...x}))});
+    res.json({success:true,inherited:true,items:(c[scope]||[]).map(x=>({...x}))});
   }catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
 });
 
