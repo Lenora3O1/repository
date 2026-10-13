@@ -345,7 +345,7 @@ const PLATFORM_COMPANY_ATTENDANCE_MENU = [
 function isAttendanceMenuItem(item, scope){
   const id=String(item?.id||'').trim(), action=String(item?.action||'').trim(), label=String(item?.label||'').trim();
   if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||['出勤與巡邏','出勤打卡','出勤紀錄','巡邏管理','巡邏紀錄'].includes(label);
-  return id==='staff-attendance'||/^staff-(?:attendance|patrol)(?:-|$)/.test(id)||/^staff-(?:attendance|patrol)/.test(action)||['出勤與巡邏','出勤打卡','巡邏巡檢','巡邏紀錄'].includes(label);
+  return id==='staff-attendance'||/^staff-(?:attendance|patrol)(?:-|$)/.test(id)||['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records'].includes(action)||['出勤與巡邏','出勤打卡','巡邏巡檢','巡邏紀錄'].includes(label);
 }
 function normalizeAttendanceMenu(items, scope){
   const source=Array.isArray(items)?items:[];
@@ -386,34 +386,34 @@ function readMenuConfig(){
   if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
-  // V2.8：未客製的公司繼承平台預設；不要在讀取設定時自動建立公司快照。
-  // 與平台目錄完全相同的舊快照可安全移除；內容不同的覆寫保留，避免抹除客製設定。
+  // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
+  // explicit array for a scope, resolveMenu() inherits the current platform default.
+  // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
   try{
+    const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
+    let changed=false;
+    for(const t of tenantRows){
+      const key=String(t.id);
+      if(!c.tenants[key] || typeof c.tenants[key]!=='object'){
+        c.tenants[key]={};
+        changed=true;
+      }
+      for(const scope of ['staff','company']){
+        // Only normalize explicit overrides. Missing override means inherit platform default.
+        if(Array.isArray(c.tenants[key][scope])){
+          const normalized=normalizeAttendanceMenu(normalizeScheduleMenu(c.tenants[key][scope],scope),scope);
+          if(JSON.stringify(c.tenants[key][scope])!==JSON.stringify(normalized)) changed=true;
+          c.tenants[key][scope]=normalized;
+        }
+      }
+    }
     const beforeStaff=JSON.stringify(c.staff), beforeCompany=JSON.stringify(c.company);
     c.staff=normalizeAttendanceMenu(normalizeScheduleMenu(c.staff,'staff'),'staff');
     c.company=normalizeAttendanceMenu(normalizeScheduleMenu(c.company,'company'),'company');
-    let changed=beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company);
-    const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
-    for(const t of tenantRows){
-      const key=String(t.id), overrides=c.tenants[key];
-      if(!overrides || typeof overrides!=='object') continue;
-      for(const scope of ['staff','company']){
-        if(!Array.isArray(overrides[scope])) continue;
-        const normalized=normalizeAttendanceMenu(normalizeScheduleMenu(overrides[scope],scope),scope);
-        const platform=scope==='staff'?c.staff:c.company;
-        if(JSON.stringify(normalized)===JSON.stringify(platform)){
-          delete overrides[scope];
-          changed=true;
-        }else if(JSON.stringify(normalized)!==JSON.stringify(overrides[scope])){
-          overrides[scope]=normalized;
-          changed=true;
-        }
-      }
-      if(!Object.keys(overrides).length) delete c.tenants[key];
-    }
-    c._schedulePlatformVersion=3;
+    if(beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company)) changed=true;
+    c._menuInheritanceVersion=1;
     if(changed) writeMenuConfig(c);
-  }catch(e){ console.error('menu tenant inheritance migration error',e); }
+  }catch(e){ console.error('menu tenant override normalization error',e); }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -605,16 +605,8 @@ app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
   res.json({scope:'staff',items});
 });
-app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{
-  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.set('Pragma','no-cache'); res.set('Expires','0');
-  res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))});
-});
-app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>{
-  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.set('Pragma','no-cache'); res.set('Expires','0');
-  res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null)});
-});
+app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))});});
+app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null)});});
 app.get('/admin', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/admin.html', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
@@ -649,11 +641,10 @@ app.post('/api/admin/menu-config/reset',requireSuperAdmin,(req,res)=>{
     if(!tenant)return res.status(404).json({error:'找不到公司'});
     c.tenants=c.tenants||{};
     c.tenants[String(tid)]=c.tenants[String(tid)]||{};
-    // 恢復平台預設＝移除該公司的此工作空間覆寫，讓它繼承平台最新預設。
+    // 恢復平台預設＝移除該公司該 scope 的覆寫，之後直接繼承最新平台預設。
     delete c.tenants[String(tid)][scope];
-    if(!Object.keys(c.tenants[String(tid)]).length) delete c.tenants[String(tid)];
     writeMenuConfig(c);
-    res.json({success:true,items:c[scope]||[]});
+    res.json({success:true,items:(c[scope]||[])});
   }catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
 });
 
