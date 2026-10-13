@@ -10,7 +10,7 @@ async function loadPermissionCatalog(){
   try{
     const companyMenu=await api('/api/company/menu-config');
     let site=fallbackSite;
-    try{const siteMenu=await api('/api/staff/menu-config');if(Array.isArray(siteMenu.items)&&siteMenu.items.length)site=siteMenu.items;}catch(e){}
+    try{const siteMenu=await api('/api/company/site-menu-config');if(Array.isArray(siteMenu.items)&&siteMenu.items.length)site=siteMenu.items;}catch(e){}
     return {company:Array.isArray(companyMenu.items)?companyMenu.items:[],site};
   }catch(e){
     return {company:[],site:fallbackSite};
