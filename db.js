@@ -103,7 +103,20 @@ addColumnIfMissing('templates', 'tenant_id', "INTEGER");
     created_at TEXT NOT NULL
   )`);
 
-// V4.6：員編改為「公司內唯一」，不同公司可以使用相同員編（例如 A001）。
+  // V4.7：舊版正式資料庫可能已建立資源表，但缺少 name 欄位；
+  // CREATE TABLE IF NOT EXISTS 不會替既有資料表補欄位，因此啟動時安全補欄並以原始檔名回填。
+  for (const table of ['platform_resources','company_resources']) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c=>String(c.name));
+    if (cols.length && !cols.includes('name')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN name TEXT`);
+      const nowCols = db.prepare(`PRAGMA table_info(${table})`).all().map(c=>String(c.name));
+      if (nowCols.includes('original_name')) {
+        db.exec(`UPDATE ${table} SET name=original_name WHERE name IS NULL OR trim(name)=''`);
+      }
+    }
+  }
+
+  // V4.6：員編改為「公司內唯一」，不同公司可以使用相同員編（例如 A001）。
 // 舊版曾在 employee_id 上建立全系統 UNIQUE，這裡安全地重建 staff_users / staff_communities 後改用複合唯一索引。
 function migrateEmployeeIdUniqueness() {
   const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='staff_users'").get()?.sql || '';
