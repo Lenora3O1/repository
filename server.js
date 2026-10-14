@@ -502,13 +502,29 @@ function menuPermissionKey(item,scope='staff'){
   for(const [key,terms] of rules) if(terms.some(t=>raw.includes(String(t).toLowerCase()))) return key;
   return null;
 }
+function effectiveMenuPermissions(staffUser,scope){
+  // 工作項目勾選值儲存在 staff_work_assignments；舊版只讀 staff_users.permission_json，
+  // 導致人員設定畫面已勾選、工作台卻仍依舊權限過濾。優先讀取該工作空間的指派權限。
+  if(!staffUser) return [];
+  let assigned=[];
+  try{
+    if(scope==='company'){
+      const a=getCompanyAssignment(staffUser);
+      assigned=Array.isArray(a?.permissions)?a.permissions.map(String):[];
+    }else{
+      assigned=getSiteAssignments(staffUser).flatMap(a=>Array.isArray(a.permissions)?a.permissions.map(String):[]);
+    }
+  }catch(e){ console.warn('menu assignment permission read error:',e.message); }
+  assigned=[...new Set(assigned.filter(Boolean))];
+  return assigned.length?assigned:effectivePermissions(staffUser);
+}
 function resolveMenu(scope,tenantIdValue,staffUser=null){
   const c=readMenuConfig();
   let items=c[scope]||[];
   if(c.tenants && tenantIdValue && Array.isArray(c.tenants[String(tenantIdValue)]?.[scope])) items=c.tenants[String(tenantIdValue)][scope];
   items=items.filter(x=>x.enabled!==false);
   if(staffUser && staffUser.role!=='company_admin'){
-    const selected=new Set(effectivePermissions(staffUser));
+    const selected=new Set(effectiveMenuPermissions(staffUser,scope));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
     items=items.filter(item=>{
       const key=menuPermissionKey(item,scope);
