@@ -530,15 +530,22 @@ function mergeTenantMenuWithPlatform(platformItems,overrideItems){
   const base=Array.isArray(platformItems)?platformItems:[];
   if(!Array.isArray(overrideItems)) return base;
   const overridesById=new Map(overrideItems.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));
+  const semanticKey=x=>`${String(x?.parentId??'') }::${String(x?.action??'')}`;
+  const overridesBySemantic=new Map();
+  for(const x of overrideItems){
+    if(x&&x.id!=null&&x.action) overridesBySemantic.set(semanticKey(x),x);
+  }
+  const usedOverrideIds=new Set();
   const baseIds=new Set(base.filter(x=>x&&x.id!=null).map(x=>String(x.id)));
-  // 平台新增的項目不會被舊企業快照整份擋掉；
-  // 同 ID 的企業自訂項目仍優先保留，平台沒有的企業自訂項目也保留。
   const merged=base.map(item=>{
-    const custom=overridesById.get(String(item.id));
-    return custom?{...item,...custom}:item;
+    let custom=overridesById.get(String(item.id));
+    // 舊設定偶爾用底線、平台則用連字號；以相同父目錄＋action 配對，避免重複顯示同一項。
+    if(!custom&&item?.action) custom=overridesBySemantic.get(semanticKey(item));
+    if(custom&&custom.id!=null) usedOverrideIds.add(String(custom.id));
+    return custom?{...item,...custom,id:item.id}:item;
   });
   for(const item of overrideItems){
-    if(item&&item.id!=null&&!baseIds.has(String(item.id))) merged.push(item);
+    if(item&&item.id!=null&&!baseIds.has(String(item.id))&&!usedOverrideIds.has(String(item.id))) merged.push(item);
   }
   return merged;
 }
