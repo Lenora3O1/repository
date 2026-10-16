@@ -526,17 +526,28 @@ function normalizeMenuForCompare(items){
     sortOrder:Number(x?.sortOrder??x?.sort_order??0)
   })).sort((a,b)=>a.id.localeCompare(b.id));
 }
+function mergeTenantMenuWithPlatform(platformItems,overrideItems){
+  const base=Array.isArray(platformItems)?platformItems:[];
+  if(!Array.isArray(overrideItems)) return base;
+  const overridesById=new Map(overrideItems.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));
+  const baseIds=new Set(base.filter(x=>x&&x.id!=null).map(x=>String(x.id)));
+  // 平台新增的項目不會被舊企業快照整份擋掉；
+  // 同 ID 的企業自訂項目仍優先保留，平台沒有的企業自訂項目也保留。
+  const merged=base.map(item=>{
+    const custom=overridesById.get(String(item.id));
+    return custom?{...item,...custom}:item;
+  });
+  for(const item of overrideItems){
+    if(item&&item.id!=null&&!baseIds.has(String(item.id))) merged.push(item);
+  }
+  return merged;
+}
 function resolveMenu(scope,tenantIdValue,staffUser=null){
   const c=readMenuConfig();
   const platformItems=Array.isArray(c[scope])?c[scope]:[];
-  let items=platformItems;
   const override=c.tenants && tenantIdValue ? c.tenants[String(tenantIdValue)]?.[scope] : null;
-  if(Array.isArray(override)){
-    // 若企業覆寫只是平台預設的完整副本，就直接以平台預設作為來源；
-    // 真正不同的企業客製內容仍保留，不會自動覆蓋。
-    const sameAsPlatform=JSON.stringify(normalizeMenuForCompare(override))===JSON.stringify(normalizeMenuForCompare(platformItems));
-    items=sameAsPlatform?platformItems:override;
-  }
+  // 以平台預設作為基底合併企業覆寫，避免舊快照漏掉後續新增的目錄項目。
+  let items=mergeTenantMenuWithPlatform(platformItems,override);
   items=items.filter(x=>x.enabled!==false);
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectiveMenuPermissions(staffUser,scope));
