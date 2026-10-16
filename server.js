@@ -697,6 +697,24 @@ app.post('/api/admin/menu-config/reset',requireSuperAdmin,(req,res)=>{
   }catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
 });
 
+app.post('/api/admin/menu-config/reset-all',requireSuperAdmin,(req,res)=>{
+  try{
+    const tid=req.body?.tenant_id?Number(req.body.tenant_id):null;
+    if(!tid)return res.status(400).json({error:'請指定公司'});
+    const tenant=db.prepare('SELECT id FROM tenants WHERE id=?').get(tid);
+    if(!tenant)return res.status(404).json({error:'找不到公司'});
+    const c=readMenuConfig();
+    if(c.tenants&&c.tenants[String(tid)]){
+      delete c.tenants[String(tid)].company;
+      delete c.tenants[String(tid)].staff;
+      if(!Object.keys(c.tenants[String(tid)]).length) delete c.tenants[String(tid)];
+      writeMenuConfig(c);
+    }
+    res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.json({success:true,tenant_id:tid,reset_scopes:['company','staff'],message:'已移除該公司內勤與駐點目錄覆寫，兩者現在直接繼承平台預設。'});
+  }catch(e){res.status(400).json({error:e.message||'清除目錄覆寫失敗'});}
+});
+
 
 // ===== 個人工作台釘選 =====
 function getStaffMenuItem(req, menuId){
