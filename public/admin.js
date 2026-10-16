@@ -290,7 +290,7 @@ function renderCustomization(){
   const title=isPlatform?'🌐 平台標準工作目錄':'🧩 企業客製化工作目錄';
   const intro=isPlatform?'這裡是整個平台的「基本標準目錄」。所有沒有另外客製的企業都會使用這套目錄；企業客製化不會反過來修改這裡。':'這裡只調整指定企業的工作目錄。只有該企業會受到影響，不會改變其他企業。';
   const status=isPlatform?'目前正在編輯：平台預設｜這套目錄會作為所有企業的基準。':`目前：${escapeHtml(t?.name||'尚未選擇公司')}｜${!hasOverride?'目前沿用平台預設目錄':effectiveMatchesPlatform?'目前目錄內容與平台預設一致（舊覆寫仍存在）':'已使用企業客製目錄'}`;
-  el.innerHTML=`<div class="panel"><div class="section-title">${title}</div><p>${intro}</p><div class="editor-grid"><div><label>設定對象</label><select id="customTargetSelect">${targetOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">${status}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">母目錄與子目錄會自動整理成樹狀結構。新增子目錄後會直接掛在母目錄下方；點「＋／−」可展開或收合。上下箭頭只會調整同一層級的順序。</p><div class="custom-menu-tree">${rootRows||'<div class="empty">目前沒有目錄項目。</div>'}</div><div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增母目錄</button>${isPlatform?'':'<button class="secondary" onclick="resetCustomMenu()">↩ 這家公司恢復平台預設</button>'}<button onclick="saveCustomMenu()">💾 ${isPlatform?'儲存平台預設':'儲存這家公司設定'}</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 權限分流說明</div><div class="guide-grid"><div><strong>🏢 內勤</strong><br>公司財務、會計、總務、人事、公司資源等內勤工作。</div><div><strong>🏠 駐點</strong><br>代辦、工作日誌、管理委員會、住戶、廠商、交接等社區工作。</div><div><strong>🏢＋🏠 內勤＋兼任駐點</strong><br>同一人可同時擁有兩個工作空間的可處理項目。</div><div><strong>🧩 企業客製</strong><br>企業若有特殊需求，可在「設定對象」選擇公司後獨立調整，不影響其他企業。</div></div></div>`;
+  el.innerHTML=`<div class="panel"><div class="section-title">${title}</div><p>${intro}</p><div class="editor-grid"><div><label>設定對象</label><select id="customTargetSelect">${targetOptions}</select></div><div><label>工作空間</label><select id="customScopeSelect">${scopeOptions}</select></div></div><p class="hint">${status}</p></div><div class="panel"><div class="section-title">📂 ${c.scope==='company'?'公司內勤':'社區駐點'}工作目錄</div><p class="hint">母目錄與子目錄會自動整理成樹狀結構。新增子目錄後會直接掛在母目錄下方；點「＋／−」可展開或收合。上下箭頭只會調整同一層級的順序。</p><div class="custom-menu-tree">${rootRows||'<div class="empty">目前沒有目錄項目。</div>'}</div><div class="form-nav"><button class="secondary" onclick="addCustomMenu()">＋ 新增母目錄</button>${isPlatform?'':'<button class="secondary" onclick="resetCustomMenu()">↩ 此工作空間恢復平台預設</button><button class="secondary" onclick="resetAllCustomMenus()">⚠️ 清除這家公司兩份舊目錄覆寫</button>'}<button onclick="saveCustomMenu()">💾 ${isPlatform?'儲存平台預設':'儲存這家公司設定'}</button><span id="customSaveMsg"></span></div></div><div class="panel"><div class="section-title">🔐 權限分流說明</div><div class="guide-grid"><div><strong>🏢 內勤</strong><br>公司財務、會計、總務、人事、公司資源等內勤工作。</div><div><strong>🏠 駐點</strong><br>代辦、工作日誌、管理委員會、住戶、廠商、交接等社區工作。</div><div><strong>🏢＋🏠 內勤＋兼任駐點</strong><br>同一人可同時擁有兩個工作空間的可處理項目。</div><div><strong>🧩 企業客製</strong><br>企業若有特殊需求，可在「設定對象」選擇公司後獨立調整，不影響其他企業。</div></div></div>`;
   $('customTargetSelect').addEventListener('change',async e=>{const v=e.target.value;if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}c.openIds=[];await loadCustomization();renderCustomization();});
   $('customScopeSelect').addEventListener('change',async e=>{c.scope=e.target.value;c.openIds=[];await loadCustomization();renderCustomization();});
 }
@@ -450,6 +450,20 @@ async function saveCustomMenu(){
   }catch(err){$('customSaveMsg').innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}
 }
 async function resetCustomMenu(){if(!confirm('確定移除這家公司目前工作空間的客製目錄覆寫，改為直接繼承平台預設嗎？之後平台預設更新時，這家公司也會同步更新。此操作只影響所選工作目錄，不會刪除人員、住戶名冊或其他業務資料。'))return;try{await api('/api/admin/menu-config/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.customization.scope,tenant_id:state.customization.tenantId})});await loadCustomization();renderCustomization();}catch(err){alert(err.message)}}
+async function resetAllCustomMenus(){
+  const tenantId=state.customization.tenantId;
+  const tenant=state.tenants.find(x=>Number(x.id)===Number(tenantId));
+  if(!tenantId||!tenant){alert('請先選擇要清理的公司。');return;}
+  const ok=confirm(`⚠️ 最後確認：要清除「${tenant.name}」的公司內勤與社區駐點兩份舊目錄覆寫嗎？\n\n這會讓兩個工作空間改為使用平台預設目錄。若有自訂項目，這些自訂目錄設定會被移除；不會刪除員工、住戶、社區、班表或其他業務資料。此操作無法從此按鈕復原，請先確認已備份 /data/menu-config.json。`);
+  if(!ok)return;
+  try{
+    await api('/api/admin/menu-config/reset-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant_id:tenantId})});
+    state.customization.openIds=[];
+    await loadCustomization();
+    renderCustomization();
+    alert('已清除這家公司的兩份舊目錄覆寫。請再切換到另一個工作空間確認。');
+  }catch(err){alert(err.message||'清除目錄覆寫失敗');}
+}
 async function loadMessageAudit(){
   if(!state.tenants.length) state.tenants=await api('/api/admin/tenants');
   const active=state.messageAudit.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
