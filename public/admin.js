@@ -5,7 +5,7 @@ async function checkSession(){try{const r=await api('/api/admin/session');if(r.i
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
 function showMain(){$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
-for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}});
+for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit','moduleTest'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}if(b.dataset.tab==='moduleTest'){renderModuleTest();}});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
   for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料…</div></div>';}
@@ -15,6 +15,43 @@ async function loadAll(){
       console.error('Admin load failed:',key,err);
     }
   }
+}
+const moduleTestCatalog=[
+ {group:'社區駐點／現場人員',scope:'staff',modules:[
+  ['代辦事項','todo','已有工作台入口；需以現場人員登入驗證資料操作。'],
+  ['工作日誌','work-journal','已有工作台入口；依人員及案場權限顯示。'],
+  ['財務報表','finance','入口存在；需確認各子功能權限。'],
+  ['管理委員會','committee','入口存在；需以測試社區驗證資料。'],
+  ['住戶名冊','residents','目前既有功能；測試時請避免修改正式住戶資料。'],
+  ['廠商聯繫','vendors','入口存在；需驗證廠商資料及子目錄。'],
+  ['交接清冊','handover','含經理／秘書交接項目。'],
+  ['公司資源','company-resources','需確認資源清單及下載。'],
+  ['案場 SOP','sop','含行政、勤務等子項目。'],
+  ['班表','staff-schedule','含排班、請假／代班及加班入口。'],
+  ['出勤與巡邏','attendance','需確認 GPS、QR 與離線流程。']
+ ]},
+ {group:'公司內勤',scope:'company',modules:[
+  ['公司管理首頁','overview','公司端首頁與摘要。'],
+  ['公司人員管理','manage-staff','人員與工作指派；請勿用正式帳號做破壞性測試。'],
+  ['社區管理','manage-communities','案場與社區資料。'],
+  ['交接清冊紀錄','view-submissions','查看已提交紀錄。'],
+  ['公司制式文件','manage-templates','公司文件範本。'],
+  ['工作日誌管理','work-journal','公司端日誌管理。'],
+  ['會計／公司財務','finance','財務功能入口。'],
+  ['總務／公司資源','company-resources','資源管理入口。'],
+  ['案場 SOP 管理','sop','SOP 管理入口。'],
+  ['班表管理','schedule','含月班表、人員班表、社區班表、換班、請假與加班。']
+ ]}
+];
+function renderModuleTest(){
+ const el=$('tab-moduleTest');if(!el)return;
+ el.innerHTML=`<div class="panel"><div class="section-title">🧪 總後台模組測試中心</div><p>這裡先盤點程式目前已存在的主要工作台模組，並提供入口快速開啟對應工作台。模組清單依現有目錄與路由整理，不代表每一項都已完成驗收。</p><div class="msg">⚠️ 第一階段採用既有正式工作台入口，不會模擬或冒用公司／現場身分。開啟後需使用該工作台帳號登入；建議先用測試帳號及測試資料驗證。</div></div>
+ <div class="panel"><div class="section-title">📋 現有模組盤點</div><div class="editor-grid">${moduleTestCatalog.map(g=>`<div class="panel"><div class="section-title">${escapeHtml(g.group)}（${g.modules.length} 項）</div><div class="table-wrap"><table><thead><tr><th>模組</th><th>目前盤點</th><th>測試入口</th></tr></thead><tbody>${g.modules.map(m=>`<tr><td><strong>${escapeHtml(m[0])}</strong><br><span class="muted">${escapeHtml(m[1])}</span></td><td>${escapeHtml(m[2])}</td><td><button class="secondary" onclick="openModuleWorkspace('${g.scope}')">開啟${g.scope==='company'?'公司內勤':'現場人員'}工作台</button></td></tr>`).join('')}</tbody></table></div></div>`).join('')}</div></div>
+ <div class="panel"><div class="section-title">🧭 驗收建議</div><ol><li>先檢查左側目錄與母／子目錄是否符合平台預設。</li><li>用測試帳號確認功能能否開啟、資料能否正常載入。</li><li>需要測試新增／修改／刪除時，只使用測試資料，避免影響正式住戶、員工及班表。</li><li>若工作台登入後缺少模組，記錄「工作台身分、模組名稱、畫面」再回總後台追查。</li></ol></div>`;
+}
+function openModuleWorkspace(scope){
+ const path=scope==='company'?'/company.html':'/index.html';
+ window.open(path,'_blank','noopener');
 }
 async function loadTenants(){state.tenants=await api('/api/admin/tenants')}
 async function loadSubmissions(){const r=await api('/api/admin/submissions');state.submissions=r.submissions}
