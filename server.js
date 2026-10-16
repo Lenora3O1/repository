@@ -518,10 +518,25 @@ function effectiveMenuPermissions(staffUser,scope){
   assigned=[...new Set(assigned.filter(Boolean))];
   return assigned.length?assigned:effectivePermissions(staffUser);
 }
+function normalizeMenuForCompare(items){
+  return (Array.isArray(items)?items:[]).map(x=>({
+    id:String(x?.id??''),parentId:x?.parentId==null?null:String(x.parentId),
+    icon:String(x?.icon??''),label:String(x?.label??''),action:String(x?.action??''),
+    enabled:x?.enabled!==false,
+    sortOrder:Number(x?.sortOrder??x?.sort_order??0)
+  })).sort((a,b)=>a.id.localeCompare(b.id));
+}
 function resolveMenu(scope,tenantIdValue,staffUser=null){
   const c=readMenuConfig();
-  let items=c[scope]||[];
-  if(c.tenants && tenantIdValue && Array.isArray(c.tenants[String(tenantIdValue)]?.[scope])) items=c.tenants[String(tenantIdValue)][scope];
+  const platformItems=Array.isArray(c[scope])?c[scope]:[];
+  let items=platformItems;
+  const override=c.tenants && tenantIdValue ? c.tenants[String(tenantIdValue)]?.[scope] : null;
+  if(Array.isArray(override)){
+    // 若企業覆寫只是平台預設的完整副本，就直接以平台預設作為來源；
+    // 真正不同的企業客製內容仍保留，不會自動覆蓋。
+    const sameAsPlatform=JSON.stringify(normalizeMenuForCompare(override))===JSON.stringify(normalizeMenuForCompare(platformItems));
+    items=sameAsPlatform?platformItems:override;
+  }
   items=items.filter(x=>x.enabled!==false);
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectiveMenuPermissions(staffUser,scope));
