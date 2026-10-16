@@ -265,9 +265,18 @@ function renderCustomization(){
   const mergeMenu=(base,custom)=>{
     if(!Array.isArray(custom))return base||[];
     const byId=new Map(custom.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));
+    const semanticKey=x=>`${String(x?.parentId??'')}::${String(x?.action??'')}`;
+    const bySemantic=new Map();
+    for(const x of custom)if(x&&x.id!=null&&x.action)bySemantic.set(semanticKey(x),x);
+    const used=new Set();
     const baseIds=new Set((base||[]).filter(x=>x&&x.id!=null).map(x=>String(x.id)));
-    const merged=(base||[]).map(x=>byId.has(String(x.id))?{...x,...byId.get(String(x.id))}:x);
-    for(const x of custom)if(x&&x.id!=null&&!baseIds.has(String(x.id)))merged.push(x);
+    const merged=(base||[]).map(x=>{
+      let item=byId.get(String(x.id));
+      if(!item&&x?.action)item=bySemantic.get(semanticKey(x));
+      if(item&&item.id!=null)used.add(String(item.id));
+      return item?{...x,...item,id:x.id}:x;
+    });
+    for(const x of custom)if(x&&x.id!=null&&!baseIds.has(String(x.id))&&!used.has(String(x.id)))merged.push(x);
     return merged;
   };
   const canonicalMenu=items=>JSON.stringify((items||[]).map(x=>({
