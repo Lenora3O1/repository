@@ -18,41 +18,45 @@ async function loadAll(){
 }
 const moduleTestCatalog=[
  {group:'社區駐點／現場人員',scope:'staff',modules:[
-  ['代辦事項','todo','已有工作台入口；需以現場人員登入驗證資料操作。'],
-  ['工作日誌','work-journal','已有工作台入口；依人員及案場權限顯示。'],
-  ['財務報表','finance','入口存在；需確認各子功能權限。'],
-  ['管理委員會','committee','入口存在；需以測試社區驗證資料。'],
-  ['住戶名冊','residents','目前既有功能；測試時請避免修改正式住戶資料。'],
-  ['廠商聯繫','vendors','入口存在；需驗證廠商資料及子目錄。'],
-  ['交接清冊','handover','含經理／秘書交接項目。'],
-  ['公司資源','company-resources','需確認資源清單及下載。'],
-  ['案場 SOP','sop','含行政、勤務等子項目。'],
-  ['班表','staff-schedule','含排班、請假／代班及加班入口。'],
-  ['出勤與巡邏','attendance','需確認 GPS、QR 與離線流程。']
+  ['代辦事項','todo','待辦清單、處理狀態與工作提醒'],
+  ['工作日誌','work-journal','每日工作紀錄與查詢'],
+  ['財務報表','finance','收入、支出與財務查詢'],
+  ['管理委員會','committee','委員名冊、會議與區權會'],
+  ['住戶名冊','residents','住戶聯絡資料與名冊分類'],
+  ['廠商聯繫','vendors','簽約保養、一般及特約廠商'],
+  ['交接清冊','handover','經理／秘書交接清冊'],
+  ['公司資源','company-resources','公告、文件與公司資源'],
+  ['案場 SOP','sop','行政、勤務、公司與案場注意事項'],
+  ['班表','staff-schedule','班表、請假／代班與加班'],
+  ['出勤與巡邏','attendance','出勤紀錄、GPS 與 QR 巡邏']
  ]},
  {group:'公司內勤',scope:'company',modules:[
-  ['公司管理首頁','overview','公司端首頁與摘要。'],
-  ['公司人員管理','manage-staff','人員與工作指派；請勿用正式帳號做破壞性測試。'],
-  ['社區管理','manage-communities','案場與社區資料。'],
-  ['交接清冊紀錄','view-submissions','查看已提交紀錄。'],
-  ['公司制式文件','manage-templates','公司文件範本。'],
-  ['工作日誌管理','work-journal','公司端日誌管理。'],
-  ['會計／公司財務','finance','財務功能入口。'],
-  ['總務／公司資源','company-resources','資源管理入口。'],
-  ['案場 SOP 管理','sop','SOP 管理入口。'],
-  ['班表管理','schedule','含月班表、人員班表、社區班表、換班、請假與加班。']
+  ['公司管理首頁','overview','公司資訊與管理摘要'],
+  ['公司人員管理','manage-staff','人員帳號、角色與權限'],
+  ['社區管理','manage-communities','案場與社區設定'],
+  ['交接清冊紀錄','view-submissions','已提交交接紀錄'],
+  ['公司制式文件','manage-templates','公司文件範本管理'],
+  ['工作日誌管理','work-journal','工作日誌查詢與管理'],
+  ['會計／公司財務','finance','公司財務相關功能'],
+  ['總務／公司資源','company-resources','公司資源與文件'],
+  ['案場 SOP 管理','sop','SOP 內容維護'],
+  ['班表管理','schedule','月班表、人員／社區班表及異動']
  ]}
 ];
+let modulePreviewSelection={scope:'staff',action:'todo',label:'代辦事項'};
 function renderModuleTest(){
  const el=$('tab-moduleTest');if(!el)return;
- el.innerHTML=`<div class="panel"><div class="section-title">🧪 總後台模組測試中心</div><p>這裡先盤點程式目前已存在的主要工作台模組，並提供入口快速開啟對應工作台。模組清單依現有目錄與路由整理，不代表每一項都已完成驗收。</p><div class="msg">⚠️ 第一階段採用既有正式工作台入口，不會模擬或冒用公司／現場身分。開啟後需使用該工作台帳號登入；建議先用測試帳號及測試資料驗證。</div></div>
- <div class="panel"><div class="section-title">📋 現有模組盤點</div><div class="editor-grid">${moduleTestCatalog.map(g=>`<div class="panel"><div class="section-title">${escapeHtml(g.group)}（${g.modules.length} 項）</div><div class="table-wrap"><table><thead><tr><th>模組</th><th>目前盤點</th><th>測試入口</th></tr></thead><tbody>${g.modules.map(m=>`<tr><td><strong>${escapeHtml(m[0])}</strong><br><span class="muted">${escapeHtml(m[1])}</span></td><td>${escapeHtml(m[2])}</td><td><button class="secondary" onclick="openModuleWorkspace('${g.scope}')">開啟${g.scope==='company'?'公司內勤':'現場人員'}工作台</button></td></tr>`).join('')}</tbody></table></div></div>`).join('')}</div></div>
- <div class="panel"><div class="section-title">🧭 驗收建議</div><ol><li>先檢查左側目錄與母／子目錄是否符合平台預設。</li><li>用測試帳號確認功能能否開啟、資料能否正常載入。</li><li>需要測試新增／修改／刪除時，只使用測試資料，避免影響正式住戶、員工及班表。</li><li>若工作台登入後缺少模組，記錄「工作台身分、模組名稱、畫面」再回總後台追查。</li></ol></div>`;
+ const group=moduleTestCatalog.find(g=>g.scope===modulePreviewSelection.scope)||moduleTestCatalog[0];
+ const selected=group.modules.find(m=>m[1]===modulePreviewSelection.action)||group.modules[0];
+ modulePreviewSelection={scope:group.scope,action:selected[1],label:selected[0]};
+ const menu=group.modules.map(m=>`<button type="button" class="secondary" style="margin:4px" onclick="selectModulePreview('${group.scope}','${m[1]}','${m[0]}')">${m[0]}</button>`).join('');
+ el.innerHTML=`<div class="panel"><div class="section-title">🧪 平台模組預覽中心</div><p>直接在總後台預覽主要模組的介面框架與目錄，不需要另外登入公司內勤或現場人員帳號。</p><div class="msg">這是隔離的預覽畫面，使用示意資料，不會讀取或修改正式住戶、人員、財務及班表資料。此階段預覽介面結構；涉及真實資料的操作功能仍需另做安全測試。</div><div class="editor-grid"><div class="field"><label>預覽工作空間</label><select id="modulePreviewScope" onchange="changeModulePreviewScope(this.value)"><option value="staff" ${group.scope==='staff'?'selected':''}>🏠 社區駐點／現場人員</option><option value="company" ${group.scope==='company'?'selected':''}>🏢 公司內勤</option></select></div><div class="field"><label>目前預覽模組</label><select id="modulePreviewSelect" onchange="changeModulePreviewModule(this.value)">${group.modules.map(m=>`<option value="${m[1]}" ${m[1]===selected[1]?'selected':''}>${m[0]}</option>`).join('')}</select></div></div></div>
+ <div class="panel"><div class="section-title">📚 模組快速切換</div><div>${menu}</div></div>
+ <div class="panel" style="padding:0;overflow:hidden"><div style="background:#19583e;color:#fff;padding:22px 26px"><div style="font-size:12px;opacity:.8">鶴絲物業管理系統｜預覽模式</div><div style="font-size:26px;font-weight:700;margin-top:8px">${escapeHtml(group.group)}</div></div><div style="display:grid;grid-template-columns:minmax(160px,230px) 1fr;min-height:360px"><aside style="background:#f3f3f1;padding:16px;border-right:1px solid #ddd"><strong>工作目錄</strong><div style="margin-top:12px;display:grid;gap:5px">${group.modules.map(m=>`<div style="padding:9px 10px;border-radius:7px;background:${m[1]===selected[1]?'#dcebe2':'transparent'};color:#183f31">${m[1]===selected[1]?'▸':'•'} ${escapeHtml(m[0])}</div>`).join('')}</div></aside><main style="padding:22px;min-width:0"><div style="font-size:12px;color:#74857d">模組預覽 / ${escapeHtml(selected[0])}</div><h2 style="margin:10px 0 6px;color:#214b3a">${escapeHtml(selected[0])}</h2><p style="color:#5b6d65">${escapeHtml(selected[2])}</p><div class="editor-grid" style="margin-top:22px"><div class="panel"><div class="hint">示意摘要</div><div style="font-size:25px;font-weight:700;margin-top:8px">—</div><div class="muted">預覽資料</div></div><div class="panel"><div class="hint">模組狀態</div><div style="font-size:20px;font-weight:700;margin-top:8px;color:#28674a">介面預覽</div><div class="muted">未連接正式資料</div></div></div><div class="panel" style="margin-top:16px"><div class="section-title">功能內容區</div><div class="table-wrap"><table><thead><tr><th>項目</th><th>示意內容</th><th>狀態</th></tr></thead><tbody><tr><td>${escapeHtml(selected[0])}</td><td>${escapeHtml(selected[2])}</td><td><span class="tag">預覽資料</span></td></tr><tr><td>資料來源</td><td>隔離的示意內容</td><td><span class="tag">唯讀預覽</span></td></tr><tr><td>正式操作</td><td>需在完成權限與資料隔離後驗收</td><td><span class="tag">未執行</span></td></tr></tbody></table></div></div></main></div></div>`;
 }
-function openModuleWorkspace(scope){
- const path=scope==='company'?'/company.html':'/index.html';
- window.open(path,'_blank','noopener');
-}
+function selectModulePreview(scope,action,label){modulePreviewSelection={scope,action,label};renderModuleTest();}
+function changeModulePreviewScope(scope){const group=moduleTestCatalog.find(g=>g.scope===scope)||moduleTestCatalog[0];modulePreviewSelection={scope:group.scope,action:group.modules[0][1],label:group.modules[0][0]};renderModuleTest();}
+function changeModulePreviewModule(action){const group=moduleTestCatalog.find(g=>g.scope===modulePreviewSelection.scope)||moduleTestCatalog[0];const m=group.modules.find(x=>x[1]===action)||group.modules[0];modulePreviewSelection={scope:group.scope,action:m[1],label:m[0]};renderModuleTest();}
 async function loadTenants(){state.tenants=await api('/api/admin/tenants')}
 async function loadSubmissions(){const r=await api('/api/admin/submissions');state.submissions=r.submissions}
 async function loadTemplates(){state.templates=await api('/api/admin/templates');state.platformResources=await api('/api/admin/platform-resources')}
