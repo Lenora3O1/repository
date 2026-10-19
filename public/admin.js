@@ -1,11 +1,11 @@
 let state={submissions:[],templates:[],platformResources:[],staff:[],tenants:[],config:null,brandingTenantId:null,branding:null,customization:{mode:'platform',tenantId:null,scope:'company',global:[],items:[],overrides:{}},messageAudit:{tenantId:null,enabled:false,auditor_ids:[],staff:[]},platformRules:null,platformRuleHistory:[]};
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
-async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
+async function checkSession(){try{const r=await api('/api/admin/session');if(r.isAdmin){showMain();await loadAll();restoreAdminTab()}else{$('loginView').style.display='block'}}catch(err){$('loginView').style.display='block';$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message||'無法讀取登入狀態，請重新整理。')}</div>`}}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
 function showMain(){$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
-for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit','moduleTest'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}if(b.dataset.tab==='moduleTest'){renderModuleTest();}});
+for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit','moduleTest'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}if(b.dataset.tab==='moduleTest'){renderModuleTest();}try{localStorage.setItem('admin-last-tab',b.dataset.tab)}catch{}document.body.classList.remove('sidebar-open');window.scrollTo({top:0});});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
   for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料…</div></div>';}
@@ -16,47 +16,47 @@ async function loadAll(){
     }
   }
 }
-const moduleTestCatalog=[
- {group:'社區駐點／現場人員',scope:'staff',modules:[
-  ['代辦事項','todo','待辦清單、處理狀態與工作提醒'],
-  ['工作日誌','work-journal','每日工作紀錄與查詢'],
-  ['財務報表','finance','收入、支出與財務查詢'],
-  ['管理委員會','committee','委員名冊、會議與區權會'],
-  ['住戶名冊','residents','住戶聯絡資料與名冊分類'],
-  ['廠商聯繫','vendors','簽約保養、一般及特約廠商'],
-  ['交接清冊','handover','經理／秘書交接清冊'],
-  ['公司資源','company-resources','公告、文件與公司資源'],
-  ['案場 SOP','sop','行政、勤務、公司與案場注意事項'],
-  ['班表','staff-schedule','班表、請假／代班與加班'],
-  ['出勤與巡邏','attendance','出勤紀錄、GPS 與 QR 巡邏']
- ]},
- {group:'公司內勤',scope:'company',modules:[
-  ['公司管理首頁','overview','公司資訊與管理摘要'],
-  ['公司人員管理','manage-staff','人員帳號、角色與權限'],
-  ['社區管理','manage-communities','案場與社區設定'],
-  ['交接清冊紀錄','view-submissions','已提交交接紀錄'],
-  ['公司制式文件','manage-templates','公司文件範本管理'],
-  ['工作日誌管理','work-journal','工作日誌查詢與管理'],
-  ['會計／公司財務','finance','公司財務相關功能'],
-  ['總務／公司資源','company-resources','公司資源與文件'],
-  ['案場 SOP 管理','sop','SOP 內容維護'],
-  ['班表管理','schedule','月班表、人員／社區班表及異動']
- ]}
-];
-let modulePreviewSelection={scope:'staff',action:'todo',label:'代辦事項'};
-function renderModuleTest(){
- const el=$('tab-moduleTest');if(!el)return;
- const group=moduleTestCatalog.find(g=>g.scope===modulePreviewSelection.scope)||moduleTestCatalog[0];
- const selected=group.modules.find(m=>m[1]===modulePreviewSelection.action)||group.modules[0];
- modulePreviewSelection={scope:group.scope,action:selected[1],label:selected[0]};
- const menu=group.modules.map(m=>`<button type="button" class="secondary" style="margin:4px" onclick="selectModulePreview('${group.scope}','${m[1]}','${m[0]}')">${m[0]}</button>`).join('');
- el.innerHTML=`<div class="panel"><div class="section-title">🧪 平台模組預覽中心</div><p>直接在總後台預覽主要模組的介面框架與目錄，不需要另外登入公司內勤或現場人員帳號。</p><div class="msg">這是隔離的預覽畫面，使用示意資料，不會讀取或修改正式住戶、人員、財務及班表資料。此階段預覽介面結構；涉及真實資料的操作功能仍需另做安全測試。</div><div class="editor-grid"><div class="field"><label>預覽工作空間</label><select id="modulePreviewScope" onchange="changeModulePreviewScope(this.value)"><option value="staff" ${group.scope==='staff'?'selected':''}>🏠 社區駐點／現場人員</option><option value="company" ${group.scope==='company'?'selected':''}>🏢 公司內勤</option></select></div><div class="field"><label>目前預覽模組</label><select id="modulePreviewSelect" onchange="changeModulePreviewModule(this.value)">${group.modules.map(m=>`<option value="${m[1]}" ${m[1]===selected[1]?'selected':''}>${m[0]}</option>`).join('')}</select></div></div></div>
- <div class="panel"><div class="section-title">📚 模組快速切換</div><div>${menu}</div></div>
- <div class="panel" style="padding:0;overflow:hidden"><div style="background:#19583e;color:#fff;padding:22px 26px"><div style="font-size:12px;opacity:.8">鶴絲物業管理系統｜預覽模式</div><div style="font-size:26px;font-weight:700;margin-top:8px">${escapeHtml(group.group)}</div></div><div style="display:grid;grid-template-columns:minmax(160px,230px) 1fr;min-height:360px"><aside style="background:#f3f3f1;padding:16px;border-right:1px solid #ddd"><strong>工作目錄</strong><div style="margin-top:12px;display:grid;gap:5px">${group.modules.map(m=>`<div style="padding:9px 10px;border-radius:7px;background:${m[1]===selected[1]?'#dcebe2':'transparent'};color:#183f31">${m[1]===selected[1]?'▸':'•'} ${escapeHtml(m[0])}</div>`).join('')}</div></aside><main style="padding:22px;min-width:0"><div style="font-size:12px;color:#74857d">模組預覽 / ${escapeHtml(selected[0])}</div><h2 style="margin:10px 0 6px;color:#214b3a">${escapeHtml(selected[0])}</h2><p style="color:#5b6d65">${escapeHtml(selected[2])}</p><div class="editor-grid" style="margin-top:22px"><div class="panel"><div class="hint">示意摘要</div><div style="font-size:25px;font-weight:700;margin-top:8px">—</div><div class="muted">預覽資料</div></div><div class="panel"><div class="hint">模組狀態</div><div style="font-size:20px;font-weight:700;margin-top:8px;color:#28674a">介面預覽</div><div class="muted">未連接正式資料</div></div></div><div class="panel" style="margin-top:16px"><div class="section-title">功能內容區</div><div class="table-wrap"><table><thead><tr><th>項目</th><th>示意內容</th><th>狀態</th></tr></thead><tbody><tr><td>${escapeHtml(selected[0])}</td><td>${escapeHtml(selected[2])}</td><td><span class="tag">預覽資料</span></td></tr><tr><td>資料來源</td><td>隔離的示意內容</td><td><span class="tag">唯讀預覽</span></td></tr><tr><td>正式操作</td><td>需在完成權限與資料隔離後驗收</td><td><span class="tag">未執行</span></td></tr></tbody></table></div></div></main></div></div>`;
+// ===== 模組測試中心：依指定公司的實際目錄，以示意資料預覽真正的模組畫面 =====
+let modulePreview={tenantId:null,scope:'staff',items:[],activeId:null,hasOverride:false,loading:false,error:''};
+function modulePreviewUrl(){const q=new URLSearchParams({scope:modulePreview.scope});if(modulePreview.tenantId)q.set('tenant_id',modulePreview.tenantId);return `/admin-preview.html?${q}`;}
+async function loadModulePreviewMenu(){
+ modulePreview.loading=true;modulePreview.error='';
+ try{
+  if(!state.tenants.length)state.tenants=await api('/api/admin/tenants');
+  if(modulePreview.tenantId===null){const t=state.tenants.find(x=>x.status==='active')||state.tenants[0];modulePreview.tenantId=t?Number(t.id):0;}
+  const q=modulePreview.tenantId?`tenant_id=${modulePreview.tenantId}&`:'';
+  const d=await api(`/api/admin/menu-preview?${q}scope=${modulePreview.scope}`);
+  modulePreview.items=d.items||[];modulePreview.hasOverride=!!d.has_override;
+ }catch(e){modulePreview.items=[];modulePreview.error=e.message;}
+ modulePreview.loading=false;
 }
-function selectModulePreview(scope,action,label){modulePreviewSelection={scope,action,label};renderModuleTest();}
-function changeModulePreviewScope(scope){const group=moduleTestCatalog.find(g=>g.scope===scope)||moduleTestCatalog[0];modulePreviewSelection={scope:group.scope,action:group.modules[0][1],label:group.modules[0][0]};renderModuleTest();}
-function changeModulePreviewModule(action){const group=moduleTestCatalog.find(g=>g.scope===modulePreviewSelection.scope)||moduleTestCatalog[0];const m=group.modules.find(x=>x[1]===action)||group.modules[0];modulePreviewSelection={scope:group.scope,action:m[1],label:m[0]};renderModuleTest();}
+async function renderModuleTest(reload=true){
+ const el=$('tab-moduleTest');if(!el)return;
+ if(reload){el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取公司目錄…</div></div>';await loadModulePreviewMenu();}
+ const tenantOptions=[`<option value="0" ${!modulePreview.tenantId?'selected':''}>🧩 平台預設目錄（不指定公司）</option>`].concat(state.tenants.map(t=>`<option value="${t.id}" ${Number(t.id)===Number(modulePreview.tenantId)?'selected':''}>${t.status==='active'?'🏢':'⏸️'} ${escapeHtml(t.name)}${t.status==='active'?'':'（停用）'}</option>`)).join('');
+ const roots=modulePreview.items.filter(x=>!x.parentId);
+ const kids=id=>modulePreview.items.filter(x=>String(x.parentId)===String(id));
+ const chip=(x,child)=>`<button type="button" class="module-chip${child?' is-child':''}${String(modulePreview.activeId)===String(x.id)?' is-active':''}" data-preview-id="${escapeAttr(String(x.id))}">${escapeHtml(x.label||'未命名')}</button>`;
+ const menuHtml=roots.length?roots.map(r=>{const c=kids(r.id);return `<div class="module-chip-group">${chip(r,false)}${c.length?`<div class="module-chip-children">${c.map(x=>chip(x,true)).join('')}</div>`:''}</div>`;}).join(''):`<div class="empty">${modulePreview.error?escapeHtml(modulePreview.error):'這個工作空間目前沒有啟用的目錄項目。'}</div>`;
+ const tenantName=modulePreview.tenantId?(state.tenants.find(t=>Number(t.id)===Number(modulePreview.tenantId))?.name||''):'平台預設';
+ el.innerHTML=`<div class="panel"><div class="section-title">🧪 模組測試中心</div>
+  <p class="hint">選擇公司與工作空間後，下方會載入<strong>真正的現場／內勤畫面</strong>，目錄依該公司目前的實際設定顯示。畫面中的人員、住戶、班表等都是示意資料；任何新增、修改、刪除都只在預覽中模擬，不會寫入正式資料。</p>
+  <div class="module-test-controls"><div class="field"><label for="modulePreviewTenant">預覽公司</label><select id="modulePreviewTenant">${tenantOptions}</select></div>
+  <div class="field"><label for="modulePreviewScope">工作空間</label><select id="modulePreviewScope"><option value="staff" ${modulePreview.scope==='staff'?'selected':''}>🏠 社區駐點／現場人員</option><option value="company" ${modulePreview.scope==='company'?'selected':''}>🏢 公司內勤</option></select></div>
+  <div class="module-test-actions"><button type="button" class="secondary" id="modulePreviewReload">↻ 重新載入</button><a class="top-link module-test-open" href="${modulePreviewUrl()}" target="_blank" rel="noopener">↗ 新分頁開啟</a></div></div>
+  <div class="module-test-status">${modulePreview.tenantId?(modulePreview.hasOverride?`<span class="tag">此公司使用企業客製目錄</span>`:`<span class="tag success">此公司直接繼承平台預設目錄</span>`):'<span class="tag">平台預設目錄</span>'}<span class="hint">${modulePreview.items.length} 個目錄項目</span></div></div>
+ <div class="panel"><div class="section-title">📚 目錄快速切換 <span class="hint">（${escapeHtml(tenantName)}）</span></div><div class="module-chip-list">${menuHtml}</div></div>
+ <div class="panel module-preview-frame-panel"><iframe id="modulePreviewFrame" title="模組預覽" src="${modulePreviewUrl()}" loading="lazy"></iframe></div>`;
+ $('modulePreviewTenant').addEventListener('change',e=>{modulePreview.tenantId=Number(e.target.value)||0;modulePreview.activeId=null;renderModuleTest(true);});
+ $('modulePreviewScope').addEventListener('change',e=>{modulePreview.scope=e.target.value;modulePreview.activeId=null;renderModuleTest(true);});
+ $('modulePreviewReload').addEventListener('click',()=>renderModuleTest(true));
+ el.querySelectorAll('[data-preview-id]').forEach(b=>b.addEventListener('click',()=>{
+  const item=modulePreview.items.find(x=>String(x.id)===b.dataset.previewId);if(!item)return;
+  modulePreview.activeId=item.id;el.querySelectorAll('.module-chip').forEach(x=>x.classList.toggle('is-active',x===b));
+  const frame=$('modulePreviewFrame');try{frame.contentWindow.postMessage({type:'admin-preview-open',action:item.action,id:item.id,label:item.label},location.origin);}catch{}
+  frame.scrollIntoView({behavior:'smooth',block:'start'});
+ }));
+}
 async function loadTenants(){state.tenants=await api('/api/admin/tenants')}
 async function loadSubmissions(){const r=await api('/api/admin/submissions');state.submissions=r.submissions}
 async function loadTemplates(){state.templates=await api('/api/admin/templates');state.platformResources=await api('/api/admin/platform-resources')}
@@ -72,9 +72,37 @@ function renderTenants(){
    : `<button class="secondary" onclick="toggleTenantStatus(${t.id},true)">重新啟用</button>`;
   return `<tr><td><input id="tenant-name-${t.id}" value="${escapeAttr(t.name)}"></td><td><span class="muted">${escapeHtml(t.code)}</span></td><td><strong>${escapeHtml(t.admin_employee_id||'—')}</strong><br><span class="muted">負責人</span></td><td>${escapeHtml(t.admin_name||'—')}<br><span class="muted">公司管理員 ${t.admin_count||0} 人</span></td><td>${t.admin_employee_id?(t.admin_is_active?'<span class="tag success">帳號啟用</span>':'<span class="tag">帳號停用</span>'):'<span class="muted">未建立</span>'}<br><span class="muted">最後登入：${t.admin_last_login_at?formatDate(t.admin_last_login_at):'尚未登入'}</span></td><td>${t.staff_count}</td><td>${t.community_count}</td><td>${status}</td><td>${action}<br><button class="secondary" onclick="manageTenantAdmins(${t.id},'${escapeAttr(t.name)}')">管理公司管理員</button></td></tr>`;
  }).join('');
- el.innerHTML=`<div class="panel designer-intro"><div class="section-title">🏢 公司／租戶管理</div><p><strong>這裡是系統總後臺。</strong> 每建立一家公司，就可以產生一個獨立的公司管理後臺；公司管理員只會看到自己的公司資料。</p><p class="hint">公司停止合作時請使用「停用公司」而不是刪除。停用會立即禁止該公司的管理員與一般人員登入，但完整保留既有交接、草稿、社區與文件資料；日後恢復合作時可直接「重新啟用」。</p></div><div class="panel"><div class="section-title">＋ 建立新物業管理公司</div><form id="addTenantForm"><div class="editor-grid"><div class="wide"><label>公司名稱</label><input id="newTenantName" placeholder="例如：○○物業管理有限公司" required></div><div><label>公司代碼（可留白自動產生）</label><input id="newTenantCode" placeholder="例如 abc-property"></div><div><label>公司負責人員編</label><input id="newTenantAdminId" placeholder="例如 CA1001" required></div><div><label>負責人姓名</label><input id="newTenantAdminName" placeholder="例如 王小明" required></div><div><label>初始密碼</label><input id="newTenantAdminPass" type="password" placeholder="至少 4 碼" required></div></div><button type="submit">＋ 建立公司與負責人帳號</button></form></div><div class="panel"><div class="section-title">已建立公司（${state.tenants.length} 家）</div><p class="hint">每家公司可以有多位公司管理員。第一位建立的帳號為「公司負責人」；公司負責人可在公司後台新增／管理其他公司管理員。這樣老闆忙碌時，可授權總經理等主管代為管理總務、會計與現場人員帳號，不需要重複建立公司。</p><div class="table-wrap"><table><thead><tr><th>公司</th><th>公司代碼</th><th>負責人帳號</th><th>負責人／管理員</th><th>負責人登入狀態</th><th>一般人員</th><th>社區</th><th>合作狀態</th><th>操作</th></tr></thead><tbody>${rows||'<tr><td colspan="9" class="empty">目前尚未建立公司。</td></tr>'}</tbody></table></div></div>`;
- $('addTenantForm').addEventListener('submit',addTenant)
+ el.innerHTML=`<div id="adminDashboard"><div class="panel"><div class="profile-loading">正在整理平台總覽…</div></div></div><div class="panel designer-intro"><div class="section-title">🏢 公司／租戶管理</div><p><strong>這裡是系統總後臺。</strong> 每建立一家公司，就可以產生一個獨立的公司管理後臺；公司管理員只會看到自己的公司資料。</p><p class="hint">公司停止合作時請使用「停用公司」而不是刪除。停用會立即禁止該公司的管理員與一般人員登入，但完整保留既有交接、草稿、社區與文件資料；日後恢復合作時可直接「重新啟用」。</p></div><div class="panel"><div class="section-title">＋ 建立新物業管理公司</div><form id="addTenantForm"><div class="editor-grid"><div class="wide"><label>公司名稱</label><input id="newTenantName" placeholder="例如：○○物業管理有限公司" required></div><div><label>公司代碼（可留白自動產生）</label><input id="newTenantCode" placeholder="例如 abc-property"></div><div><label>公司負責人員編</label><input id="newTenantAdminId" placeholder="例如 CA1001" required></div><div><label>負責人姓名</label><input id="newTenantAdminName" placeholder="例如 王小明" required></div><div><label>初始密碼</label><input id="newTenantAdminPass" type="password" placeholder="至少 4 碼" required></div></div><button type="submit">＋ 建立公司與負責人帳號</button></form></div><div class="panel"><div class="section-title">已建立公司（${state.tenants.length} 家）</div><p class="hint">每家公司可以有多位公司管理員。第一位建立的帳號為「公司負責人」；公司負責人可在公司後台新增／管理其他公司管理員。這樣老闆忙碌時，可授權總經理等主管代為管理總務、會計與現場人員帳號，不需要重複建立公司。</p><div class="table-wrap"><table><thead><tr><th>公司</th><th>公司代碼</th><th>負責人帳號</th><th>負責人／管理員</th><th>負責人登入狀態</th><th>一般人員</th><th>社區</th><th>合作狀態</th><th>操作</th></tr></thead><tbody>${rows||'<tr><td colspan="9" class="empty">目前尚未建立公司。</td></tr>'}</tbody></table></div></div>`;
+ $('addTenantForm').addEventListener('submit',addTenant);
+ loadDashboard();
 }
+// ===== 平台總覽儀表板 =====
+async function loadDashboard(){
+ const box=$('adminDashboard');if(!box)return;
+ try{state.dashboard=await api('/api/admin/dashboard');renderDashboard();}
+ catch(e){box.innerHTML=`<div class="panel"><div class="msg error">平台總覽讀取失敗：${escapeHtml(e.message)}</div></div>`;}
+}
+function renderDashboard(){
+ const box=$('adminDashboard'),d=state.dashboard;if(!box||!d)return;
+ const t=d.totals||{};
+ const tile=(icon,label,value,note,tone='')=>`<div class="dash-tile ${tone}"><span class="dash-tile-label">${icon} ${label}</span><strong>${Number(value||0).toLocaleString('zh-TW')}</strong>${note?`<small>${note}</small>`:''}</div>`;
+ const rel=v=>{if(!v)return '尚無紀錄';const days=Math.floor((Date.now()-new Date(v).getTime())/86400000);return days<=0?'今天':days===1?'昨天':`${days} 天前`;};
+ const list=(d.tenants||[]).slice().sort((a,b)=>(a.status==='active'?0:1)-(b.status==='active'?0:1)||b.alerts.filter(x=>x.level==='warn').length-a.alerts.filter(x=>x.level==='warn').length||a.name.localeCompare(b.name,'zh-Hant'));
+ const filter=state.dashboardFilter||'all';
+ const shown=list.filter(r=>filter==='all'||(filter==='alerts'?r.alerts.some(x=>x.level==='warn'):r.status!=='active'));
+ const rows=shown.map(r=>`<tr class="${r.status==='active'?'':'is-inactive'}"><td><strong>${escapeHtml(r.name)}</strong><div class="muted">${escapeHtml(r.code||'')}</div></td>
+  <td class="num">${r.staff}</td><td class="num">${r.communities}</td><td class="num">${r.active7}</td><td class="num">${r.submissions30}</td><td class="num">${r.attendance7}</td>
+  <td>${rel(r.last_login_at)}</td>
+  <td>${r.alerts.length?r.alerts.map(a=>`<span class="dash-alert ${a.level}">${escapeHtml(a.text)}</span>`).join(''):'<span class="dash-alert ok">正常</span>'}</td>
+  <td class="dash-actions">${r.status==='active'?`<button type="button" class="secondary" onclick="openTenantPreview(${r.id})">預覽</button><button type="button" class="secondary" onclick="openTenantCustomization(${r.id})">目錄</button>`:''}</td></tr>`).join('');
+ box.innerHTML=`<div class="panel dash-panel"><div class="dash-head"><div><div class="section-title">📊 平台總覽</div><p class="hint">更新時間：${formatDate(d.generated_at)}；只統計合作中的公司。</p></div><button type="button" class="secondary" onclick="loadDashboard()">↻ 更新</button></div>
+  <div class="dash-tiles">${tile('🏢','合作中公司',t.tenants,t.inactive_tenants?`另有 ${t.inactive_tenants} 家已停用`:'')}${tile('🏠','啟用中社區',t.communities)}${tile('👥','在職人員',t.staff,`公司管理員 ${t.admins||0} 人`)}${tile('🟢','近 7 天登入',t.active7,'人次（依最後登入）')}${tile('📋','近 30 天交接',t.submissions30,'份正式交接')}${tile('📍','近 7 天打卡',t.attendance7,'筆出勤／巡邏')}${tile('⚠️','需要處理',t.alerts,'項提醒',t.alerts?'is-warn':'is-ok')}</div>
+  <div class="dash-filter" role="tablist">${[['all','全部公司'],['alerts','只看需要處理'],['inactive','已停用']].map(([k,l])=>`<button type="button" class="${filter===k?'active':''}" onclick="state.dashboardFilter='${k}';renderDashboard()">${l}</button>`).join('')}</div>
+  <div class="table-wrap"><table class="dash-table"><thead><tr><th>公司</th><th class="num">人員</th><th class="num">社區</th><th class="num">7 天登入</th><th class="num">30 天交接</th><th class="num">7 天打卡</th><th>最後登入</th><th>狀態提醒</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="9" class="empty">沒有符合條件的公司。</td></tr>'}</tbody></table></div></div>`;
+}
+function switchAdminTab(tab){const b=document.querySelector(`.nav-tabs button[data-tab="${tab}"]`);if(b)b.click();}
+function openTenantPreview(id){modulePreview.tenantId=Number(id);modulePreview.activeId=null;switchAdminTab('moduleTest');}
+function openTenantCustomization(id){state.customization.mode='company';state.customization.tenantId=Number(id);state.customization.scope='staff';switchAdminTab('customization');}
 async function addTenant(e){e.preventDefault();try{const employeeId=$('newTenantAdminId').value.trim();const r=await api('/api/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('newTenantName').value,code:$('newTenantCode').value,admin_employee_id:employeeId,admin_name:$('newTenantAdminName').value,admin_password:$('newTenantAdminPass').value})});await loadTenants();renderTenants();alert(`公司已建立！公司負責人員編：${employeeId}`)}catch(err){alert(err.message)}}
 async function saveTenant(id){const t=state.tenants.find(x=>Number(x.id)===Number(id));try{await api(`/api/admin/tenants/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$(`tenant-name-${id}`).value,status:t?.status==='active'})});await loadTenants();renderTenants();alert('公司資料已儲存。')}catch(err){alert(err.message)}}
 async function toggleTenantStatus(id,active){const t=state.tenants.find(x=>Number(x.id)===Number(id));if(!t)return;const message=active?`確定重新啟用「${t.name}」嗎？公司管理員與一般人員將可以重新登入。`:`確定停用「${t.name}」嗎？這不會刪除資料，但會立即禁止該公司的管理員與一般人員登入。`;if(!confirm(message))return;try{await api(`/api/admin/tenants/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:t.name,status:active})});await loadTenants();renderTenants()}catch(err){alert(err.message)}}
@@ -232,6 +260,7 @@ async function loadCustomization(){
     c.overrides={};
     c.items=c.global.map(x=>({...x}));
     c.openIds=[];
+    c.savedSnapshot=customMenuSnapshot(c.items);
     return;
   }
   const active=c.tenantId||state.tenants.find(t=>t.status==='active')?.id||state.tenants[0]?.id;
@@ -242,6 +271,7 @@ async function loadCustomization(){
   c.overrides=d.overrides||{};
   c.items=(d.overrides?.[c.scope]||d.global?.[c.scope]||[]).map(x=>({...x}));
   c.openIds=[];
+  c.savedSnapshot=customMenuSnapshot(c.items);
 }
 function customMenuChildren(items,parentId){
   return items.filter(x=>String(x.parentId||'')===String(parentId||''));
@@ -289,7 +319,7 @@ function customMenuTreeRows(items,parentId=null,depth=0,openIds=new Set(),ancest
   }).join('');
 }
 
-function renderCustomization(){
+function renderCustomizationBase(){
   const el=$('tab-customization'); if(!el)return;
   const c=state.customization;
   c.items=normalizeCustomMenuTree(c.items||[]);
@@ -335,6 +365,65 @@ function renderCustomization(){
   $('customTargetSelect').addEventListener('change',async e=>{const v=e.target.value;if(v==='platform'){c.mode='platform';c.tenantId=null;}else{c.mode='company';c.tenantId=Number(v.split(':')[1]);}c.openIds=[];await loadCustomization();renderCustomization();});
   $('customScopeSelect').addEventListener('change',async e=>{c.scope=e.target.value;c.openIds=[];await loadCustomization();renderCustomization();});
 }
+// ===== 目錄編輯器強化：拖拉排序、快速顯示／隱藏、即時預覽、未儲存提醒 =====
+function customMenuSnapshot(items){return JSON.stringify(normalizeCustomMenuTree((items||[]).map(x=>({...x}))).map(x=>[String(x.id),x.parentId==null?null:String(x.parentId),x.icon||'',x.label||'',x.action||'',x.enabled!==false]));}
+function customMenuDirty(){const c=state.customization;return c.savedSnapshot!==undefined&&customMenuSnapshot(c.items)!==c.savedSnapshot;}
+function renderCustomization(){
+  renderCustomizationBase();
+  const c=state.customization,tree=document.querySelector('#tab-customization .custom-menu-tree');if(!tree)return;
+  const panel=tree.closest('.panel');
+  // 兩欄：左邊編輯、右邊即時預覽
+  const wrap=document.createElement('div');wrap.className='custom-menu-workbench';
+  panel.parentNode.insertBefore(wrap,panel);wrap.appendChild(panel);
+  const aside=document.createElement('aside');aside.className='panel custom-menu-live';wrap.appendChild(aside);
+  const hint=panel.querySelector('p.hint');if(hint)hint.textContent='拖拉左側「⠿」可調整同一層的順序；點「👁」可快速顯示／隱藏。修改後記得按「儲存」，右側會即時顯示目前的樣子。';
+  tree.querySelectorAll('.custom-menu-node').forEach(node=>{
+    const id=node.dataset.menuId,item=c.items.find(x=>String(x.id)===String(id));if(!item)return;
+    const head=node.querySelector('.custom-menu-node-head');
+    const grip=document.createElement('span');grip.className='custom-menu-grip';grip.textContent='⠿';grip.title='拖拉調整順序';grip.setAttribute('aria-hidden','true');head.prepend(grip);
+    head.draggable=true;node.classList.toggle('is-hidden-item',item.enabled===false);
+    const eye=document.createElement('button');eye.type='button';eye.className='icon-btn custom-menu-eye';eye.textContent=item.enabled===false?'🚫':'👁';eye.title=item.enabled===false?'目前隱藏，點一下改為顯示':'目前顯示，點一下改為隱藏';
+    eye.addEventListener('click',()=>{item.enabled=item.enabled===false;renderCustomization();});
+    head.querySelector('.custom-menu-node-actions')?.prepend(eye);
+    head.addEventListener('dragstart',e=>{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',String(id));tree.dataset.dragId=String(id);tree.dataset.dragParent=String(item.parentId||'');node.classList.add('is-dragging');});
+    head.addEventListener('dragend',()=>{node.classList.remove('is-dragging');tree.querySelectorAll('.drop-before,.drop-after').forEach(x=>x.classList.remove('drop-before','drop-after'));});
+    head.addEventListener('dragover',e=>{if(tree.dataset.dragParent!==String(item.parentId||'')||tree.dataset.dragId===String(id))return;e.preventDefault();const r=head.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;head.classList.toggle('drop-after',after);head.classList.toggle('drop-before',!after);});
+    head.addEventListener('dragleave',()=>head.classList.remove('drop-before','drop-after'));
+    head.addEventListener('drop',e=>{e.preventDefault();const after=head.classList.contains('drop-after');head.classList.remove('drop-before','drop-after');const dragId=tree.dataset.dragId;if(dragId&&tree.dataset.dragParent===String(item.parentId||''))reorderCustomMenuSibling(dragId,id,after);});
+  });
+  // 即時預覽
+  const visible=c.items.filter(x=>x.enabled!==false);
+  const vIds=new Set(visible.map(x=>String(x.id)));
+  const roots=visible.filter(x=>!x.parentId||!vIds.has(String(x.parentId)));
+  const kids=pid=>visible.filter(x=>String(x.parentId||'')===String(pid));
+  const scopeName=c.scope==='company'?'公司內勤':'現場人員';
+  const tenantName=c.mode==='platform'?'平台預設':(state.tenants.find(x=>Number(x.id)===Number(c.tenantId))?.name||'');
+  const dirty=customMenuDirty();
+  aside.innerHTML=`<div class="section-title">👀 ${scopeName}看到的目錄</div><p class="hint">${escapeHtml(tenantName)}｜依左側目前內容即時顯示（隱藏項目不列出）。實際人員還會依個人工作權限再過濾。</p>
+   ${dirty?'<div class="custom-menu-dirty">● 有尚未儲存的變更</div>':'<div class="custom-menu-clean">✓ 與已儲存內容一致</div>'}
+   <div class="live-sidebar"><div class="live-sidebar-head">${c.scope==='company'?'公司管理後台':'人員工作台'}</div>${roots.map(r=>{const ch=kids(r.id);return `<div class="live-item">● ${escapeHtml(r.label||'未命名')}${ch.length?'<span>›</span>':''}</div>${ch.map(x=>`<div class="live-item is-child">· ${escapeHtml(x.label||'未命名')}</div>`).join('')}`;}).join('')||'<div class="empty">沒有顯示中的目錄</div>'}</div>
+   ${c.mode!=='platform'&&c.tenantId?`<button type="button" class="secondary live-preview-btn" onclick="openTenantPreviewFromCustom()">🧪 在模組測試中心看實際畫面${dirty?'（顯示已儲存版本）':''}</button>`:''}`;
+  // 儲存按鈕旁的提醒
+  const saveMsg=$('customSaveMsg');if(saveMsg&&dirty&&!saveMsg.textContent)saveMsg.innerHTML='<span class="hint">尚未儲存</span>';
+}
+function reorderCustomMenuSibling(dragId,targetId,after){
+  const items=normalizeCustomMenuTree(state.customization.items);
+  const drag=items.find(x=>String(x.id)===String(dragId));if(!drag)return;
+  const siblings=customMenuChildren(items,drag.parentId||null);
+  const order=siblings.filter(x=>String(x.id)!==String(dragId));
+  let idx=order.findIndex(x=>String(x.id)===String(targetId));if(idx<0)return;
+  order.splice(after?idx+1:idx,0,drag);
+  const block=id=>[items.find(x=>String(x.id)===String(id)),...customMenuDescendantIds(items,id).map(d=>items.find(x=>x.id===d))].filter(Boolean);
+  const moving=new Set();for(const s of siblings){for(const x of block(s.id))moving.add(x);}
+  const first=items.findIndex(x=>moving.has(x));
+  const rest=items.filter(x=>!moving.has(x));
+  const before=items.slice(0,first).filter(x=>!moving.has(x)).length;
+  rest.splice(before,0,...order.flatMap(s=>block(s.id)));
+  state.customization.items=normalizeCustomMenuTree(rest);
+  renderCustomization();
+}
+function openTenantPreviewFromCustom(){const c=state.customization;modulePreview.tenantId=Number(c.tenantId)||0;modulePreview.scope=c.scope;modulePreview.activeId=null;switchAdminTab('moduleTest');}
+window.addEventListener('beforeunload',e=>{if(customMenuDirty()&&$('tab-customization')?.style.display!=='none'){e.preventDefault();e.returnValue='';}});
 function toggleCustomMenuNode(id){
   const c=state.customization;
   const key=String(id);
@@ -603,3 +692,6 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCustomMenuEdito
 
 async function downloadPlatformResource(id){window.open(`/api/admin/platform-resources/${id}/download`,'_blank')}
 async function deletePlatformResource(id){if(!confirm('確定刪除這份平台公版文件嗎？已經被公司採用的複本不會受影響。'))return;try{await api(`/api/admin/platform-resources/${id}`,{method:'DELETE'});await loadTemplates();renderTemplates()}catch(e){alert(e.message)}}
+
+// 重新整理後回到上次使用的分頁
+function restoreAdminTab(){let t='';try{t=localStorage.getItem('admin-last-tab')||''}catch{}if(t&&t!=='tenants')switchAdminTab(t);}

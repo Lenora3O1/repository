@@ -1103,6 +1103,58 @@ app.put('/api/admin/ui-copy',requireSuperAdmin,(req,res)=>{const copy=sanitizePl
 app.get('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});res.json({tenant_id:id,copy:readStaffUiCopy(id)});});
 app.put('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});const copy=sanitizeStaffUiCopy(req.body||{},id);writeStaffUiCopy(id,copy);res.json({success:true,tenant_id:id,copy});});
 
+// ===== 總後台：模組預覽用的實際目錄（唯讀） =====
+// 依指定公司的目錄設定（含企業覆寫）回傳現場／內勤會看到的目錄；不套用個人權限過濾。
+app.get('/api/admin/menu-preview',requireSuperAdmin,(req,res)=>{
+  res.set('Cache-Control','no-store');
+  const scope=['staff','company'].includes(String(req.query?.scope))?String(req.query.scope):'staff';
+  const tid=req.query?.tenant_id?Number(req.query.tenant_id):null;
+  const tenant=tid?db.prepare('SELECT id,name,status FROM tenants WHERE id=?').get(tid):null;
+  if(tid&&!tenant)return res.status(404).json({error:'找不到公司'});
+  const cfg=readMenuConfig();
+  const hasOverride=!!(tid&&Array.isArray(cfg.tenants?.[String(tid)]?.[scope]));
+  res.json({scope,tenant,items:resolveMenu(scope,tid,null),has_override:hasOverride});
+});
+
+// ===== 總後台：儀表板統計（唯讀） =====
+app.get('/api/admin/dashboard',requireSuperAdmin,(req,res)=>{
+  res.set('Cache-Control','no-store');
+  const safe=(fn,fallback)=>{try{return fn();}catch(e){console.warn('dashboard stat error:',e.message);return fallback;}};
+  const nowMs=Date.now(), day=86400000;
+  const since=d=>new Date(nowMs-d*day).toISOString();
+  const tenants=safe(()=>db.prepare('SELECT id,name,code,status,created_at FROM tenants ORDER BY id').all(),[]);
+  const cfg=safe(()=>readMenuConfig(),{tenants:{}});
+  const rows=tenants.map(t=>{
+    const q=(sql,...a)=>safe(()=>db.prepare(sql).get(t.id,...a)?.c||0,0);
+    const staff=q("SELECT COUNT(*) c FROM staff_users WHERE tenant_id=? AND role='staff' AND is_active=1");
+    const admins=q("SELECT COUNT(*) c FROM staff_users WHERE tenant_id=? AND role='company_admin' AND is_active=1");
+    const communities=q("SELECT COUNT(*) c FROM communities WHERE tenant_id=? AND status='active'");
+    const active7=q("SELECT COUNT(*) c FROM staff_users WHERE tenant_id=? AND is_active=1 AND last_login_at>=?",since(7));
+    const submissions30=q("SELECT COUNT(*) c FROM submissions WHERE tenant_id=? AND created_at>=?",since(30));
+    const attendance7=q("SELECT COUNT(*) c FROM attendance_records WHERE tenant_id=? AND recorded_at>=?",since(7));
+    const lastLogin=safe(()=>db.prepare("SELECT MAX(last_login_at) m FROM staff_users WHERE tenant_id=? AND last_login_at<>''").get(t.id)?.m||'','');
+    const owner=safe(()=>db.prepare("SELECT name,employee_id,is_active,last_login_at FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(t.id)||null,null);
+    const placeholderCommunity=q("SELECT COUNT(*) c FROM communities WHERE tenant_id=? AND name='請建立第一個社區'");
+    const unassignedStaff=q("SELECT COUNT(*) c FROM staff_users u WHERE u.tenant_id=? AND u.role='staff' AND u.is_active=1 AND COALESCE(u.work_type,'site')<>'internal' AND NOT EXISTS (SELECT 1 FROM staff_work_assignments a WHERE a.staff_id=u.id AND a.scope_type='site') AND NOT EXISTS (SELECT 1 FROM staff_communities sc WHERE sc.staff_id=u.id)");
+    const ov=cfg.tenants?.[String(t.id)]||{};
+    const overrides=['staff','company'].filter(k=>Array.isArray(ov[k]));
+    const alerts=[];
+    if(t.status!=='active') alerts.push({level:'muted',text:'公司已停用'});
+    else{
+      if(!owner) alerts.push({level:'warn',text:'沒有公司負責人帳號'});
+      else if(!owner.is_active) alerts.push({level:'warn',text:'公司負責人帳號已停用'});
+      if(!communities||placeholderCommunity) alerts.push({level:'warn',text:placeholderCommunity?'尚未建立正式社區（仍是預設社區）':'沒有啟用中的社區'});
+      if(unassignedStaff) alerts.push({level:'warn',text:`${unassignedStaff} 位駐點人員未指派案場，登入後看不到工作目錄`});
+      if(!lastLogin||new Date(lastLogin).getTime()<nowMs-30*day) alerts.push({level:'info',text:lastLogin?'超過 30 天無人登入':'尚無任何登入紀錄'});
+      if(overrides.length&&!Array.isArray(ov._base?.staff)&&!Array.isArray(ov._base?.company)) alerts.push({level:'info',text:'有舊版目錄覆寫，建議到企業客製化重新儲存一次'});
+    }
+    return {id:t.id,name:t.name,code:t.code,status:t.status,created_at:t.created_at,staff,admins,communities,active7,submissions30,attendance7,last_login_at:lastLogin,owner,overrides,alerts};
+  });
+  const active=rows.filter(r=>r.status==='active');
+  const sum=k=>active.reduce((a,r)=>a+Number(r[k]||0),0);
+  res.json({generated_at:new Date().toISOString(),totals:{tenants:active.length,inactive_tenants:rows.length-active.length,staff:sum('staff'),admins:sum('admins'),communities:sum('communities'),active7:sum('active7'),submissions30:sum('submissions30'),attendance7:sum('attendance7'),alerts:active.reduce((a,r)=>a+r.alerts.filter(x=>x.level==='warn').length,0)},tenants:rows});
+});
+
 app.get('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   const rows=db.prepare(`SELECT t.*, (SELECT COUNT(*) FROM staff_users u WHERE u.tenant_id=t.id AND u.role='staff') staff_count, (SELECT COUNT(*) FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin') admin_count, (SELECT COUNT(*) FROM communities c WHERE c.tenant_id=t.id) community_count, (SELECT u.employee_id FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_employee_id, (SELECT u.name FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_name, (SELECT u.last_login_at FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_last_login_at, (SELECT u.is_active FROM staff_users u WHERE u.tenant_id=t.id AND u.role='company_admin' AND u.admin_level='owner' ORDER BY u.id LIMIT 1) admin_is_active FROM tenants t ORDER BY CASE WHEN t.status='active' THEN 0 ELSE 1 END,t.id DESC`).all();
   res.json(rows);

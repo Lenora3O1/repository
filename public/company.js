@@ -83,8 +83,10 @@ $('logoutBtn').addEventListener('click',async()=>{await api('/api/company/logout
 $('staffEntryLink')?.addEventListener('click',async e=>{e.preventDefault();await api('/api/staff/logout',{method:'POST'});location.href='/';});
 
 
+// 目錄動作代碼 → 公司工作台分頁（目錄使用 manage-staff 等代碼，原本對不上分頁名稱，點了沒有反應）。
+const COMPANY_ACTION_ALIASES={'manage-staff':'staff','manage-communities':'communities','view-submissions':'submissions','manage-templates':'templates','schedule':'schedule-month'};
 document.addEventListener('workspace-menu',async e=>{
-  const a=e.detail?.action;
+  const a=COMPANY_ACTION_ALIASES[e.detail?.action]||e.detail?.action;
   const tabs=['overview','staff','communities','submissions','templates'];
   if(tabs.includes(a)){document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));for(const id of tabs){const el=$(`tab-${id}`);if(el)el.style.display=a===id?'block':'none';}const cw=$('companyWorkspace');if(cw)cw.style.display='none';return;}
   if(['schedule-month','schedule-staff','schedule-community','schedule-swap','schedule-leave','schedule-overtime'].includes(a)){openScheduleModule(a,e.detail?.label||'班表');return;}

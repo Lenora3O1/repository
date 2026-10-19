@@ -1,0 +1,102 @@
+/* 系統總後台：版面與新功能樣式（只載入於 admin.html） */
+:root{--adm-ink:#1f2d27;--adm-muted:#5f6f68;--adm-line:#dfe7e3;--adm-soft:#f4f8f6;--adm-accent:#1b5e3f;--adm-accent-soft:#e3efe8;--adm-warn:#a35a00;--adm-warn-soft:#fff3e0;--adm-info:#2f5d8a;--adm-info-soft:#e8f0f9}
+
+/* ---- 整體 ---- */
+body.admin-console .shell{max-width:1480px}
+body.admin-console .panel{border-radius:14px}
+body.admin-console .section-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+body.admin-console .editor-grid label{display:block;font-weight:700;margin:0 0 6px;color:var(--adm-ink)}
+body.admin-console .editor-grid input,body.admin-console .editor-grid select,body.admin-console .editor-grid textarea{width:100%;box-sizing:border-box;margin:0 0 14px}
+body.admin-console .editor-grid{gap:0 18px}
+body.admin-console .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+body.admin-console td .secondary,body.admin-console td .danger{margin:2px 4px 2px 0}
+.admin-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:0 0 16px}
+.admin-page-head h1{font-size:1.55rem;margin:0}
+.admin-page-head .crumb{font-size:.8rem;color:var(--adm-muted);font-weight:700;letter-spacing:.04em}
+.app-sidebar .sidebar-head{gap:4px}
+.app-sidebar .nav-tabs button.active{background:var(--adm-accent-soft);color:var(--adm-accent);font-weight:700}
+
+/* ---- 平台總覽儀表板 ---- */
+.dash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.dash-head .hint{margin:4px 0 0}
+.dash-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0 18px}
+.dash-tile{border:1px solid var(--adm-line);border-radius:12px;padding:14px 16px;background:#fff;display:flex;flex-direction:column;gap:4px;min-width:0}
+.dash-tile-label{font-size:.82rem;color:var(--adm-muted);font-weight:700}
+.dash-tile strong{font-size:1.75rem;line-height:1.15;color:var(--adm-ink);font-variant-numeric:tabular-nums}
+.dash-tile small{font-size:.78rem;color:var(--adm-muted)}
+.dash-tile.is-warn{background:var(--adm-warn-soft);border-color:#f2d3a5}
+.dash-tile.is-warn strong{color:var(--adm-warn)}
+.dash-tile.is-ok strong{color:var(--adm-accent)}
+.dash-filter{display:inline-flex;gap:4px;padding:4px;border-radius:10px;background:var(--adm-soft);border:1px solid var(--adm-line);margin:0 0 10px}
+.dash-filter button{background:transparent;color:var(--adm-muted);border:0;padding:7px 14px;border-radius:8px;font-weight:700;min-height:0}
+.dash-filter button:hover{background:#fff;color:var(--adm-ink)}
+.dash-filter button.active{background:#fff;color:var(--adm-accent);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.dash-table th{white-space:nowrap}
+.dash-table td{vertical-align:top}
+.dash-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dash-table tr.is-inactive td{color:#8a9691}
+.dash-alert{display:inline-block;margin:0 6px 6px 0;padding:3px 9px;border-radius:999px;font-size:.78rem;line-height:1.4;font-weight:600}
+.dash-alert.warn{background:var(--adm-warn-soft);color:var(--adm-warn)}
+.dash-alert.info{background:var(--adm-info-soft);color:var(--adm-info)}
+.dash-alert.muted{background:#eef0ef;color:#6b7772}
+.dash-alert.ok{background:var(--adm-accent-soft);color:var(--adm-accent)}
+.dash-actions{white-space:nowrap}
+.dash-table td:nth-child(8){min-width:240px}
+.dash-table td:nth-child(7){white-space:nowrap}
+.dash-actions button{padding:6px 12px;min-height:0;font-size:.85rem}
+
+/* ---- 模組測試中心 ---- */
+.module-test-controls{display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(200px,1fr) auto;gap:14px;align-items:end;margin-top:14px}
+.module-test-controls .field{margin:0}
+.module-test-controls label{display:block;font-weight:700;margin:0 0 6px}
+.module-test-controls select{width:100%;margin:0}
+.module-test-actions{display:flex;gap:8px;align-items:center}
+.module-test-open{display:inline-flex;align-items:center;padding:10px 14px;border:1px solid var(--adm-line);border-radius:10px;background:#fff;color:var(--adm-accent);text-decoration:none;font-weight:700;white-space:nowrap}
+.module-test-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.module-test-status .hint{margin:0}
+.module-chip-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.module-chip-group{border:1px solid var(--adm-line);border-radius:12px;padding:8px;background:var(--adm-soft);display:flex;flex-direction:column;gap:6px}
+.module-chip-children{display:flex;flex-wrap:wrap;gap:6px}
+.module-chip{background:#fff;color:var(--adm-ink);border:1px solid var(--adm-line);border-radius:9px;padding:8px 12px;font-weight:700;text-align:left;min-height:0;font-size:.92rem}
+.module-chip.is-child{font-weight:500;font-size:.84rem;padding:6px 10px}
+.module-chip:hover{border-color:var(--adm-accent);color:var(--adm-accent);background:#fff}
+.module-chip.is-active{background:var(--adm-accent);color:#fff;border-color:var(--adm-accent)}
+.module-preview-frame-panel{padding:0!important;overflow:hidden}
+#modulePreviewFrame{display:block;width:100%;height:min(82vh,900px);border:0;background:#fff}
+
+/* ---- 企業客製化：目錄編輯器 ---- */
+.custom-menu-workbench{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}
+.custom-menu-workbench>.panel{margin-bottom:18px}
+.custom-menu-live{position:sticky;top:16px}
+.custom-menu-grip{cursor:grab;color:#9aa8a2;font-size:1.05rem;padding:0 6px 0 0;user-select:none}
+.custom-menu-node-head[draggable=true]:active .custom-menu-grip{cursor:grabbing}
+.custom-menu-node.is-dragging{opacity:.45}
+.custom-menu-node-head.drop-before{box-shadow:inset 0 3px 0 var(--adm-accent)}
+.custom-menu-node-head.drop-after{box-shadow:inset 0 -3px 0 var(--adm-accent)}
+.custom-menu-node.is-hidden-item>.custom-menu-node-head strong{color:#9aa8a2;text-decoration:line-through}
+.custom-menu-eye{min-width:34px}
+.custom-menu-dirty{margin:8px 0 12px;padding:8px 12px;border-radius:9px;background:var(--adm-warn-soft);color:var(--adm-warn);font-weight:700;font-size:.88rem}
+.custom-menu-clean{margin:8px 0 12px;padding:8px 12px;border-radius:9px;background:var(--adm-accent-soft);color:var(--adm-accent);font-weight:700;font-size:.88rem}
+.live-sidebar{border:1px solid var(--adm-line);border-radius:12px;background:#f3f3f1;padding:10px;max-height:60vh;overflow:auto}
+.live-sidebar-head{font-weight:800;padding:4px 8px 10px;color:var(--adm-ink)}
+.live-item{display:flex;justify-content:space-between;padding:8px 10px;border-radius:8px;color:var(--adm-ink);font-size:.92rem}
+.live-item.is-child{padding-left:26px;font-size:.86rem;color:#3d4f48}
+.live-item span{color:#9aa8a2}
+.live-preview-btn{width:100%;margin-top:12px}
+
+/* ---- 手機／窄螢幕 ---- */
+@media(max-width:1100px){.custom-menu-workbench{grid-template-columns:minmax(0,1fr)}.custom-menu-live{position:static}}
+@media(max-width:760px){
+  .module-test-controls{grid-template-columns:minmax(0,1fr)}
+  .module-test-actions{flex-wrap:wrap}
+  .dash-head{flex-direction:column}
+  .dash-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dash-tile strong{font-size:1.45rem}
+  #modulePreviewFrame{height:75vh}
+  body.admin-console .editor-grid{grid-template-columns:minmax(0,1fr)}
+  /* 表格不擠壓文字，改為左右滑動 */
+  body.admin-console .panel{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  body.admin-console .panel table{min-width:720px}
+  body.admin-console .panel table td:first-child{min-width:130px}
+  .dash-filter{display:flex;width:100%;box-sizing:border-box}.dash-filter button{flex:1;padding:7px 4px;white-space:nowrap;font-size:.85rem}
+}
