@@ -1,0 +1,177 @@
+/* 內部訊息中心（現場工作台／公司內勤共用）V5.12
+   所有規則都掛在 #messageCenterModal 底下，避免影響其他畫面。 */
+#messageCenterModal{
+  --chat-accent:var(--accent,#2E6B4F);--chat-accent-dark:var(--accent-dark,#1B4D37);
+  --chat-ink:#1d2a25;--chat-muted:#6a7a73;--chat-line:#e3eae7;--chat-soft:#f3f7f5;--chat-bg:#eef3f0;
+  --chat-in:#ffffff;--chat-radius:18px;
+  backdrop-filter:blur(3px);background:rgba(18,32,26,.42);
+}
+#messageCenterModal .chat-modal{width:min(1120px,calc(100vw - 40px));height:min(780px,calc(100vh - 48px));border:0;border-radius:22px;box-shadow:0 30px 90px rgba(10,30,20,.28);overflow:hidden;background:#fff}
+#messageCenterModal .chat-layout{position:relative;display:grid;grid-template-columns:340px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100%;min-height:0;overflow:hidden}
+/* 讓訊息區在固定高度內捲動，不把整個視窗撐開 */
+#messageCenterModal .chat-list-pane,#messageCenterModal .chat-pane{min-height:0;height:100%;overflow:hidden}
+#messageCenterModal .chat-messages,#messageCenterModal .conversation-list{min-height:0}
+#messageCenterModal .chat-close{position:absolute;right:14px;top:14px;z-index:6;width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:var(--chat-muted);font-size:1.45rem;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+#messageCenterModal .chat-close:hover{color:var(--chat-ink);background:#fff}
+#messageCenterModal button{font-family:inherit;min-height:0}
+
+/* ---- 左側清單 ---- */
+#messageCenterModal .chat-list-pane{background:#fff;border-right:1px solid var(--chat-line);display:flex;flex-direction:column;min-width:0}
+#messageCenterModal .chat-list-head{display:flex;align-items:flex-end;justify-content:space-between;padding:22px 18px 12px 22px}
+#messageCenterModal .chat-eyebrow{font-size:.75rem;font-weight:700;letter-spacing:.08em;color:var(--chat-muted)}
+#messageCenterModal .chat-list-head h2{margin:2px 0 0;font-size:1.6rem;color:var(--chat-ink);letter-spacing:.02em}
+#messageCenterModal .chat-list-actions{display:flex;gap:6px}
+#messageCenterModal .chat-icon-btn{width:38px;height:38px;border-radius:50%;border:0;background:var(--chat-soft);color:var(--chat-accent-dark);font-size:1.05rem;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:background .15s}
+#messageCenterModal .chat-icon-btn:hover{background:#e3eee8}
+#messageCenterModal .chat-close-mobile,#messageCenterModal .chat-back{display:none}
+#messageCenterModal .chat-search,#messageCenterModal .recipient-search-inline{position:relative;padding:0 16px 12px}
+#messageCenterModal .recipient-search-inline{padding:0;margin:18px 0 14px}
+#messageCenterModal .chat-search span,#messageCenterModal .recipient-search-inline span{position:absolute;left:30px;top:10px;font-size:.85rem;opacity:.55;pointer-events:none}
+#messageCenterModal .recipient-search-inline span{left:14px;top:12px}
+#messageCenterModal .chat-search input,#messageCenterModal .recipient-search-inline input{width:100%;box-sizing:border-box;border:1px solid transparent;border-radius:12px;background:var(--chat-soft);padding:10px 14px 10px 36px;font-size:.92rem;outline:none;color:var(--chat-ink)}
+#messageCenterModal .recipient-search-inline input{padding:12px 14px 12px 38px;background:#fff;border-color:var(--chat-line)}
+#messageCenterModal .chat-search input:focus,#messageCenterModal .recipient-search-inline input:focus{border-color:var(--chat-accent);background:#fff;box-shadow:0 0 0 3px rgba(46,107,79,.12)}
+#messageCenterModal .conversation-list{flex:1;overflow:auto;padding:4px 10px 14px}
+#messageCenterModal .conversation-item{width:100%;display:flex;align-items:center;gap:12px;text-align:left;border:0;border-radius:14px;background:transparent;padding:11px 10px;margin:2px 0;cursor:pointer;color:var(--chat-ink);transition:background .12s}
+#messageCenterModal .conversation-item:hover{background:var(--chat-soft)}
+#messageCenterModal .conversation-item.active{background:#e4efe9}
+#messageCenterModal .conversation-avatar{flex:0 0 44px;width:44px;height:44px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--avatar-tone,#2f7d5b);color:#fff;font-weight:800;font-size:1.02rem;letter-spacing:0}
+#messageCenterModal .conversation-avatar.large{flex-basis:42px;width:42px;height:42px}
+#messageCenterModal .conversation-main{flex:1;min-width:0;display:block}
+#messageCenterModal .conversation-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+#messageCenterModal .conversation-top strong{font-size:.98rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--chat-ink)!important}
+#messageCenterModal .conversation-top small{flex:0 0 auto;font-size:.74rem;color:var(--chat-muted)}
+#messageCenterModal .conversation-sub{display:block;font-size:.72rem;color:var(--chat-muted);margin-top:1px}
+#messageCenterModal .conversation-preview{display:block;margin-top:3px;font-size:.84rem;color:var(--chat-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#messageCenterModal .conversation-item.has-unread .conversation-preview{color:var(--chat-ink);font-weight:700}
+#messageCenterModal .conversation-unread{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#e5484d;color:#fff;font-size:.7rem;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+#messageCenterModal .chat-list-empty{padding:40px 16px;text-align:center;color:var(--chat-muted);font-size:.9rem;line-height:1.7}
+#messageCenterModal .chat-list-empty-icon{font-size:2rem;margin-bottom:6px;opacity:.7}
+#messageCenterModal .chat-text-btn{display:block;margin:10px auto 0;border:0;background:transparent;color:var(--chat-accent);font-weight:700;cursor:pointer;padding:6px 10px}
+
+/* ---- 右側 ---- */
+#messageCenterModal .chat-pane{position:relative;display:flex;flex-direction:column;min-width:0;background:var(--chat-bg)}
+#messageCenterModal .chat-empty{margin:auto;text-align:center;color:var(--chat-muted);padding:24px;line-height:1.75}
+#messageCenterModal .chat-empty strong{display:block;color:var(--chat-ink);font-size:1.12rem;margin-bottom:6px}
+#messageCenterModal .chat-empty p{margin:0 0 18px}
+#messageCenterModal .chat-empty-icon{width:84px;height:84px;margin:0 auto 16px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:2.4rem;box-shadow:0 6px 20px rgba(20,60,40,.08)}
+#messageCenterModal .chat-primary-btn{border:0;border-radius:999px;background:var(--chat-accent);color:#fff;font-weight:700;padding:11px 22px;cursor:pointer}
+#messageCenterModal .chat-primary-btn:hover{background:var(--chat-accent-dark)}
+#messageCenterModal .chat-header{flex:0 0 auto;height:auto;display:flex;align-items:center;justify-content:flex-start;gap:10px;padding:14px 64px 14px 20px;background:rgba(255,255,255,.92);border-bottom:1px solid var(--chat-line);backdrop-filter:blur(6px)}
+#messageCenterModal .chat-person{display:flex;align-items:center;gap:12px;min-width:0}
+#messageCenterModal .chat-person strong{display:block;font-size:1.02rem;color:var(--chat-ink)}
+#messageCenterModal .chat-person small{display:block;font-size:.78rem;color:var(--chat-muted)}
+#messageCenterModal .chat-messages{flex:1;overflow:auto;padding:18px 22px 8px;scroll-behavior:auto}
+#messageCenterModal .chat-day{display:flex;justify-content:center;margin:14px 0 10px}
+#messageCenterModal .chat-day span{font-size:.74rem;color:var(--chat-muted);background:rgba(255,255,255,.75);padding:4px 12px;border-radius:999px}
+#messageCenterModal .chat-bubble-row{display:flex;margin:2px 0}
+#messageCenterModal .chat-bubble-row.group-first{margin-top:10px}
+#messageCenterModal .chat-bubble-row.out{justify-content:flex-end}
+#messageCenterModal .chat-bubble-stack{display:flex;flex-direction:column;max-width:min(72%,560px);gap:4px}
+#messageCenterModal .chat-bubble-row.out .chat-bubble-stack{align-items:flex-end}
+#messageCenterModal .chat-bubble{max-width:100%;box-sizing:border-box;padding:9px 14px;border-radius:var(--chat-radius);font-size:.95rem;line-height:1.55;word-break:break-word;white-space:normal;box-shadow:none}
+#messageCenterModal .chat-bubble.in{background:var(--chat-in);color:var(--chat-ink);border:1px solid #e1e8e4;border-top-left-radius:6px}
+#messageCenterModal .chat-bubble.out{background:var(--chat-accent);color:#fff;border:0;border-top-right-radius:6px}
+#messageCenterModal .chat-bubble-row:not(.group-first) .chat-bubble.in{border-top-left-radius:var(--chat-radius)}
+#messageCenterModal .chat-bubble-row:not(.group-first) .chat-bubble.out{border-top-right-radius:var(--chat-radius)}
+#messageCenterModal .chat-bubble a{color:inherit;text-decoration:underline;word-break:break-all}
+#messageCenterModal .chat-meta{display:flex;align-items:center;gap:6px;font-size:.7rem;color:var(--chat-muted);padding:0 4px}
+#messageCenterModal .read-state{font-weight:700;color:#8a9a93}
+#messageCenterModal .read-state.read{color:var(--chat-accent)}
+#messageCenterModal .chat-error{color:#c0392b}
+#messageCenterModal .chat-empty-inline{margin:60px auto;text-align:center;color:var(--chat-muted);display:flex;flex-direction:column;align-items:center;gap:6px}
+#messageCenterModal .chat-empty-inline strong{color:var(--chat-ink)}
+#messageCenterModal .typing-indicator{min-height:22px;padding:0 24px;display:flex;align-items:center;gap:3px;font-size:.78rem;color:var(--chat-muted)}
+#messageCenterModal .typing-indicator span{margin-right:4px}
+#messageCenterModal .typing-indicator i{width:5px;height:5px;border-radius:50%;background:#9aaba3;animation:chatDot 1.2s infinite}
+#messageCenterModal .typing-indicator i:nth-child(3){animation-delay:.15s}#messageCenterModal .typing-indicator i:nth-child(4){animation-delay:.3s}
+@keyframes chatDot{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+
+/* ---- 圖片 ---- */
+#messageCenterModal .chat-image{position:relative;display:block;padding:0;border:0;background:#dfe7e3;border-radius:16px;overflow:hidden;cursor:zoom-in;width:min(280px,60vw);max-height:340px;aspect-ratio:4/3}
+#messageCenterModal .chat-image img{display:block;width:100%;height:100%;object-fit:cover}
+#messageCenterModal .chat-image:hover img{filter:brightness(.96)}
+#messageCenterModal .chat-image.is-pending{cursor:default}
+#messageCenterModal .chat-image.is-pending img{opacity:.55}
+#messageCenterModal .chat-image.is-error{outline:2px solid #e5484d}
+#messageCenterModal .chat-pending-label{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.55);color:#fff;font-size:.78rem;font-weight:700;padding:5px 12px;border-radius:999px;white-space:nowrap}
+#messageCenterModal .chat-caption{width:min(280px,60vw)}
+
+/* ---- 貼圖 ---- */
+#messageCenterModal .chat-sticker{width:132px;height:132px;border-radius:28px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:0;padding:8px;box-sizing:border-box;background:var(--st-bg);color:var(--st-ink);box-shadow:0 6px 16px rgba(30,60,45,.08);user-select:none}
+#messageCenterModal .chat-sticker-emoji{font-size:3.1rem;line-height:1;filter:drop-shadow(0 2px 2px rgba(0,0,0,.1))}
+#messageCenterModal .chat-sticker-text{font-weight:900;font-size:.98rem;letter-spacing:.04em;background:#fff;color:var(--st-ink);border-radius:999px;padding:3px 12px;box-shadow:0 1px 0 rgba(0,0,0,.05)}
+#messageCenterModal .tone-green{--st-bg:#dff2e6;--st-ink:#1f6b43}
+#messageCenterModal .tone-peach{--st-bg:#ffe4d8;--st-ink:#a3492a}
+#messageCenterModal .tone-gold{--st-bg:#fff0c2;--st-ink:#8a5a00}
+#messageCenterModal .tone-blue{--st-bg:#ddeafb;--st-ink:#285a96}
+#messageCenterModal .tone-lilac{--st-bg:#ece3fb;--st-ink:#5b3f96}
+#messageCenterModal .tone-orange{--st-bg:#ffe5cc;--st-ink:#a14f00}
+#messageCenterModal .tone-red{--st-bg:#ffdfe0;--st-ink:#b42330}
+#messageCenterModal .tone-teal{--st-bg:#d7f1ef;--st-ink:#1f6e69}
+#messageCenterModal .tone-gray{--st-bg:#e9eeec;--st-ink:#45534d}
+#messageCenterModal .sticker-panel{flex:0 0 auto;max-height:260px;overflow:auto;background:#fff;border-top:1px solid var(--chat-line);padding:10px 16px 14px}
+#messageCenterModal .sticker-panel[hidden]{display:none}
+#messageCenterModal .sticker-panel-head{font-size:.78rem;font-weight:700;color:var(--chat-muted);margin:2px 0 10px}
+#messageCenterModal .sticker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:10px}
+#messageCenterModal .sticker-grid .chat-sticker{width:100%;height:auto;aspect-ratio:1;border-radius:20px;cursor:pointer;box-shadow:none;gap:5px;transition:transform .12s}
+#messageCenterModal .sticker-grid .chat-sticker:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 6px 14px rgba(30,60,45,.12)}
+#messageCenterModal .sticker-grid .chat-sticker-emoji{font-size:2.1rem}
+#messageCenterModal .sticker-grid .chat-sticker-text{font-size:.76rem;padding:2px 7px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
+#messageCenterModal .chat-sticker-text{white-space:nowrap}
+
+/* ---- 輸入列 ---- */
+#messageCenterModal .chat-inputbar{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:10px 14px 14px;background:#fff;border-top:1px solid var(--chat-line)}
+#messageCenterModal .chat-tool-btn{flex:0 0 40px;width:40px;height:40px;border-radius:50%;border:0;background:transparent;font-size:1.25rem;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;transition:background .12s}
+#messageCenterModal .chat-tool-btn:hover,#messageCenterModal .chat-tool-btn.active{background:var(--chat-soft)}
+#messageCenterModal #chatInput{flex:1;min-width:0;resize:none;border:1px solid transparent;border-radius:20px;background:var(--chat-soft);padding:10px 16px;font:inherit;font-size:.95rem;line-height:1.45;max-height:140px;outline:none;color:var(--chat-ink);box-sizing:border-box;min-height:40px;margin:0}
+#messageCenterModal #chatInput:focus{background:#fff;border-color:var(--chat-accent);box-shadow:0 0 0 3px rgba(46,107,79,.12)}
+#messageCenterModal .chat-send{flex:0 0 40px;width:40px;height:40px;border-radius:50%;border:0;background:var(--chat-accent);color:#fff;font-size:1rem;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center}
+#messageCenterModal .chat-send:hover{background:var(--chat-accent-dark)}
+#messageCenterModal .chat-send:disabled{opacity:.5}
+#messageCenterModal .chat-drop-hint{display:none;position:absolute;inset:12px;border:2px dashed var(--chat-accent);border-radius:18px;background:rgba(238,246,242,.92);align-items:center;justify-content:center;font-weight:800;color:var(--chat-accent-dark);font-size:1.05rem;z-index:4;pointer-events:none}
+#messageCenterModal .chat-pane.is-dragging .chat-drop-hint{display:flex}
+
+/* ---- 找同事 ---- */
+#messageCenterModal .chat-recipient-picker{padding:26px 30px 30px;max-width:760px;width:100%;margin:0 auto;box-sizing:border-box;overflow:auto;height:100%}
+#messageCenterModal .picker-head{display:flex;align-items:center;gap:10px;padding-right:44px}
+#messageCenterModal .picker-head h3{margin:0;font-size:1.25rem;color:var(--chat-ink)}
+#messageCenterModal .picker-head p{margin:2px 0 0;color:var(--chat-muted);font-size:.86rem}
+#messageCenterModal .recipient-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+#messageCenterModal .recipient-card{display:flex;align-items:center;gap:12px;text-align:left;border:1px solid var(--chat-line);background:#fff;border-radius:16px;padding:12px 14px;cursor:pointer;color:var(--chat-ink);transition:border-color .12s,box-shadow .12s;min-height:0}
+#messageCenterModal .recipient-card:hover{border-color:var(--chat-accent);box-shadow:0 4px 14px rgba(30,70,50,.08)}
+#messageCenterModal .recipient-copy{flex:1;min-width:0}
+#messageCenterModal .recipient-copy strong{display:block;font-size:.98rem}
+#messageCenterModal .recipient-copy small{display:block;color:var(--chat-muted);font-size:.78rem;margin-top:2px}
+#messageCenterModal .recipient-copy em{display:block;font-style:normal;color:var(--chat-accent-dark);font-size:.76rem;margin-top:3px}
+#messageCenterModal .recipient-go{color:#b4c2bc;font-size:1.4rem}
+
+/* ---- 圖片放大 ---- */
+.chat-lightbox{position:fixed;inset:0;z-index:10050;background:rgba(10,14,12,.9);display:flex;align-items:center;justify-content:center;padding:64px 20px 24px;box-sizing:border-box;cursor:zoom-out}
+.chat-lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+.chat-lightbox-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:12px 16px;color:#fff;font-size:.9rem;cursor:default}
+.chat-lightbox-bar span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+.chat-lightbox-btn{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:999px;padding:6px 14px;font-size:.88rem;text-decoration:none;cursor:pointer;min-height:0;font-family:inherit}
+.chat-lightbox-btn:hover{background:rgba(255,255,255,.2)}
+.audit-msg-thumb{display:block;max-width:160px;max-height:120px;border-radius:8px;border:1px solid #dfe7e3}
+
+/* ---- 手機 ---- */
+@media(max-width:720px){
+  #messageCenterModal{padding:0!important;align-items:stretch;justify-content:stretch}
+  #messageCenterModal .chat-modal{width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;border-radius:0}
+  #messageCenterModal .chat-layout{grid-template-columns:1fr}
+  #messageCenterModal .chat-close{display:none}
+  #messageCenterModal .chat-close-mobile,#messageCenterModal .chat-back{display:inline-flex}
+  #messageCenterModal .chat-pane{display:none}
+  #messageCenterModal .chat-layout.chat-show-pane .chat-list-pane{display:none}
+  #messageCenterModal .chat-layout.chat-show-pane .chat-pane{display:flex}
+  #messageCenterModal .chat-header{padding:10px 12px}
+  #messageCenterModal .chat-messages{padding:12px 12px 6px}
+  #messageCenterModal .chat-bubble-stack{max-width:82%}
+  #messageCenterModal .chat-recipient-picker{padding:16px}
+  #messageCenterModal .picker-head{padding-right:0}
+  #messageCenterModal .recipient-grid{grid-template-columns:1fr}
+  #messageCenterModal .chat-inputbar{padding:8px 8px calc(10px + env(safe-area-inset-bottom))}
+  #messageCenterModal #chatInput{font-size:16px}
+  #messageCenterModal .chat-sticker{width:116px;height:116px}
+}

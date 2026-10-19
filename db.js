@@ -701,6 +701,10 @@ function repairDuplicateNamedTenants() {
 }
 repairDuplicateNamedTenants();
 
+// 內部訊息：圖片與貼圖。舊訊息預設為文字訊息，不影響既有資料。
+addColumnIfMissing('messages', 'message_type', "TEXT NOT NULL DEFAULT 'text'");
+addColumnIfMissing('messages', 'attachment_json', "TEXT NOT NULL DEFAULT ''");
+
 module.exports = db;
 module.exports.makePassword = makePassword;
 module.exports.verifyPassword = verifyPassword;

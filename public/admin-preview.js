@@ -63,10 +63,20 @@
     {id:4,recorded_at:iso(-1,18,1),record_type:'checkout',location_name:'一樓大廳管理中心',staff_name:'林雅婷',employee_id:'D002',community_name:COMMUNITIES[0].name,source:'online'}
   ];
   function scheduleEntries(){const out=[];const days=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();let id=1;for(const p of PEOPLE.filter(x=>x.work_type!=='internal')){for(let d=1;d<=days;d++){const date=ymd(new Date(today.getFullYear(),today.getMonth(),d));const off=(d+p.id)%6===0;out.push({id:id++,staff_id:p.id,staff_name:p.name,employee_id:p.employee_id,community_id:901,community_name:COMMUNITIES[0].name,work_date:date,month,category:p.job_category==='保全'?'security':p.job_category==='機動'?'mobile':'admin',shift_code:off?'off':(p.job_category==='保全'?'day':'work'),source:'auto'});}}return out;}
-  const messages=[
-    {id:1,subject:'',body:'明天上午 10 點電梯保養，請先張貼公告。',created_at:iso(0,9,12),read_at:null,sender_id:804,recipient_id:801,sender_name:'張美玲',sender_employee_id:'D004',recipient_name:'王小明',partner_id:804,partner_name:'張美玲'},
-    {id:2,subject:'',body:'收到，我下午貼好。',created_at:iso(0,9,20),read_at:iso(0,9,21),sender_id:801,recipient_id:804,sender_name:'王小明',recipient_name:'張美玲',partner_id:804,partner_name:'張美玲'}
+  // 示意聊天：文字、貼圖、圖片（圖片用內嵌 SVG，不讀取任何正式檔案）
+  const demoPhoto='data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe3f3"/><stop offset="1" stop-color="#eef4ea"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/><rect x="120" y="230" width="560" height="300" fill="#b9c7c0"/><rect x="170" y="280" width="120" height="110" fill="#8fa39a"/><rect x="340" y="280" width="120" height="110" fill="#8fa39a"/><rect x="510" y="280" width="120" height="110" fill="#8fa39a"/><rect x="360" y="420" width="80" height="110" fill="#6d8178"/><text x="400" y="150" font-size="44" text-anchor="middle" fill="#45605a" font-family="sans-serif">示意照片</text></svg>');
+  const ME={id:801,employee_id:'D001',name:'王小明（示意）',role:'staff',work_type:'site'}, MEI={id:804,employee_id:'D004',name:'張美玲',role:'staff',work_type:'internal'};
+  const msgDef=[
+    [MEI,ME,'text','明天上午 10 點電梯保養，麻煩先張貼公告。',null,-1,9,12,true],
+    [ME,MEI,'text','收到，我下午貼好。',null,-1,9,20,true],
+    [ME,MEI,'sticker','[貼圖] 收到！',{id:'received',emoji:'👌',text:'收到！',tone:'green'},-1,9,21,true],
+    [ME,MEI,'image','[圖片] 公告已張貼在一樓電梯旁',{url:demoPhoto,name:'公告照片.jpg',width:800,height:600},0,14,5,true],
+    [MEI,ME,'sticker','[貼圖] 辛苦了',{id:'hardwork',emoji:'💪',text:'辛苦了',tone:'gold'},0,14,9,false],
+    [MEI,ME,'text','另外 B1 抽水馬達的保養報告，廠商下週會送過來。',null,0,14,10,false]
   ];
+  const messages=msgDef.map(([from,to,type,body,att,d,h,mi,read],i)=>({id:900+i,subject:'',body,message_type:type,attachment:att,created_at:iso(d,h,mi),read_at:read?iso(d,h,mi+1):null,sender_id:from.id,recipient_id:to.id,sender:from,recipient:to,sender_name:from.name,recipient_name:to.name}));
+  const msgFor=meId=>messages.map(m=>({...m,direction:m.sender_id===meId?'out':'in',unread:m.recipient_id===meId&&!m.read_at}));
+  const STICKERS=[['received','👌','收到！','green'],['thanks','🙏','謝謝','peach'],['hardwork','💪','辛苦了','gold'],['ok','👍','好的','blue'],['wait','⏳','稍等一下','lilac'],['onit','🏃','馬上處理','orange'],['done','✅','處理好了','green'],['help','🆘','請協助','red'],['check','👀','請確認','blue'],['call','📞','請回電','teal'],['sorry','🙇','抱歉','peach'],['great','🎉','太棒了','gold'],['morning','☀️','早安','orange'],['night','🌙','晚安','lilac'],['onsite','📍','已到現場','teal'],['vendor','🔧','已通知廠商','gray']].map(([id,emoji,text,tone])=>({id,emoji,text,tone}));
 
   // ---------- 示意 API 路由 ----------
   const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
@@ -95,10 +105,12 @@
     [/^\/api\/staff\/attendance\/records$/,()=>({rows:attRecords})],
     [/^\/api\/staff\/attendance\/patrol-management$/,()=>({locations:attLocations.filter(l=>l.location_type==='patrol')})],
     [/^\/api\/staff\/attendance\/patrol-status$/,()=>({summary:{people:1,scans:2,points:2},rows:attRecords.filter(r=>r.record_type==='patrol')})],
-    [/^\/api\/messages\/unread-count$/,()=>({count:1})],
-    [/^\/api\/messages\/recipients$/,()=>({recipients:PEOPLE.filter(p=>p.id!==801).map(p=>({...p,role:'staff',communities:COMMUNITIES[0].name}))})],
-    [/^\/api\/messages\/conversation\/\d+/,()=>({partner:PEOPLE[3],messages})],
-    [/^\/api\/messages(\/conversations)?$/,()=>({messages,conversations:[{partner_id:804,partner_name:'張美玲',last_body:messages[1].body,last_at:messages[1].created_at,unread:1}]})],
+    [/^\/api\/messages\/unread-count$/,()=>({count:2})],
+    [/^\/api\/messages\/stickers$/,()=>({stickers:STICKERS})],
+    [/^\/api\/messages\/typing$/,()=>({typing:false})],
+    [/^\/api\/messages\/recipients$/,()=>PEOPLE.filter(p=>p.id!==801).map(p=>({...p,role:'staff',communities:p.work_type==='internal'?[]:[COMMUNITIES[0].name],scope_label:p.work_type==='internal'?'公司內勤':'社區駐點'}))],
+    [/^\/api\/messages\/conversation\/\d+/,()=>({partner:{...MEI,scope_label:'公司內勤'},messages:msgFor(scope==='company'?804:801)})],
+    [/^\/api\/messages$/,()=>msgFor(scope==='company'?804:801).slice().reverse()],
     // 公司內勤
     [/^\/api\/company\/session$/,()=>({loggedIn:true,entry:'company',user:companyUser(),tenant:{id:ctx.tenant.id,name:ctx.tenant.name}})],
     [/^\/api\/company\/branding$/,()=>ctx.branding||{}],
