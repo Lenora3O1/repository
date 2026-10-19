@@ -354,7 +354,7 @@ async function handleWorkspaceMenu(e){
   }
   if(['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records'].includes(action)){
     showWorkspaceLoading(label||'出勤與巡邏');
-    try{if(!window.AttendanceStaffModule) throw new Error('出勤與巡邏模組尚未載入，請重新整理頁面'); await window.AttendanceStaffModule.render();}catch(err){showWorkspaceError(label||'出勤與巡邏',err);}
+    try{if(!window.AttendanceStaffModule) throw new Error('出勤與巡邏模組尚未載入，請重新整理頁面'); await window.AttendanceStaffModule.render();const host=$('staffHome');if(host){host.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">📍 出勤與巡邏</div><h1>${escapeHtml(label||'出勤與巡邏')}</h1><p>出勤打卡、巡邏巡檢與巡邏紀錄已在視窗中開啟；打卡地點與巡邏路線依公司內勤「出勤與巡邏」的設定。</p><button type="button" id="attendanceReopenBtn">重新開啟出勤與巡邏</button></div>`;$('attendanceReopenBtn')?.addEventListener('click',()=>window.AttendanceStaffModule.render().catch(err=>showWorkspaceError(label||'出勤與巡邏',err)));}}catch(err){showWorkspaceError(label||'出勤與巡邏',err);}
     return;
   }
   showWorkspacePlaceholder(label||'工作功能');
