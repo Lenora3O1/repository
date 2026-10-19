@@ -883,6 +883,41 @@ app.post('/api/staff/select-community',requireStaffFiller,(req,res)=>{const cid=
 // ===== 公司/社區資訊給前台 =====
 app.get('/api/staff/tenant',requireStaff,(req,res)=>res.json({tenant:getTenant(req)}));
 // ===== 內部訊息中心：公司內勤 ↔ 社區駐點人員；總後臺不提供此功能 =====
+// ===== 內部訊息：貼圖、圖片設定 =====
+const MESSAGE_STICKERS=[
+  {id:'received',emoji:'👌',text:'收到！',tone:'green'},{id:'thanks',emoji:'🙏',text:'謝謝',tone:'peach'},
+  {id:'hardwork',emoji:'💪',text:'辛苦了',tone:'gold'},{id:'ok',emoji:'👍',text:'好的',tone:'blue'},
+  {id:'wait',emoji:'⏳',text:'稍等一下',tone:'lilac'},{id:'onit',emoji:'🏃',text:'馬上處理',tone:'orange'},
+  {id:'done',emoji:'✅',text:'處理好了',tone:'green'},{id:'help',emoji:'🆘',text:'請協助',tone:'red'},
+  {id:'check',emoji:'👀',text:'請確認',tone:'blue'},{id:'call',emoji:'📞',text:'請回電',tone:'teal'},
+  {id:'sorry',emoji:'🙇',text:'抱歉',tone:'peach'},{id:'great',emoji:'🎉',text:'太棒了',tone:'gold'},
+  {id:'morning',emoji:'☀️',text:'早安',tone:'orange'},{id:'night',emoji:'🌙',text:'晚安',tone:'lilac'},
+  {id:'onsite',emoji:'📍',text:'已到現場',tone:'teal'},{id:'vendor',emoji:'🔧',text:'已通知廠商',tone:'gray'}
+];
+const MESSAGE_UPLOADS_DIR=path.join(DATA_DIR,'uploads','messages');
+fs.mkdirSync(MESSAGE_UPLOADS_DIR,{recursive:true});
+const MESSAGE_IMAGE_TYPES={'image/jpeg':'.jpg','image/png':'.png','image/gif':'.gif','image/webp':'.webp'};
+const messageImageUpload=multer({
+  storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,MESSAGE_UPLOADS_DIR),filename:(req,file,cb)=>cb(null,`${Date.now()}-${crypto.randomBytes(8).toString('hex')}${MESSAGE_IMAGE_TYPES[file.mimetype]||'.img'}`)}),
+  limits:{fileSize:10*1024*1024,files:1},
+  fileFilter:(req,file,cb)=>MESSAGE_IMAGE_TYPES[file.mimetype]?cb(null,true):cb(new Error('只能傳送 JPG、PNG、GIF 或 WEBP 圖片'))
+});
+// 以檔頭確認確實是圖片，避免把其他檔案改副檔名上傳。
+function messageImageLooksValid(file){
+  try{const fd=fs.openSync(file,'r');const b=Buffer.alloc(12);fs.readSync(fd,b,0,12,0);fs.closeSync(fd);
+    return (b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF)||b.slice(0,8).equals(Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]))||b.slice(0,4).toString('ascii')==='GIF8'||(b.slice(0,4).toString('ascii')==='RIFF'&&b.slice(8,12).toString('ascii')==='WEBP');
+  }catch{return false;}
+}
+function messagePayload(r){
+  const {attachment_json,...rest}=r;let a=null;
+  try{a=attachment_json?JSON.parse(attachment_json):null}catch{a=null}
+  const type=['image','sticker'].includes(r.message_type)?r.message_type:'text';
+  let attachment=null;
+  if(type==='image'&&a)attachment={url:`/api/messages/${r.id}/image`,name:a.name||'',size:a.size||0,width:a.width||null,height:a.height||null};
+  if(type==='sticker'&&a){const st=MESSAGE_STICKERS.find(x=>x.id===a.sticker_id);attachment=st?{...st}:{id:a.sticker_id,emoji:'💬',text:String(r.body||'').replace(/^\[貼圖\]\s*/,''),tone:'gray'};}
+  return {...rest,message_type:type,attachment};
+}
+
 app.get('/api/messages/unread-count',requireMessageUser,(req,res)=>{
   const u=getUser(req);
   const row=db.prepare('SELECT COUNT(*) AS count FROM messages WHERE tenant_id=? AND recipient_id=? AND read_at IS NULL').get(tenantId(req),u.id);
@@ -911,7 +946,7 @@ app.get('/api/messages/recipients',requireMessageUser,(req,res)=>{
 app.get('/api/messages',requireMessageUser,(req,res)=>{
   const u=getUser(req);
   const limit=Math.min(100,Math.max(10,Number(req.query?.limit)||50));
-  const rows=db.prepare(`SELECT m.id,m.subject,m.body,m.created_at,m.read_at,m.sender_id,m.recipient_id,
+  const rows=db.prepare(`SELECT m.id,m.subject,m.body,m.message_type,m.attachment_json,m.created_at,m.read_at,m.sender_id,m.recipient_id,
       COALESCE(m.sender_employee_id,s.employee_id,'') AS sender_employee_id,COALESCE(m.sender_name,s.name,'已離職／帳號已封存') AS sender_name,s.role AS sender_role,s.work_type AS sender_work_type,
       COALESCE(m.recipient_employee_id,r.employee_id,'') AS recipient_employee_id,COALESCE(m.recipient_name,r.name,'已離職／帳號已封存') AS recipient_name,r.role AS recipient_role,r.work_type AS recipient_work_type
     FROM messages m
@@ -920,7 +955,7 @@ app.get('/api/messages',requireMessageUser,(req,res)=>{
     WHERE m.tenant_id=? AND (m.sender_id=? OR m.recipient_id=?)
     ORDER BY m.created_at DESC LIMIT ?`).all(tenantId(req),u.id,u.id,limit);
   res.json(rows.map(r=>({
-    ...r,
+    ...messagePayload(r),
     direction:r.recipient_id===u.id?'in':'out',
     unread:r.recipient_id===u.id&&!r.read_at,
     sender:{id:r.sender_id,employee_id:r.sender_employee_id,name:r.sender_name,role:r.sender_role,work_type:r.sender_work_type||'site'},
@@ -932,7 +967,10 @@ app.post('/api/messages',requireMessageUser,(req,res)=>{
   const u=getUser(req);
   const recipientId=Number(req.body?.recipient_id);
   const subject=String(req.body?.subject||'').trim().slice(0,120);
-  const body=String(req.body?.body||'').trim();
+  const stickerId=String(req.body?.sticker_id||'').trim();
+  const sticker=req.body?.message_type==='sticker'?MESSAGE_STICKERS.find(x=>x.id===stickerId):null;
+  if(req.body?.message_type==='sticker'&&!sticker)return res.status(400).json({error:'找不到這張貼圖'});
+  const body=sticker?`[貼圖] ${sticker.text}`:String(req.body?.body||'').trim();
   if(!recipientId)return res.status(400).json({error:'請選擇收件人'});
   if(recipientId===u.id)return res.status(400).json({error:'不能傳送訊息給自己'});
   if(!body)return res.status(400).json({error:'訊息內容不可空白'});
@@ -940,8 +978,44 @@ app.post('/api/messages',requireMessageUser,(req,res)=>{
   const recipient=db.prepare(`SELECT id,employee_id,name FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'`).get(recipientId,tenantId(req));
   if(!recipient)return res.status(404).json({error:'找不到可用的公司內部收件人'});
   const t=now();
-  const info=db.prepare('INSERT INTO messages (tenant_id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,subject,body,created_at,read_at) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)').run(tenantId(req),u.id,recipientId,u.employee_id,u.name,recipient.employee_id,recipient.name,subject||'內部訊息',body,t);
+  const info=db.prepare('INSERT INTO messages (tenant_id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,subject,body,message_type,attachment_json,created_at,read_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)').run(tenantId(req),u.id,recipientId,u.employee_id,u.name,recipient.employee_id,recipient.name,subject||'內部訊息',body,sticker?'sticker':'text',sticker?JSON.stringify({sticker_id:sticker.id}):'',t);
   res.json({success:true,id:info.lastInsertRowid,created_at:t});
+});
+
+// ===== 內部訊息：圖片 =====
+// 圖片存放於 DATA_DIR/uploads/messages，只能由對話雙方或公司授權的訊息稽核人員讀取。
+app.get('/api/messages/stickers',requireMessageUser,(req,res)=>res.json({stickers:MESSAGE_STICKERS}));
+app.post('/api/messages/image',requireMessageUser,(req,res)=>{
+  messageImageUpload.single('image')(req,res,err=>{
+    if(err){const msg=err.code==='LIMIT_FILE_SIZE'?'圖片太大，單張最多 10MB':(err.message||'圖片上傳失敗');return res.status(400).json({error:msg});}
+    const u=getUser(req);
+    const cleanup=()=>{try{if(req.file)fs.unlinkSync(req.file.path)}catch{}};
+    if(!req.file)return res.status(400).json({error:'請選擇要傳送的圖片'});
+    const recipientId=Number(req.body?.recipient_id);
+    if(!recipientId||recipientId===u.id){cleanup();return res.status(400).json({error:'請選擇收件人'});}
+    const recipient=db.prepare(`SELECT id,employee_id,name FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'`).get(recipientId,tenantId(req));
+    if(!recipient){cleanup();return res.status(404).json({error:'找不到可用的公司內部收件人'});}
+    if(!messageImageLooksValid(req.file.path)){cleanup();return res.status(400).json({error:'這個檔案不是可辨識的圖片'});}
+    const caption=String(req.body?.caption||'').trim().slice(0,500);
+    const attachment={file:req.file.filename,name:String(req.file.originalname||'image').slice(0,120),mime:req.file.mimetype,size:req.file.size,width:Number(req.body?.width)||null,height:Number(req.body?.height)||null};
+    const t=now();
+    const info=db.prepare('INSERT INTO messages (tenant_id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,subject,body,message_type,attachment_json,created_at,read_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)').run(tenantId(req),u.id,recipientId,u.employee_id,u.name,recipient.employee_id,recipient.name,'內部訊息',caption?`[圖片] ${caption}`:'[圖片]','image',JSON.stringify(attachment),t);
+    res.json({success:true,id:info.lastInsertRowid,created_at:t});
+  });
+});
+app.get('/api/messages/:id/image',requireMessageUser,(req,res)=>{
+  const u=getUser(req),id=Number(req.params.id);
+  const m=id?db.prepare("SELECT id,tenant_id,sender_id,recipient_id,attachment_json FROM messages WHERE id=? AND tenant_id=? AND message_type='image'").get(id,tenantId(req)):null;
+  if(!m)return res.status(404).json({error:'找不到圖片'});
+  if(m.sender_id!==u.id&&m.recipient_id!==u.id&&!canAuditMessages(req))return res.status(403).json({error:'您沒有查看這張圖片的權限'});
+  let a={};try{a=JSON.parse(m.attachment_json||'{}')}catch{}
+  const file=path.join(MESSAGE_UPLOADS_DIR,path.basename(String(a.file||'')));
+  if(!a.file||!fs.existsSync(file))return res.status(404).json({error:'圖片檔案已不存在'});
+  res.set('Cache-Control','private, max-age=86400');
+  res.set('X-Content-Type-Options','nosniff');
+  res.type(MESSAGE_IMAGE_TYPES[a.mime]?a.mime:'application/octet-stream');
+  if(req.query?.download==='1')res.attachment(a.name||'image');
+  res.sendFile(file);
 });
 
 app.put('/api/messages/:id/read',requireMessageUser,(req,res)=>{
@@ -965,9 +1039,9 @@ app.get('/api/messages/conversation/:partnerId',requireMessageUser,(req,res)=>{
   if(!partnerId || partnerId===u.id)return res.status(400).json({error:'對話對象不正確'});
   const partner=db.prepare("SELECT id,employee_id,name,role,work_type,position,job_category,job_level FROM staff_users WHERE id=? AND tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' AND role<>'super_admin'").get(partnerId,tenantId(req));
   if(!partner)return res.status(404).json({error:'找不到可用的對話對象'});
-  const rows=db.prepare(`SELECT m.id,m.subject,m.body,m.created_at,m.read_at,m.sender_id,m.recipient_id,COALESCE(m.sender_employee_id,s.employee_id,'') AS sender_employee_id,COALESCE(m.sender_name,s.name,'已離職／帳號已封存') AS sender_name,COALESCE(m.recipient_employee_id,r.employee_id,'') AS recipient_employee_id,COALESCE(m.recipient_name,r.name,'已離職／帳號已封存') AS recipient_name FROM messages m LEFT JOIN staff_users s ON s.id=m.sender_id LEFT JOIN staff_users r ON r.id=m.recipient_id WHERE m.tenant_id=? AND ((m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?)) ORDER BY m.created_at DESC LIMIT ?`).all(tenantId(req),u.id,partnerId,partnerId,u.id,limit).reverse();
+  const rows=db.prepare(`SELECT m.id,m.subject,m.body,m.message_type,m.attachment_json,m.created_at,m.read_at,m.sender_id,m.recipient_id,COALESCE(m.sender_employee_id,s.employee_id,'') AS sender_employee_id,COALESCE(m.sender_name,s.name,'已離職／帳號已封存') AS sender_name,COALESCE(m.recipient_employee_id,r.employee_id,'') AS recipient_employee_id,COALESCE(m.recipient_name,r.name,'已離職／帳號已封存') AS recipient_name FROM messages m LEFT JOIN staff_users s ON s.id=m.sender_id LEFT JOIN staff_users r ON r.id=m.recipient_id WHERE m.tenant_id=? AND ((m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?)) ORDER BY m.created_at DESC LIMIT ?`).all(tenantId(req),u.id,partnerId,partnerId,u.id,limit).reverse();
   const scope=partner.role==='company_admin'?'公司管理員':(partner.work_type==='hybrid'?'內勤＋駐點':partner.work_type==='internal'?'公司內勤':'社區駐點');
-  res.json({partner:{...partner,scope_label:scope},messages:rows.map(r=>({...r,direction:r.sender_id===u.id?'out':'in',unread:r.recipient_id===u.id&&!r.read_at}))});
+  res.json({partner:{...partner,scope_label:scope},messages:rows.map(r=>({...messagePayload(r),direction:r.sender_id===u.id?'out':'in',unread:r.recipient_id===u.id&&!r.read_at}))});
 });
 app.put('/api/messages/conversation/:partnerId/read',requireMessageUser,(req,res)=>{const u=getUser(req),partnerId=Number(req.params.partnerId);if(!partnerId)return res.status(400).json({error:'對話對象不正確'});const t=now();const result=db.prepare('UPDATE messages SET read_at=? WHERE tenant_id=? AND sender_id=? AND recipient_id=? AND read_at IS NULL').run(t,tenantId(req),partnerId,u.id);res.json({success:true,updated_count:result.changes,read_at:t});});
 app.get('/api/messages/typing',requireMessageUser,(req,res)=>{const u=getUser(req),partnerId=Number(req.query?.partner_id);if(!partnerId)return res.status(400).json({error:'對話對象不正確'});const current=now();db.prepare('DELETE FROM message_typing WHERE tenant_id=? AND expires_at<=?').run(tenantId(req),current);const row=db.prepare('SELECT 1 AS typing FROM message_typing WHERE tenant_id=? AND sender_id=? AND recipient_id=? AND expires_at>?').get(tenantId(req),partnerId,u.id,current);res.json({typing:!!row});});
@@ -995,21 +1069,21 @@ app.get('/api/company/message-audit/access',requireCompanyAdmin,(req,res)=>{
 });
 app.get('/api/company/message-audit/search',requireCompanyAdmin,requireMessageAuditor,(req,res)=>{
   const q=String(req.query?.q||'').trim(); const from=String(req.query?.from||'').trim(); const to=String(req.query?.to||'').trim();
-  let sql=`SELECT m.id,m.sender_id,m.recipient_id,m.sender_employee_id,m.sender_name,m.recipient_employee_id,m.recipient_name,m.body,m.created_at,m.read_at FROM messages m WHERE m.tenant_id=?`; const params=[tenantId(req)];
+  let sql=`SELECT m.id,m.sender_id,m.recipient_id,m.sender_employee_id,m.sender_name,m.recipient_employee_id,m.recipient_name,m.body,m.message_type,m.attachment_json,m.created_at,m.read_at FROM messages m WHERE m.tenant_id=?`; const params=[tenantId(req)];
   if(q){sql+=` AND (m.body LIKE ? OR m.sender_name LIKE ? OR m.recipient_name LIKE ? OR m.sender_employee_id LIKE ? OR m.recipient_employee_id LIKE ?)`;const k=`%${q}%`;params.push(k,k,k,k,k);}
   if(/^\d{4}-\d{2}-\d{2}$/.test(from)){sql+=` AND substr(m.created_at,1,10)>=?`;params.push(from);}
   if(/^\d{4}-\d{2}-\d{2}$/.test(to)){sql+=` AND substr(m.created_at,1,10)<=?`;params.push(to);}
   sql+=' ORDER BY m.created_at DESC LIMIT 500';
   const rows=db.prepare(sql).all(...params);
   db.prepare(`INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(tenantId(req),getUser(req).employee_id,getUser(req).name,'view-message-audit','message_audit','search','',JSON.stringify({q,from,to,count:rows.length}),now());
-  res.json({rows});
+  res.json({rows:rows.map(messagePayload)});
 });
 app.get('/api/company/message-audit/conversation/:partnerId',requireCompanyAdmin,requireMessageAuditor,(req,res)=>{
   const u=getUser(req),partnerId=Number(req.params.partnerId); if(!partnerId)return res.status(400).json({error:'對話對象不正確'});
   const partner=db.prepare("SELECT id,employee_id,name,role,work_type,position,job_category,job_level FROM staff_users WHERE id=? AND tenant_id=?").get(partnerId,tenantId(req)); if(!partner)return res.status(404).json({error:'找不到人員'});
-  const rows=db.prepare(`SELECT id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,body,created_at,read_at FROM messages WHERE tenant_id=? AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) ORDER BY created_at ASC LIMIT 500`).all(tenantId(req),u.id,partnerId,partnerId,u.id);
+  const rows=db.prepare(`SELECT id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,body,message_type,attachment_json,created_at,read_at FROM messages WHERE tenant_id=? AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) ORDER BY created_at ASC LIMIT 500`).all(tenantId(req),u.id,partnerId,partnerId,u.id);
   db.prepare(`INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(tenantId(req),u.employee_id,u.name,'view-message-conversation','message_audit','conversation',String(partnerId),JSON.stringify({partner_employee_id:partner.employee_id,partner_name:partner.name,count:rows.length}),now());
-  res.json({partner,messages:rows});
+  res.json({partner,messages:rows.map(messagePayload)});
 });
 
 app.get('/api/staff/profile',requireStaff,(req,res)=>{
