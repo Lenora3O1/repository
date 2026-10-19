@@ -375,6 +375,7 @@ function defaultMenuConfig(){
   if(fs.existsSync(seed)) return JSON.parse(fs.readFileSync(seed,'utf-8'));
   return {staff:[],company:[]};
 }
+const MENU_STRUCTURE_VERSION=2;
 function readMenuConfig(){
   if(!fs.existsSync(MENU_CONFIG_PATH)) fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(defaultMenuConfig(),null,2),'utf-8');
   const c=JSON.parse(fs.readFileSync(MENU_CONFIG_PATH,'utf-8'));
@@ -389,31 +390,23 @@ function readMenuConfig(){
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
   // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
-  try{
-    const tenantRows=db.prepare('SELECT id FROM tenants ORDER BY id').all();
-    let changed=false;
-    for(const t of tenantRows){
-      const key=String(t.id);
-      if(!c.tenants[key] || typeof c.tenants[key]!=='object'){
-        c.tenants[key]={};
-        changed=true;
-      }
-      for(const scope of ['staff','company']){
-        // Only normalize explicit overrides. Missing override means inherit platform default.
-        if(Array.isArray(c.tenants[key][scope])){
-          const normalized=normalizeAttendanceMenu(normalizeScheduleMenu(c.tenants[key][scope],scope),scope);
-          if(JSON.stringify(c.tenants[key][scope])!==JSON.stringify(normalized)) changed=true;
-          c.tenants[key][scope]=normalized;
+  // 班表／出勤目錄標準化只在升級時執行一次。舊版每次讀取都重新套用，
+  // 會把總後台對這兩組目錄的改名、停用、刪除、排序全部蓋回內建版本，造成現場目錄與總後台設定不符。
+  if(c._menuStructureVersion!==MENU_STRUCTURE_VERSION){
+    try{
+      for(const key of Object.keys(c.tenants)){
+        const tenant=c.tenants[key];
+        if(!tenant || typeof tenant!=='object') continue;
+        for(const scope of ['staff','company']){
+          if(Array.isArray(tenant[scope])) tenant[scope]=normalizeAttendanceMenu(normalizeScheduleMenu(tenant[scope],scope),scope);
         }
       }
-    }
-    const beforeStaff=JSON.stringify(c.staff), beforeCompany=JSON.stringify(c.company);
-    c.staff=normalizeAttendanceMenu(normalizeScheduleMenu(c.staff,'staff'),'staff');
-    c.company=normalizeAttendanceMenu(normalizeScheduleMenu(c.company,'company'),'company');
-    if(beforeStaff!==JSON.stringify(c.staff)||beforeCompany!==JSON.stringify(c.company)) changed=true;
-    c._menuInheritanceVersion=1;
-    if(changed) writeMenuConfig(c);
-  }catch(e){ console.error('menu tenant override normalization error',e); }
+      c.staff=normalizeAttendanceMenu(normalizeScheduleMenu(c.staff,'staff'),'staff');
+      c.company=normalizeAttendanceMenu(normalizeScheduleMenu(c.company,'company'),'company');
+      c._menuStructureVersion=MENU_STRUCTURE_VERSION;
+      writeMenuConfig(c);
+    }catch(e){ console.error('menu structure migration error',e); }
+  }
   return c;
 }
 function writeMenuConfig(c){fs.writeFileSync(MENU_CONFIG_PATH,JSON.stringify(c,null,2),'utf-8');}
@@ -496,7 +489,9 @@ function menuPermissionKey(item,scope='staff'){
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
   const rules=[
-    ['manage-staff',['staff','人員管理','公司人員']],['attendance',['attendance','出勤與巡邏','打卡','巡邏']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
+    // 只比對公司後台的人員管理項目；不可用 'staff' 子字串，否則 staff-schedule、staff-attendance 等現場目錄
+    // 都會被判成「公司人員管理」而在現場工作台被整組隱藏。
+    ['manage-staff',['company-staff','manage-staff','人員管理','公司人員']],['attendance',['attendance','出勤與巡邏','打卡','巡邏']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
     ['todo',['todo','代辦事項']],['work-journal',['work-journal','工作日誌']],['finance',['finance','財務','會計']],['committee',['committee','管理委員會']],['residents',['residents','住戶名冊']],['vendors',['vendors','廠商聯繫']],['handover',['handover','交接清冊']],['company-resources',['company-resources','公司資源']]
   ];
   for(const [key,terms] of rules) if(terms.some(t=>raw.includes(String(t).toLowerCase()))) return key;
@@ -526,14 +521,37 @@ function normalizeMenuForCompare(items){
     sortOrder:Number(x?.sortOrder??x?.sort_order??0)
   })).sort((a,b)=>a.id.localeCompare(b.id));
 }
-function mergeTenantMenuWithPlatform(platformItems,overrideItems){
+// 企業覆寫合併規則：
+// - 企業覆寫的順序、名稱、停用與刪除都以企業設定為準（現場看到的＝總後台存的）。
+// - 只有「企業覆寫存檔之後平台才新增」的項目會自動補上，避免舊覆寫漏掉新功能。
+//   存檔時記錄當下平台項目代碼（baseIds）；不在 baseIds 裡的平台項目才算新增。
+// - 沒有 baseIds 的舊覆寫沿用舊行為，總後台重新儲存一次該公司目錄即可改用新規則。
+function mergeTenantMenuWithPlatform(platformItems,overrideItems,baseIds){
   const base=Array.isArray(platformItems)?platformItems:[];
   if(!Array.isArray(overrideItems)) return base;
+  if(Array.isArray(baseIds)) return mergeTenantMenuOverride(base,overrideItems,new Set(baseIds.map(String)));
+  return mergeTenantMenuLegacy(base,overrideItems);
+}
+function mergeTenantMenuOverride(base,overrideItems,known){
+  const platformById=new Map(base.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));
+  const merged=overrideItems.filter(x=>x&&x.id!=null).map(x=>{const p=platformById.get(String(x.id));return p?{...p,...x}:x;});
+  const present=new Set(merged.map(x=>String(x.id)));
+  for(const item of base){
+    const id=String(item?.id??'');
+    if(!id||present.has(id)||known.has(id)) continue;
+    // 新增的平台子項目若母目錄已被企業刪除，就不單獨補上。
+    if(item.parentId && !present.has(String(item.parentId))) continue;
+    merged.push({...item}); present.add(id);
+  }
+  return merged;
+}
+function mergeTenantMenuLegacy(base,overrideItems){
   const overridesById=new Map(overrideItems.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));
   const semanticKey=x=>`${String(x?.parentId??'') }::${String(x?.action??'')}`;
   const overridesBySemantic=new Map();
   for(const x of overrideItems){
-    if(x&&x.id!=null&&x.action) overridesBySemantic.set(semanticKey(x),x);
+    // 'placeholder' 是未設定功能的預設值，多個項目會共用，不能拿來配對。
+    if(x&&x.id!=null&&x.action&&x.action!=='placeholder') overridesBySemantic.set(semanticKey(x),x);
   }
   const usedOverrideIds=new Set();
   const baseIds=new Set(base.filter(x=>x&&x.id!=null).map(x=>String(x.id)));
@@ -552,9 +570,11 @@ function mergeTenantMenuWithPlatform(platformItems,overrideItems){
 function resolveMenu(scope,tenantIdValue,staffUser=null){
   const c=readMenuConfig();
   const platformItems=Array.isArray(c[scope])?c[scope]:[];
-  const override=c.tenants && tenantIdValue ? c.tenants[String(tenantIdValue)]?.[scope] : null;
-  // 以平台預設作為基底合併企業覆寫，避免舊快照漏掉後續新增的目錄項目。
-  let items=mergeTenantMenuWithPlatform(platformItems,override);
+  const tenantCfg=c.tenants && tenantIdValue ? c.tenants[String(tenantIdValue)] : null;
+  const override=tenantCfg?.[scope];
+  const baseIds=tenantCfg?._base?.[scope];
+  // 以企業覆寫為準，只補上覆寫存檔後平台才新增的目錄項目。
+  let items=mergeTenantMenuWithPlatform(platformItems,override,baseIds);
   items=items.filter(x=>x.enabled!==false);
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectiveMenuPermissions(staffUser,scope));
@@ -676,7 +696,9 @@ app.put('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
     const tid=req.body?.tenant_id?Number(req.body.tenant_id):null;
     if(tid){
       if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(tid)) return res.status(404).json({error:'找不到公司'});
-      current.tenants=current.tenants||{}; current.tenants[String(tid)]=current.tenants[String(tid)]||{}; current.tenants[String(tid)][scope]=items;
+      current.tenants=current.tenants||{}; const tcfg=current.tenants[String(tid)]=current.tenants[String(tid)]||{}; tcfg[scope]=items;
+      // 記錄存檔當下的平台項目，之後平台新增的項目才會自動補給這家公司，企業刪除的項目不會再被補回。
+      if(scope!=='admin'){ tcfg._base=tcfg._base||{}; tcfg._base[scope]=(current[scope]||[]).map(x=>String(x.id)); }
     }else{ current[scope]=items; }
     writeMenuConfig(current); res.json({success:true,config:current});
   }catch(e){res.status(400).json({error:e.message||'目錄設定儲存失敗'});}
@@ -692,6 +714,7 @@ app.post('/api/admin/menu-config/reset',requireSuperAdmin,(req,res)=>{
     c.tenants[String(tid)]=c.tenants[String(tid)]||{};
     // 恢復平台預設＝移除該公司該 scope 的覆寫，之後直接繼承最新平台預設。
     delete c.tenants[String(tid)][scope];
+    if(c.tenants[String(tid)]._base) delete c.tenants[String(tid)]._base[scope];
     writeMenuConfig(c);
     res.json({success:true,items:(c[scope]||[])});
   }catch(e){res.status(400).json({error:e.message||'恢復平台預設失敗'});}
@@ -707,6 +730,7 @@ app.post('/api/admin/menu-config/reset-all',requireSuperAdmin,(req,res)=>{
     if(c.tenants&&c.tenants[String(tid)]){
       delete c.tenants[String(tid)].company;
       delete c.tenants[String(tid)].staff;
+      delete c.tenants[String(tid)]._base;
       if(!Object.keys(c.tenants[String(tid)]).length) delete c.tenants[String(tid)];
       writeMenuConfig(c);
     }
@@ -1070,11 +1094,7 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   const finalCode=code||`company-${Date.now()}`; const t=now(); const tx=db.transaction(()=>{
     const info=db.prepare('INSERT INTO tenants (name,code,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(name,finalCode,'active',t,t);
     const tid=info.lastInsertRowid;
-    // 新公司建立當下就複製一份平台目錄，之後平台預設的變更不會同步到這家公司。
-    const menuNow=readMenuConfig();
-    menuNow.tenants=menuNow.tenants||{};
-    menuNow.tenants[String(tid)]={staff:(menuNow.staff||[]).map(x=>({...x})),company:(menuNow.company||[]).map(x=>({...x}))};
-    writeMenuConfig(menuNow);
+    // 新公司不建立目錄快照，直接繼承平台預設；需要企業客製時再由總後台另存覆寫。
     const p=db.makePassword(adminPassword); const u=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(adminEmployeeId,adminName,p.hash,p.salt,t,t,'company_admin',tid,'owner');
     db.prepare('INSERT INTO communities (tenant_id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(tid,'請建立第一個社區','active',t,t);
     return {tenantId:tid,userId:u.lastInsertRowid};
