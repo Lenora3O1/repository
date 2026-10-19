@@ -322,8 +322,10 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
   el.querySelectorAll('[data-self-date]').forEach(btn=>btn.addEventListener('click',async()=>{const date=btn.dataset.selfDate;btn.disabled=true;try{await api('/api/staff/schedule/self-select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({month,work_date:date,community_id:Number(selected)})});await loadStaffSchedulePage('self','自選休假',month,selected);}catch(err){alert(err.message||'自選休假失敗');btn.disabled=false;}}));
 }
 
+// 目錄設定使用的動作代碼與程式內部代碼對照（目錄的 handover-manager 等原本沒有對應，點了只會看到「建置中」）。
+const WORKSPACE_ACTION_ALIASES={'handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
 async function handleWorkspaceMenu(e){
-  const {action,label}=e.detail||{};
+  const {label}=e.detail||{};const action=WORKSPACE_ACTION_ALIASES[e.detail?.action]||e.detail?.action;
   if(['staff-schedule','staff-schedule-community','staff-schedule-self-select'].includes(action)){
     try{await loadStaffSchedulePage(action==='staff-schedule-self-select'?'self':'community',label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
     return;
@@ -390,7 +392,7 @@ async function onSubmit(e){e.preventDefault();if(!validateCurrentPage())return;a
 function showHomeAfterSubmit(){api('/api/staff/session').then(s=>showHome(s.user)).catch(showLogin)}
 async function backHome(){await saveNow(true);await loadChecklistModule('交接清冊');}
 $('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
-$('staffLogout').addEventListener('click',async()=>{if(dirty&&draftId)await saveNow(true);await api('/api/staff/logout',{method:'POST'});showLogin();$('employeePassword').value='';});
+$('staffLogout')?.addEventListener('click',async()=>{if(dirty&&draftId)await saveNow(true);await api('/api/staff/logout',{method:'POST'});showLogin();$('employeePassword').value='';});
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}

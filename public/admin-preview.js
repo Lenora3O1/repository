@@ -1,0 +1,210 @@
+// 總後台模組預覽（隔離沙盒）
+// 1) 以總後台身分讀取「指定公司」的實際目錄與美編設定（唯讀）。
+// 2) 之後把 window.fetch 換成示意資料路由：現場／內勤程式發出的所有 API 都由這裡回應，
+//    任何新增、修改、刪除一律攔截，不會送到伺服器。
+// 3) 載入真正的 index.html / company.html 與其程式，因此預覽畫面就是實際模組畫面。
+(function(){
+  'use strict';
+  const params=new URLSearchParams(location.search);
+  const scope=params.get('scope')==='company'?'company':'staff';
+  const tenantId=Number(params.get('tenant_id')||0)||null;
+  const initialAction=params.get('action')||'';
+  const realFetch=window.fetch.bind(window);
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  // ---------- 示意資料 ----------
+  const today=new Date();
+  const iso=(dOffset=0,h=9,m=0)=>{const d=new Date(today);d.setDate(d.getDate()+dOffset);d.setHours(h,m,0,0);return d.toISOString();};
+  const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const month=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  const COMMUNITIES=[{id:901,name:'示意社區・綠景莊園',status:'active'},{id:902,name:'示意社區・翠堤大廈',status:'active'}];
+  const PEOPLE=[
+    {id:801,employee_id:'D001',name:'王小明',job_level:'經理',job_category:'社區管理',work_type:'site',position:'經理｜社區管理'},
+    {id:802,employee_id:'D002',name:'林雅婷',job_level:'秘書',job_category:'秘書',work_type:'site',position:'秘書｜秘書'},
+    {id:803,employee_id:'D003',name:'陳志豪',job_level:'保全',job_category:'保全',work_type:'site',position:'保全｜保全'},
+    {id:804,employee_id:'D004',name:'張美玲',job_level:'專員',job_category:'會計',work_type:'internal',position:'專員｜會計'},
+    {id:805,employee_id:'D005',name:'黃建宏',job_level:'機動',job_category:'機動',work_type:'site',position:'機動｜機動'}
+  ];
+  const SITE_PERMS=['todo','work-journal','finance','committee','residents','vendors','handover','company-resources','sop','schedule','attendance'];
+  const COMPANY_PERMS=['finance','company-resources','manage-staff','manage-communities','view-submissions','manage-templates','manage-sop','work-journal','company-work-journal','company-accounting','company-general-affairs','company-personnel','company-finance','company-hr','company-new-record','schedule','attendance'];
+  const siteAssignments=COMMUNITIES.map(c=>({community_id:c.id,community_name:c.name,job_categories:['社區管理'],job_level:'經理',permissions:SITE_PERMS}));
+  const scheduleProfile={staff_id:801,schedule_role:'admin',community_ids:COMMUNITIES.map(c=>c.id),rest_days:8,self_select_days:2,default_shift:'day'};
+  const ctx={tenant:{id:tenantId||0,name:'示意公司'},branding:null,menu:[]};
+
+  function staffUser(){return {id:801,employee_id:'D001',name:'王小明（示意）',position:'經理｜社區管理',job_category:'社區管理',job_level:'經理',work_type:'site',permissions:SITE_PERMS,job_categories:['社區管理'],schedule_role:'admin',schedule_profile:scheduleProfile,site_assignments:siteAssignments.slice(0,1),company_assignment:null,role:'staff',tenant_id:ctx.tenant.id,tenant_name:ctx.tenant.name};}
+  function companyUser(){return {id:810,employee_id:'A001',name:'公司管理員（示意）',admin_level:'owner',role:'company_admin',work_type:'internal',permissions:COMPANY_PERMS,job_categories:['社區管理']};}
+  const todos=[
+    {id:1,content:'B1 機房抽水馬達異音，聯絡保養廠商到場檢查',status:'open',created_at:iso(-1,10),created_by_name:'林雅婷',visibility:'community',community_id:901},
+    {id:2,content:'下週一管委會月例會資料印製 15 份',status:'open',created_at:iso(0,8,30),created_by_name:'王小明',visibility:'community',community_id:901},
+    {id:3,content:'中庭照明定時器調整為 18:00 開啟',status:'open',created_at:iso(-2,14),created_by_name:'陳志豪',visibility:'community',community_id:901}
+  ];
+  const residents=(()=>{const names=['曲采姿','古博翔','何靖閔','李佳穎','吳承恩','周子瑜','鄭家豪','蔡依林','許志明','謝雅雯','劉冠廷','楊淑芬'];return names.map((n,i)=>({id:i+1,building:i<6?'A棟':'B棟',unit:`${Math.floor(i/2)+1}F-${(i%2)+1}`,floor:String(Math.floor(i/2)+1),name:n,phone:`09${String(12345678+i*1111).slice(0,2)}-${String(345678+i*731).slice(0,3)}-${String(100+i*37).padStart(3,'0')}`,address:'',extra:i%3===0?'承租人；機車位 B1-'+(100+i):''}));})();
+  const sops=[
+    {id:1,title:'颱風季防災應變流程',category:'行政 SOP',description:'颱風警報發布後的巡查、沙包與通報流程',version:'v2',original_filename:'颱風應變SOP.pdf',updated_at:iso(-10),updated_by:'公司總務',scope_type:'company',review_status:'published',is_active:1},
+    {id:2,title:'夜間巡邏勤務規範',category:'勤務 SOP',description:'夜班巡邏路線、打卡點與異常通報',version:'v1',original_filename:'夜間巡邏規範.docx',updated_at:iso(-20),updated_by:'勤務主管',scope_type:'company',review_status:'published',is_active:1},
+    {id:3,title:'包裹代收注意事項',category:'案場注意事項',description:'本社區包裹登記與領取規則',version:'v1',original_filename:'包裹代收.pdf',updated_at:iso(-3),updated_by:'王小明',scope_type:'community',review_status:'published',is_active:1}
+  ];
+  const resources=[
+    {id:1,name:'住戶聯繫表上傳範本',original_name:'住戶聯繫表範本.xlsx',extension:'.xlsx',category:'住戶名冊',description:'上傳住戶名冊時使用的欄位範本',created_at:iso(-30)},
+    {id:2,name:'交接清冊空白表',original_name:'交接清冊.docx',extension:'.docx',category:'交接清冊',description:'紙本交接時使用',created_at:iso(-40)},
+    {id:3,name:'員工手冊 2026',original_name:'員工手冊2026.pdf',extension:'.pdf',category:'公司資源',description:'人事規章與福利說明',created_at:iso(-60)}
+  ];
+  const attLocations=[
+    {id:11,community_id:901,location_type:'attendance',name:'一樓大廳管理中心',address:'大廳櫃台',lat:25.033,lng:121.565,radius_m:80,qr_token:'P-DEMO-CHECKIN',is_active:true},
+    {id:12,community_id:901,location_type:'patrol',name:'B1 機房',address:'機房鐵門旁',radius_m:30,qr_token:'P-DEMO-B1',is_active:true},
+    {id:13,community_id:901,location_type:'patrol',name:'B2 車道出入口',address:'車道柵欄旁',radius_m:30,qr_token:'P-DEMO-B2',is_active:true},
+    {id:14,community_id:902,location_type:'attendance',name:'翠堤大廳',address:'大廳',radius_m:80,qr_token:'P-DEMO-C2',is_active:true}
+  ];
+  const attRoutes=[{id:21,community_id:901,name:'夜間地下室巡邏',time_label:'22:00',is_active:true,points:[{location_id:12,sequence_no:1,name:'B1 機房'},{location_id:13,sequence_no:2,name:'B2 車道出入口'}]}];
+  const attRecords=[
+    {id:1,recorded_at:iso(0,8,2),record_type:'checkin',location_name:'一樓大廳管理中心',staff_name:'王小明',employee_id:'D001',community_name:COMMUNITIES[0].name,source:'online'},
+    {id:2,recorded_at:iso(-1,22,10),record_type:'patrol',location_name:'B1 機房',patrol_route_name:'夜間地下室巡邏',staff_name:'陳志豪',employee_id:'D003',community_name:COMMUNITIES[0].name,source:'offline'},
+    {id:3,recorded_at:iso(-1,22,18),record_type:'patrol',location_name:'B2 車道出入口',patrol_route_name:'夜間地下室巡邏',staff_name:'陳志豪',employee_id:'D003',community_name:COMMUNITIES[0].name,source:'online'},
+    {id:4,recorded_at:iso(-1,18,1),record_type:'checkout',location_name:'一樓大廳管理中心',staff_name:'林雅婷',employee_id:'D002',community_name:COMMUNITIES[0].name,source:'online'}
+  ];
+  function scheduleEntries(){const out=[];const days=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();let id=1;for(const p of PEOPLE.filter(x=>x.work_type!=='internal')){for(let d=1;d<=days;d++){const date=ymd(new Date(today.getFullYear(),today.getMonth(),d));const off=(d+p.id)%6===0;out.push({id:id++,staff_id:p.id,staff_name:p.name,employee_id:p.employee_id,community_id:901,community_name:COMMUNITIES[0].name,work_date:date,month,category:p.job_category==='保全'?'security':p.job_category==='機動'?'mobile':'admin',shift_code:off?'off':(p.job_category==='保全'?'day':'work'),source:'auto'});}}return out;}
+  const messages=[
+    {id:1,subject:'',body:'明天上午 10 點電梯保養，請先張貼公告。',created_at:iso(0,9,12),read_at:null,sender_id:804,recipient_id:801,sender_name:'張美玲',sender_employee_id:'D004',recipient_name:'王小明',partner_id:804,partner_name:'張美玲'},
+    {id:2,subject:'',body:'收到，我下午貼好。',created_at:iso(0,9,20),read_at:iso(0,9,21),sender_id:801,recipient_id:804,sender_name:'王小明',recipient_name:'張美玲',partner_id:804,partner_name:'張美玲'}
+  ];
+
+  // ---------- 示意 API 路由 ----------
+  const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
+  // 未知 GET：回傳「可當陣列也可當物件」的空資料，讓模組顯示空狀態而不是報錯。
+  function emptyish(){const a=[];for(const k of ['rows','items','records','staff','communities','sops','todos','pins','entries','locations','routes','submissions','templates','admins','messages','conversations','recipients','platformResources','companyResources','globalTemplates','companyTemplates','problems','questions','managers'])a[k]=[];a.success=true;a.preview=true;return a;}
+  const GET=[
+    [/^\/api\/form-config$/,()=>'passthrough'],
+    [/^\/api\/staff\/session$/,()=>({loggedIn:true,entry:'staff',user:staffUser()})],
+    [/^\/api\/staff\/branding$/,()=>ctx.branding||{}],
+    [/^\/api\/staff\/menu-config$/,()=>({scope:'staff',items:ctx.menu})],
+    [/^\/api\/staff\/profile$/,()=>({...staffUser(),site_assignments:siteAssignments})],
+    [/^\/api\/staff\/communities$/,()=>COMMUNITIES],
+    [/^\/api\/staff\/dashboard-pins$/,()=>{const leaf=ctx.menu.filter(x=>x.parentId&&x.enabled!==false).slice(0,3);return {pins:leaf.map((item,i)=>({menu_id:item.id,sort_order:i,item}))};}],
+    [/^\/api\/staff\/todos\/archived$/,()=>({todos:[{id:9,content:'中秋節社區活動場地復原',status:'done',created_at:iso(-12),completed_at:iso(-11),created_by_name:'林雅婷',completed_by_name:'王小明'}]})],
+    [/^\/api\/staff\/todos$/,()=>({todos})],
+    [/^\/api\/staff\/drafts$/,()=>({drafts:[]})],
+    [/^\/api\/staff\/residents$/,(u)=>({community:COMMUNITIES[0],category:u.searchParams.get('category')||'residents-contact',records:residents,preference:{sort:'building'},last_import:{original_filename:'住戶資料表(示意).xlsx',imported_at:iso(-5),imported_by_name:'王小明'},viewer:{can_upload:true}})],
+    [/^\/api\/staff\/platform-resources$/,()=>({platformResources:resources,companyResources:[]})],
+    [/^\/api\/staff\/company-resources$/,()=>({platformResources:resources,companyResources:[],resources})],
+    [/^\/api\/staff\/sops$/,()=>({sops,viewer:{job_level:'經理',manager:true,can_upload:true,upload_communities:COMMUNITIES,upload_scope:'assigned'}})],
+    [/^\/api\/staff\/manager-checklist$/,async()=>{const r=await realFetch('/api/form-config',{credentials:'same-origin'});const c=r.ok?await r.json():{pages:[],questions:[]};return {version:'central-manager',formConfig:{title:c.title||'社區交接清冊',subtitle:c.subtitle||'',pages:c.pages||[],questions:c.questions||[]},communities:COMMUNITIES};}],
+    [/^\/api\/staff\/schedule\/community-view$/,()=>({month,communities:COMMUNITIES,selected_community_id:901,staff:PEOPLE.filter(p=>p.work_type!=='internal'),entries:scheduleEntries(),profile:scheduleProfile,self_off_dates:[],off_conflicts:[]})],
+    [/^\/api\/staff\/schedule\/(month|community)$/,()=>({month,category:'admin',profile:scheduleProfile,entries:scheduleEntries().filter(e=>e.staff_id===801),communities:COMMUNITIES,problems:[],rules:[]})],
+    [/^\/api\/staff\/schedule\/(rules|requests|overtime)$/,()=>({rules:COMMUNITIES.map(c=>({community_id:c.id,name:c.name,config:{mode:'rotation',rest_days:8}})),rows:[]})],
+    [/^\/api\/staff\/attendance\/bootstrap$/,()=>({rules:{enabled:true,default_checkin_radius_m:80},communities:COMMUNITIES,locations:attLocations,routes:attRoutes,active_community_id:901,patrol_access:{901:true,902:false},can_manage_patrol:true})],
+    [/^\/api\/staff\/attendance\/records$/,()=>({rows:attRecords})],
+    [/^\/api\/staff\/attendance\/patrol-management$/,()=>({locations:attLocations.filter(l=>l.location_type==='patrol')})],
+    [/^\/api\/staff\/attendance\/patrol-status$/,()=>({summary:{people:1,scans:2,points:2},rows:attRecords.filter(r=>r.record_type==='patrol')})],
+    [/^\/api\/messages\/unread-count$/,()=>({count:1})],
+    [/^\/api\/messages\/recipients$/,()=>({recipients:PEOPLE.filter(p=>p.id!==801).map(p=>({...p,role:'staff',communities:COMMUNITIES[0].name}))})],
+    [/^\/api\/messages\/conversation\/\d+/,()=>({partner:PEOPLE[3],messages})],
+    [/^\/api\/messages(\/conversations)?$/,()=>({messages,conversations:[{partner_id:804,partner_name:'張美玲',last_body:messages[1].body,last_at:messages[1].created_at,unread:1}]})],
+    // 公司內勤
+    [/^\/api\/company\/session$/,()=>({loggedIn:true,entry:'company',user:companyUser(),tenant:{id:ctx.tenant.id,name:ctx.tenant.name}})],
+    [/^\/api\/company\/branding$/,()=>ctx.branding||{}],
+    [/^\/api\/company\/menu-config$/,()=>({scope:'company',items:ctx.menu})],
+    [/^\/api\/company\/site-menu-config$/,()=>({scope:'staff',items:ctx.siteMenu||[]})],
+    [/^\/api\/company\/staff$/,()=>PEOPLE.map(p=>({...p,is_active:1,role:'staff',permissions:p.work_type==='internal'?['finance','company-resources']:SITE_PERMS,job_categories:[p.job_category],site_assignments:p.work_type==='internal'?[]:[{community_id:901,community_name:COMMUNITIES[0].name}],community_ids:p.work_type==='internal'?[]:[901],last_login_at:iso(-1),created_at:iso(-90)}))],
+    [/^\/api\/company\/communities$/,()=>COMMUNITIES.map(c=>({...c,tenant_id:ctx.tenant.id,created_at:iso(-200)}))],
+    [/^\/api\/company\/submissions$/,()=>({submissions:[{id:1,created_at:iso(-6),employee_id:'D001',staff_name:'王小明',data:{community_name:COMMUNITIES[0].name,handover_date:ymd(today)}}],questions:[]})],
+    [/^\/api\/company\/templates$/,()=>({globalTemplates:[{id:1,name:'平台交接清冊範本',filename:'demo.docx',is_active:1,created_at:iso(-100)}],companyTemplates:[]})],
+    [/^\/api\/company\/platform-resources$/,()=>({platformResources:resources,companyResources:[]})],
+    [/^\/api\/company\/admins$/,()=>({admins:[{id:810,employee_id:'A001',name:'公司管理員（示意）',admin_level:'owner',is_active:1,last_login_at:iso(0)}],current_user_id:810,current_admin_level:'owner'})],
+    [/^\/api\/company\/sops$/,()=>({sops})],
+    [/^\/api\/company\/sops\/upload-context$/,()=>({communities:COMMUNITIES,managers:[PEOPLE[0]],current_uploader_id:810,current_uploader_name:'公司管理員（示意）'})],
+    [/^\/api\/company\/schedule\/staff$/,()=>({staff:PEOPLE.filter(p=>p.work_type!=='internal').map(p=>({...p,is_active:1,job_categories:[p.job_category],schedule_profile:{...scheduleProfile,staff_id:p.id,schedule_role:p.job_category==='保全'?'security':p.job_category==='機動'?'mobile':'admin'},site_assignments:siteAssignments.slice(0,1)})),communities:COMMUNITIES})],
+    [/^\/api\/company\/schedule\/month$/,(u)=>{const cat=u.searchParams.get('category')||'security';return {month,category:cat,community_id:901,entries:scheduleEntries().filter(e=>e.category===cat),problems:[]};}],
+    [/^\/api\/company\/schedule\/rules$/,(u)=>({tenant_id:ctx.tenant.id,community_id:null,category:u.searchParams.get('category')||'security',config:{mode:'rotation',rest_days:8,self_select_days:2,max_consecutive:6,shift:'day'}})],
+    [/^\/api\/company\/schedule\/menu-state$/,()=>({enabled:true,items:[]})],
+    [/^\/api\/company\/attendance\/bootstrap$/,()=>({rules:{enabled:true,default_checkin_radius_m:80,patrol_qr_radius_m:30},communities:COMMUNITIES,locations:attLocations,routes:attRoutes})],
+    [/^\/api\/company\/attendance\/records$/,()=>({rows:attRecords})],
+    [/^\/api\/company\/attendance\/routes$/,()=>({routes:attRoutes})],
+    [/^\/api\/company\/attendance\/patrol-staff$/,()=>({community:COMMUNITIES[0],staff:PEOPLE.filter(p=>p.work_type!=='internal').map(p=>({...p,is_patrol:p.job_category==='保全'}))})],
+    [/^\/api\/company\/attendance\/maps-config$/,()=>({configured:false,key:''})],
+    [/^\/api\/company\/message-audit\/access$/,()=>({enabled:false,authorized:false,user_id:810})],
+    [/^\/api\/company\/personnel-archive/,()=>[]]
+  ];
+  function previewToast(text){
+    let t=document.getElementById('previewToast');
+    if(!t){t=document.createElement('div');t.id='previewToast';t.setAttribute('role','status');document.body.appendChild(t);}
+    t.textContent=text;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);
+  }
+  async function mockFetch(input,init={}){
+    const url=new URL(typeof input==='string'?input:input.url,location.origin);
+    const method=String(init.method||(typeof input==='object'&&input.method)||'GET').toUpperCase();
+    if(url.origin!==location.origin) return json({error:'預覽模式不連線外部網站'},403);
+    if(!url.pathname.startsWith('/api/')) return realFetch(input,init); // 靜態檔（範本 html、css）
+    if(method!=='GET'){
+      previewToast('預覽模式：此操作不會儲存，也不會修改任何正式資料。');
+      if(/\/(login)$/.test(url.pathname)) return json({success:true,user:staffUser()});
+      if(/\/logout$/.test(url.pathname)) return json({success:true});
+      return json({success:true,preview:true,id:0,rows:[],items:[]});
+    }
+    for(const [re,fn] of GET){
+      if(re.test(url.pathname)){
+        const out=await fn(url);
+        if(out==='passthrough') return realFetch(url.pathname+url.search,{credentials:'same-origin'});
+        return json(out);
+      }
+    }
+    return json(emptyish());
+  }
+
+  // ---------- 開機 ----------
+  async function adminJson(path){const r=await realFetch(path,{credentials:'same-origin',cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`讀取失敗（${r.status}）`);return d;}
+  function showFatal(msg){document.body.innerHTML=`<div style="font-family:sans-serif;padding:32px;color:#7a2e1f"><h2>預覽無法載入</h2><p>${esc(msg)}</p><p style="color:#555">請確認仍以系統總管理員身分登入總後台。</p></div>`;}
+  async function boot(){
+    try{
+      const q=tenantId?`tenant_id=${tenantId}&`:'';
+      const [menu,siteMenu]=await Promise.all([adminJson(`/api/admin/menu-preview?${q}scope=${scope}`),scope==='company'?adminJson(`/api/admin/menu-preview?${q}scope=staff`):Promise.resolve(null)]);
+      ctx.menu=menu.items||[];ctx.siteMenu=siteMenu?.items||[];
+      if(menu.tenant)ctx.tenant={id:menu.tenant.id,name:menu.tenant.name};else ctx.tenant={id:0,name:'平台預設（示意公司）'};
+      if(tenantId){try{ctx.branding=await adminJson(`/api/admin/tenants/${tenantId}/branding`);}catch{ctx.branding=null;}}
+    }catch(e){showFatal(e.message);return;}
+
+    // 從這一刻起，所有程式的 API 呼叫都只會拿到示意資料。
+    window.fetch=mockFetch;
+    window.open=function(){previewToast('預覽模式不提供檔案下載或開新視窗。');return null;};
+    document.addEventListener('click',e=>{
+      const a=e.target.closest?.('a[href]');
+      if(a){const href=a.getAttribute('href')||'';if(href&&!href.startsWith('#')&&!href.startsWith('javascript:')){e.preventDefault();e.stopPropagation();previewToast('預覽模式不會離開此頁面。');return;}}
+      if(e.target.closest?.('#logoutBtn,#staffEntryLink,#staffLogoutBtn,[data-logout]')){e.preventDefault();e.stopImmediatePropagation();previewToast('預覽模式不提供登出。');}
+    },true);
+    document.addEventListener('submit',e=>{const f=e.target;if(f&&f.getAttribute('action')){e.preventDefault();previewToast('預覽模式：此操作不會儲存。');}},true);
+
+    const page=scope==='company'?'company.html':'index.html';
+    const html=await (await realFetch(page,{cache:'no-store'})).text();
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    doc.querySelectorAll('link[rel=stylesheet]').forEach(l=>{const n=document.createElement('link');n.rel='stylesheet';n.href=l.getAttribute('href');document.head.appendChild(n);});
+    doc.querySelectorAll('head style').forEach(s=>document.head.appendChild(s.cloneNode(true)));
+    const scripts=[...doc.querySelectorAll('script')];
+    scripts.forEach(s=>s.remove());
+    const banner=document.createElement('div');
+    banner.className='preview-banner';
+    banner.innerHTML=`<strong>預覽模式</strong><span>${esc(ctx.tenant.name)}｜${scope==='company'?'公司內勤':'社區駐點／現場人員'}</span><span class="preview-banner-note">示意資料・所有變更都不會儲存</span>`;
+    document.body.innerHTML=doc.body.innerHTML;
+    document.body.prepend(banner);
+    document.body.classList.add('is-admin-preview');
+    for(const s of scripts){
+      await new Promise(resolve=>{
+        const n=document.createElement('script');
+        if(s.src){n.src=s.getAttribute('src');n.onload=resolve;n.onerror=resolve;}
+        else{n.textContent=s.textContent;}
+        document.body.appendChild(n);
+        if(!s.src)resolve();
+      });
+    }
+    // 預覽頁路徑不是 company.html／index.html，側邊欄不會自動判斷工作空間，這裡主動載入一次。
+    if(scope==='company')setTimeout(()=>window.refreshWorkspaceMenu?.('company'),300);
+    if(initialAction){
+      const item=ctx.menu.find(x=>String(x.action)===initialAction||String(x.id)===initialAction);
+      setTimeout(()=>document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:item?.action||initialAction,id:item?.id||initialAction,label:item?.label||''}})),700);
+    }
+    try{parent.postMessage({type:'admin-preview-ready',scope,tenant:ctx.tenant,menu:ctx.menu},location.origin);}catch{}
+  }
+  window.addEventListener('message',e=>{
+    if(e.origin!==location.origin||e.data?.type!=='admin-preview-open')return;
+    const d=e.data;document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:d.action,id:d.id,label:d.label}}));
+  });
+  boot();
+})();
