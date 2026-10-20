@@ -354,8 +354,17 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
 
 // 目錄設定使用的動作代碼與程式內部代碼對照（目錄的 handover-manager 等原本沒有對應，點了只會看到「建置中」）。
 const WORKSPACE_ACTION_ALIASES={'handover':'checklist','handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
+// 企業自訂目錄若沒有設定功能代碼（placeholder），依名稱對應到已上線的功能
+const WORKSPACE_LABEL_ACTIONS=[['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop']];
+function resolveWorkspaceAction(detail){
+  const raw=String(detail?.action||'');
+  if(raw&&raw!=='placeholder')return WORKSPACE_ACTION_ALIASES[raw]||raw;
+  const label=String(detail?.label||'');
+  const hit=WORKSPACE_LABEL_ACTIONS.find(([k])=>label.includes(k));
+  return hit?hit[1]:raw;
+}
 async function handleWorkspaceMenu(e){
-  const {label}=e.detail||{};const action=WORKSPACE_ACTION_ALIASES[e.detail?.action]||e.detail?.action;
+  const {label}=e.detail||{};const action=resolveWorkspaceAction(e.detail);
   if(['staff-schedule','staff-schedule-community','staff-schedule-self-select'].includes(action)){
     try{await loadStaffSchedulePage(action==='staff-schedule-self-select'?'self':'community',label||'班表');}catch(err){showWorkspaceError(label||'班表',err);}
     return;
