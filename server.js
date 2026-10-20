@@ -420,6 +420,18 @@ function readMenuConfig(){
     c._giftsMenuAdded=1;
     try{writeMenuConfig(c);}catch(e){console.error('gifts menu migration error',e);}
   }
+  // 一次性升級：會計底下加入薪資三項、人事管理改為人事資料（企業覆寫依 _base 規則自動取得新項目）。
+  if(!c._payrollMenuAdded){
+    try{
+      const acc=c.company.find(x=>String(x.id)==='company-accounting');
+      if(acc&&!c.company.some(x=>String(x.action||'').startsWith('payroll-'))){
+        let i=c.company.indexOf(acc)+1;while(i<c.company.length&&String(c.company[i].parentId||'')==='company-accounting')i++;
+        c.company.splice(i,0,{id:'company-payroll-stats',parentId:'company-accounting',icon:'↳',label:'人員薪資統計表',action:'payroll-stats',enabled:true},{id:'company-payroll-slips',parentId:'company-accounting',icon:'↳',label:'人員薪資單',action:'payroll-slips',enabled:true},{id:'company-payroll-advances',parentId:'company-accounting',icon:'↳',label:'借資',action:'payroll-advances',enabled:true});
+      }
+      const hr=c.company.find(x=>String(x.id)==='company-hr');if(hr&&hr.action==='manage-staff')hr.action='hr-records';
+      c._payrollMenuAdded=1;writeMenuConfig(c);
+    }catch(e){console.error('payroll menu migration error',e);}
+  }
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
   // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
@@ -524,8 +536,8 @@ function menuPermissionKey(item,scope='staff'){
   const rules=[
     // 只比對公司後台的人員管理項目；不可用 'staff' 子字串，否則 staff-schedule、staff-attendance 等現場目錄
     // 都會被判成「公司人員管理」而在現場工作台被整組隱藏。
-    ['manage-staff',['company-staff','manage-staff','人員管理','公司人員']],['attendance',['attendance','出勤與巡邏','打卡','巡邏']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
-    ['todo',['todo','代辦事項']],['work-journal',['work-journal','工作日誌']],['finance',['finance','財務','會計']],['committee',['committee','管理委員會']],['residents',['residents','住戶名冊']],['vendors',['vendors','廠商聯繫']],['handover',['handover','交接清冊']],['company-resources',['company-resources','公司資源']]
+    ['manage-staff',['company-staff','manage-staff','人員管理','公司人員','hr-records','人事管理']],['attendance',['attendance','出勤與巡邏','打卡','巡邏']],['manage-communities',['communities','社區管理']],['view-submissions',['submissions','交接紀錄']],['manage-templates',['templates','公司文件','範本']],['manage-sop',['manage-sop']],['schedule',['schedule','班表']],
+    ['todo',['todo','代辦事項']],['work-journal',['work-journal','工作日誌']],['finance',['finance','財務','會計','payroll','薪資','借資','借支']],['committee',['committee','管理委員會']],['residents',['residents','住戶名冊']],['vendors',['vendors','廠商聯繫']],['handover',['handover','交接清冊']],['company-resources',['company-resources','公司資源']]
   ];
   for(const [key,terms] of rules) if(terms.some(t=>raw.includes(String(t).toLowerCase()))) return key;
   return null;
@@ -1138,7 +1150,8 @@ app.get('/api/staff/profile',requireStaff,(req,res)=>{
   const t=db.prepare('SELECT id,name FROM tenants WHERE id=?').get(u.tenant_id);
   const communities=u.role==='company_admin'
     ? db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tenantId(req))
-    : db.prepare("SELECT c.id,c.name,c.status FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name").all(tenantId(req),u.id);
+    // 服務案場以「人員設定 → 案場派駐」為準（與班表、工作日誌一致），沒有派駐資料時才用舊表
+    : getSiteAssignments(u).map(a=>({id:Number(a.community_id),name:a.community_name,status:'active'})).filter(c=>c.id);
   res.json({
     employee_id:u.employee_id,
     name:u.name,
@@ -1152,13 +1165,8 @@ app.get('/api/staff/profile',requireStaff,(req,res)=>{
     company_assignment:getCompanyAssignment(u),
     tenant_name:t?.name||'',
     communities,
-    salary:{
-      trial_end_date:u.trial_end_date||'',
-      formal_salary:u.formal_salary||'',
-      insurance_level:u.insurance_level||'',
-      health_dependents:Number(u.health_dependents||0)
-    },
-    payslip:{available:false,message:'本月薪資單尚未建立'}
+    // 薪資相關、本月薪資單、借資：來自人事管理與薪資模組（payroll-routes.js）
+    ...payroll.profileExtras(u)
   });
 });
 
@@ -2534,6 +2542,8 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
 })();
 
 // ===== 工作日誌（每日／每週）：路由在 journal-routes.js =====
+// ===== 人事管理、借資、人員薪資統計表、人員薪資單、投保級距表 =====
+const payroll=require('./payroll-routes')(app,{db,fs,path,DATA_DIR,XLSX,getUser,tenantId,now,effectivePermissions,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments});
 // ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
 handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});

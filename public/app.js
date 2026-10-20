@@ -98,32 +98,48 @@ async function showStaffProfile(user){
         <span><strong>薪資相關</strong><small>試用期、正式薪資、投保等資料</small></span><b>›</b>
       </button>
       <button type="button" class="monthly-payslip-card" id="monthlyPayslipBtn">
-        <span><strong>本月薪資單</strong><small>點選查看當月薪資單</small></span><b>›</b>
+        <span><strong>本月薪資單</strong><small>${d.payslip?.available?`${escapeHtml(d.payslip.month.slice(0,4)+' 年 '+Number(d.payslip.month.slice(5,7))+' 月')}｜實發 ${Number(d.payslip.net||0).toLocaleString('en-US')} 元${d.payslip.confirmed?'':'（待確認）'}`:'點選查看當月薪資單'}</small></span><b>›</b>
       </button>`;
-    modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard(salary));
-    modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d));
+    modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard(salary,d.advances));
+    modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d).catch(e=>alert(e.message)));
   }catch(e){modal.querySelector('#staffProfileBody').innerHTML=`<div class="profile-error">目前無法載入職員資料。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
-function openPayslipCard(profile){
+function payslipModal(inner){
   const old=document.getElementById('staffPayslipModal');if(old)old.remove();
   const modal=document.createElement('div');modal.id='staffPayslipModal';modal.className='modal-backdrop payslip-backdrop';
-  const now=new Date();const ym=`${now.getFullYear()} 年 ${now.getMonth()+1} 月`;
-  modal.innerHTML=`<div class="modal payslip-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">本月薪資單</div><h2>${escapeHtml(ym)}</h2><div class="payslip-empty"><strong>本月薪資單尚未建立</strong><p>待公司後台建立薪資資料後，這裡會顯示當月薪資單。</p></div></div>`;
+  modal.innerHTML=`<div class="modal payslip-modal" role="dialog" aria-modal="true" style="max-width:640px;width:min(640px,96vw);max-height:92vh;overflow:auto"><button type="button" class="modal-close" aria-label="關閉">×</button>${inner}</div>`;
   document.body.appendChild(modal);document.body.classList.add('modal-open');
   const close=()=>{modal.remove();document.body.classList.remove('modal-open')};modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
+  return {modal,close};
 }
-function openSalaryDetailsCard(salary){
-  salary=salary||{};
-  const old=document.getElementById('staffSalaryModal');if(old)old.remove();
-  const modal=document.createElement('div');modal.id='staffSalaryModal';modal.className='modal-backdrop payslip-backdrop';
-  modal.innerHTML=`<div class="modal payslip-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">薪資相關</div><h2>試用與投保資料</h2><div class="staff-profile-basic salary-details-body">
+async function openPayslipCard(profile,id){
+  const list=(await api('/api/staff/payslips').catch(()=>({payslips:[]}))).payslips||[];
+  if(!list.length){payslipModal(`<div class="eyebrow">本月薪資單</div><h2>${escapeHtml(new Date().getFullYear()+' 年 '+(new Date().getMonth()+1)+' 月')}</h2><div class="payslip-empty"><strong>薪資單尚未發布</strong><p>公司會計發布薪資單後，您會收到訊息通知，並可在這裡查看。</p></div>`);return;}
+  const pick=id||list[0].id;
+  const {payslip}=await api(`/api/staff/payslips/${pick}`);
+  const others=list.filter(x=>String(x.id)!==String(pick));
+  const {modal,close}=payslipModal(`${window.PayslipView?window.PayslipView.html(payslip):''}<div class="modal-actions">${payslip.confirmed_at?'':'<button type="button" id="payslipConfirm">✓ 已確認，金額無誤</button>'}</div>${others.length?`<div class="payslip-history" style="margin-top:14px"><div style="font-weight:800;font-size:.9rem;margin-bottom:6px">歷史薪資單</div>${others.map(x=>`<button type="button" data-slip="${x.id}" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin:0 0 6px;padding:10px 14px;border:1px solid #e1e9e5;border-radius:10px;background:#fff;color:#1d2a25;min-height:0;font-weight:700;text-align:left"><span>${escapeHtml(x.month.slice(0,4)+' 年 '+Number(x.month.slice(5,7))+' 月')}<small style="display:block;font-weight:400;color:#6a7a73">實發 ${Number(x.net||0).toLocaleString('en-US')} 元${x.confirmed_at?'｜已確認':'｜待確認'}</small></span><span>›</span></button>`).join('')}</div>`:''}`);
+  modal.querySelector('#payslipConfirm')?.addEventListener('click',async()=>{try{await api(`/api/staff/payslips/${pick}/confirm`,{method:'POST'});close();openPayslipCard(profile,pick);}catch(e){alert(e.message)}});
+  modal.querySelectorAll('[data-slip]').forEach(b=>b.addEventListener('click',()=>{close();openPayslipCard(profile,b.dataset.slip);}));
+}
+function openSalaryDetailsCard(salary,advances){
+  salary=salary||{};advances=advances||[];
+  const money=v=>Number(v||0).toLocaleString('en-US');
+  const yes=(on,txt)=>on?txt:'<span style="color:#999">未加保</span>';
+  const allow=(salary.allowances||[]).map(a=>`${escapeHtml(a.name)} ${money(a.amount)}`).join('、');
+  const ee=salary.employee_insurance||{};const eeSum=Number(ee.labor||0)+Number(ee.health||0)+Number(ee.pension_self||0);
+  payslipModal(`<div class="eyebrow">薪資相關</div><h2>人事與投保資料</h2><div class="staff-profile-basic salary-details-body">
+    <div><span>到職日</span><strong>${salary.hire_date?escapeHtml(salary.hire_date):'尚未設定'}</strong></div>
     <div><span>試用期</span><strong>${salary.trial_end_date?`至 ${escapeHtml(salary.trial_end_date)}`:'尚未設定'}</strong></div>
-    <div><span>正式薪資</span><strong>${salary.formal_salary?escapeHtml(salary.formal_salary):'尚未設定'}</strong></div>
-    <div><span>投保級距</span><strong>${salary.insurance_level?escapeHtml(salary.insurance_level):'尚未設定'}</strong></div>
-    <div><span>健保眷屬</span><strong>${Number.isFinite(Number(salary.health_dependents))?Number(salary.health_dependents):0} 人</strong></div>
-  </div></div>`;
-  document.body.appendChild(modal);document.body.classList.add('modal-open');
-  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
+    <div><span>正式薪資（底薪）</span><strong>${salary.formal_salary?`${money(salary.formal_salary)} 元`:'尚未設定'}</strong></div>
+    ${allow?`<div><span>固定加給</span><strong>${allow}</strong></div>`:''}
+    <div><span>勞保投保薪資</span><strong>${yes(salary.labor_insured,salary.insurance_level?`${money(salary.insurance_level)} 元${salary.employment_insured?'（含就保）':''}`:'尚未設定')}</strong></div>
+    <div><span>健保投保金額</span><strong>${yes(salary.health_insured,salary.health_grade?`${money(salary.health_grade)} 元`:'尚未設定')}</strong></div>
+    <div><span>健保眷屬</span><strong>${Number(salary.health_dependents||0)} 人</strong></div>
+    <div><span>勞退</span><strong>${salary.pension_enabled?`公司提繳 6%${salary.pension_self_rate?`，自提 ${salary.pension_self_rate}%`:''}`:'未提繳'}</strong></div>
+    ${salary.configured?`<div><span>每月保費自付</span><strong>${money(eeSum)} 元</strong></div>`:''}
+    ${advances.map(a=>`<div><span>借資餘額</span><strong>${money(a.balance)} 元（每月扣回 ${money(a.monthly_deduct)}）</strong></div>`).join('')}
+  </div><p class="hint" style="margin-top:10px">資料由公司人事維護，如有錯誤請洽人事或會計。</p>`);
 }
 
 

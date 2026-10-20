@@ -88,6 +88,11 @@ const COMPANY_ACTION_ALIASES={'manage-staff':'staff','manage-communities':'commu
 document.addEventListener('workspace-menu',async e=>{
   const a=COMPANY_ACTION_ALIASES[e.detail?.action]||e.detail?.action;
   const tabs=['overview','staff','communities','submissions','templates'];
+  // 人事管理、人員薪資統計表、人員薪資單、借資（企業自訂目錄依名稱對應）
+  {const L=String(e.detail?.label||'');const PA={'hr-records':'hr','payroll-stats':'stats','payroll-slips':'slips','payroll-advances':'advances'};
+   const byLabel=[['人事管理','hr'],['薪資統計','stats'],['薪資單','slips'],['借資','advances'],['借支','advances']].find(([k])=>L.includes(k));
+   const view=PA[a]||(byLabel?byLabel[1]:null);
+   if(view){const workspace=$('companyWorkspace');try{if(!window.PayrollCompanyModule)throw new Error('薪資模組尚未載入，請重新整理頁面');if(!workspace)throw new Error('找不到公司工作頁面。');document.querySelectorAll('[id^="tab-"]').forEach(el=>el.style.display='none');workspace.classList.remove('schedule-workpage');workspace.classList.add('panel');workspace.style.display='block';workspace.innerHTML='<div class="profile-loading">讀取中…</div>';await window.PayrollCompanyModule.render(workspace,view,L||undefined);}catch(err){if(workspace){workspace.style.display='block';workspace.innerHTML=`<div class="msg error">${escapeHtml(err?.message||'無法開啟')}</div>`;}else alert(err?.message||'無法開啟');}return;}}
   if(tabs.includes(a)){document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));for(const id of tabs){const el=$(`tab-${id}`);if(el)el.style.display=a===id?'block':'none';}const cw=$('companyWorkspace');if(cw)cw.style.display='none';return;}
   if(['schedule-month','schedule-staff','schedule-community','schedule-swap','schedule-leave','schedule-overtime'].includes(a)){openScheduleModule(a,e.detail?.label||'班表');return;}
   if(['attendance','attendance-locations','attendance-records','patrol-management','patrol-records'].includes(a)){if(!window.AttendanceCompanyModule){alert('出勤與巡邏模組尚未載入，請重新整理頁面');return;}try{await window.AttendanceCompanyModule.render(a,e.detail?.label||'出勤與巡邏')}catch(err){alert(err.message||'出勤與巡邏模組載入失敗')}return;}

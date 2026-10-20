@@ -165,3 +165,15 @@ body.admin-console td .secondary,body.admin-console td .danger{margin:2px 4px 2p
 .stk-b{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line,#ddd);border-radius:999px;padding:6px 14px 6px 10px;margin:0;font-weight:700;cursor:pointer;background:#fff}
 .stk-b input{width:auto;margin:0}.stk-b-emoji{font-size:1.3rem}
 .stk-b:has(input:not(:checked)){opacity:.45}
+
+/* ===== 投保級距表 ===== */
+.ins-status{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.ins-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:10px}
+.ins-card{border:1px solid var(--line,#ddd);border-radius:12px;padding:10px 12px;background:#fff}
+.ins-card h4{margin:0 0 8px;font-size:.92rem}
+.ins-list{display:flex;flex-wrap:wrap;gap:5px}
+.ins-list span{background:#f4f8f6;border-radius:8px;padding:2px 8px;font-size:.8rem;font-variant-numeric:tabular-nums}
+.ins-list small{color:#8a958f;margin-right:4px;font-size:.68rem}
+.ins-rates{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px}
+.ins-rates div{display:flex;justify-content:space-between;border-bottom:1px dashed #e6ece9;padding:3px 0;font-size:.86rem}
+@media(max-width:800px){.ins-grid{grid-template-columns:1fr}}
