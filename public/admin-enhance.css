@@ -134,3 +134,18 @@ body.admin-console td .secondary,body.admin-console td .danger{margin:2px 4px 2p
 .gift-form-fields input:not([type=checkbox]),.gift-form-fields textarea{width:100%;box-sizing:border-box;margin:0;font-weight:400}
 .gift-form-fields .check-row{flex-direction:row;align-items:center;gap:8px;font-weight:600}
 @media(max-width:760px){.gift-form-logo{display:grid;grid-template-columns:120px minmax(0,1fr);gap:4px 12px;align-items:start}.gift-form-logo .gift-logo-preview{grid-row:1/3;margin:0}.gift-form-logo .hint{margin:0}.gift-form .modal-actions{position:sticky;bottom:-1px;background:#fff;padding-bottom:4px}.gift-admin-row{grid-template-columns:72px minmax(0,1fr);}.gift-admin-logo{width:72px;height:56px}.gift-admin-status{grid-column:2}.gift-admin-actions{grid-column:1/-1;justify-content:flex-start}.gift-form{grid-template-columns:1fr}}
+
+/* ===== 中央表單設計中心：交接清冊經理／秘書版、智慧題目 ===== */
+.ho-role-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.ho-role-tabs button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 18px;min-width:200px;text-align:left}
+.ho-role-tabs button small{font-weight:400;opacity:.8;font-size:.78rem}
+.ho-smart-guide{background:#f4f9f6;border:1px solid #d6e8de;border-radius:12px;padding:12px 16px;font-size:.88rem;line-height:1.7}
+.ho-smart-guide ul{margin:6px 0 0;padding-left:20px}
+.ho-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.ho-chip{display:inline-block;padding:2px 9px;border-radius:999px;background:#e6f2fb;color:#1e5f8c;font-size:.74rem;font-weight:700}
+.ho-chip.cond{background:#f3ecfb;color:#5b3a8c}.ho-chip.req{background:#fdecec;color:#a33}
+.question-card textarea{width:100%;box-sizing:border-box;margin-bottom:9px;min-height:70px}
+.ho-cond-row>div{display:flex;gap:8px;flex-wrap:wrap}.ho-cond-row select,.ho-cond-row input{flex:1;min-width:150px}
+.question-card input:not([type=checkbox]):not([type=radio]),.page-card input,.jta-row input:not([type=checkbox]):not([type=radio]),.jta-custom input{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--line,#d9e2dd);border-radius:8px;background:#fff;font:inherit}
+.jta-row input:not([type=checkbox]):not([type=radio]){width:auto;flex:1}
+.question-card input:focus,.page-card input:focus,.jta-row input:focus,.jta-custom input:focus{outline:2px solid rgba(46,107,79,.25);border-color:var(--accent,#2E6B4F)}

@@ -73,6 +73,9 @@ addColumnIfMissing('submissions', 'tenant_id', "INTEGER");
 addColumnIfMissing('submissions', 'community_id', "INTEGER");
 addColumnIfMissing('drafts', 'tenant_id', "INTEGER");
 addColumnIfMissing('drafts', 'community_id', "INTEGER");
+// 交接清冊類型：manager（經理）／secretary（秘書）。既有資料都是經理版。
+addColumnIfMissing('drafts', 'form_type', "TEXT DEFAULT 'manager'");
+addColumnIfMissing('submissions', 'form_type', "TEXT DEFAULT 'manager'");
 addColumnIfMissing('templates', 'tenant_id', "INTEGER");
 
   // 平台公版文件／公司資源（與交接 Word 範本分離，支援一般文書檔案）

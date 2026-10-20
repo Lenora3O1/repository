@@ -334,6 +334,8 @@ function readFormConfig(){
   return config;
 }
 function writeFormConfig(config){fs.writeFileSync(FORM_CONFIG_PATH,JSON.stringify(config,null,2),'utf-8');}
+// 交接清冊：經理版／秘書版分開（handover-forms.js）
+const handover=require('./handover-forms')({fs,path,DATA_DIR,readFormConfig,writeFormConfig});
 const PLATFORM_STAFF_SCHEDULE_MENU = [
   {id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true},
   {id:'staff-schedule-community',parentId:'staff-schedule',icon:'↳',label:'案場全班班表',action:'staff-schedule-community',enabled:true},
@@ -1136,14 +1138,21 @@ app.get('/api/staff/communities',requireStaff,(req,res)=>{
 
 // ===== 員工草稿 =====
 app.get('/api/staff/drafts',requireStaffFiller,(req,res)=>{
-  const rows=db.prepare('SELECT id,created_at,updated_at,current_page,data,community_id FROM drafts WHERE employee_id=? AND tenant_id=? ORDER BY updated_at DESC').all(req.session.employeeId,tenantId(req));
-  res.json(rows.map(r=>({id:r.id,created_at:r.created_at,updated_at:r.updated_at,current_page:r.current_page,community_id:r.community_id,data:JSON.parse(r.data)})));
+  const type=req.query.form_type?handover.cleanFormType(req.query.form_type):null;
+  const rows=type
+    ?db.prepare("SELECT id,created_at,updated_at,current_page,data,community_id,COALESCE(form_type,'manager') form_type FROM drafts WHERE employee_id=? AND tenant_id=? AND COALESCE(form_type,'manager')=? ORDER BY updated_at DESC").all(req.session.employeeId,tenantId(req),type)
+    :db.prepare("SELECT id,created_at,updated_at,current_page,data,community_id,COALESCE(form_type,'manager') form_type FROM drafts WHERE employee_id=? AND tenant_id=? ORDER BY updated_at DESC").all(req.session.employeeId,tenantId(req));
+  res.json(rows.map(r=>({id:r.id,created_at:r.created_at,updated_at:r.updated_at,current_page:r.current_page,community_id:r.community_id,form_type:r.form_type,data:JSON.parse(r.data)})));
 });
 app.post('/api/staff/drafts',requireStaffFiller,(req,res)=>{
   const data=cleanData(req.body?.data); const page=Math.max(0,Number(req.body?.current_page)||0); const communityId=req.body?.community_id?Number(req.body.community_id):null;
-  if(communityId && !getAccessibleCommunity(req,communityId)) return res.status(403).json({error:'您沒有這個社區的填寫權限'});
-  const t=now(); const info=db.prepare('INSERT INTO drafts (employee_id,tenant_id,community_id,created_at,updated_at,current_page,data) VALUES (?,?,?,?,?,?,?)').run(req.session.employeeId,tenantId(req),communityId,t,t,page,JSON.stringify(data));
-  res.json({success:true,id:info.lastInsertRowid,updated_at:t});
+  const community=communityId?getAccessibleCommunity(req,communityId):null;
+  if(communityId && !community) return res.status(403).json({error:'您沒有這個社區的填寫權限'});
+  const formType=handover.cleanFormType(req.body?.form_type);
+  // 智慧帶入：社區名稱、今天日期、填寫人、上次同社區同類型交接清冊的答案
+  if(req.body?.prefill){const form=handover.readForm(formType);const last=handover.lastSubmissionFor(db,tenantId(req),communityId,formType);Object.assign(data,{...handover.initialAnswers(form,{community,user:getUser(req),last:last?.data}),...data});}
+  const t=now(); const info=db.prepare('INSERT INTO drafts (employee_id,tenant_id,community_id,created_at,updated_at,current_page,data,form_type) VALUES (?,?,?,?,?,?,?,?)').run(req.session.employeeId,tenantId(req),communityId,t,t,page,JSON.stringify(data),formType);
+  res.json({success:true,id:info.lastInsertRowid,updated_at:t,form_type:formType,data});
 });
 app.put('/api/staff/drafts/:id',requireStaffFiller,(req,res)=>{
   const id=Number(req.params.id); const draft=db.prepare('SELECT * FROM drafts WHERE id=? AND employee_id=? AND tenant_id=?').get(id,req.session.employeeId,tenantId(req));
@@ -1156,15 +1165,17 @@ app.put('/api/staff/drafts/:id',requireStaffFiller,(req,res)=>{
 app.get('/api/staff/drafts/:id',requireStaffFiller,(req,res)=>{
   const r=db.prepare('SELECT * FROM drafts WHERE id=? AND employee_id=? AND tenant_id=?').get(Number(req.params.id),req.session.employeeId,tenantId(req));
   if(!r) return res.status(404).json({error:'找不到這份草稿'});
-  res.json({id:r.id,created_at:r.created_at,updated_at:r.updated_at,current_page:r.current_page,community_id:r.community_id,data:JSON.parse(r.data)});
+  res.json({id:r.id,created_at:r.created_at,updated_at:r.updated_at,current_page:r.current_page,community_id:r.community_id,form_type:r.form_type||'manager',data:JSON.parse(r.data)});
 });
 app.delete('/api/staff/drafts/:id',requireStaffFiller,(req,res)=>{db.prepare('DELETE FROM drafts WHERE id=? AND employee_id=? AND tenant_id=?').run(Number(req.params.id),req.session.employeeId,tenantId(req));res.json({success:true});});
 app.post('/api/staff/drafts/:id/submit',requireStaffFiller,(req,res)=>{
   const draft=db.prepare('SELECT * FROM drafts WHERE id=? AND employee_id=? AND tenant_id=?').get(Number(req.params.id),req.session.employeeId,tenantId(req));
   if(!draft) return res.status(404).json({error:'找不到這份草稿'});
-  const answers=JSON.parse(draft.data); const questions=readQuestions(); const missing=questions.filter(q=>q.required&&!String(answers[q.id]??'').trim());
+  const formType=handover.cleanFormType(draft.form_type); const form=handover.readForm(formType);
+  const raw=JSON.parse(draft.data); const missing=handover.missingRequired(form,raw);
   if(missing.length) return res.status(400).json({error:'有必填欄位未填寫',missing:missing.map(q=>q.label)});
-  const t=now(); const info=db.prepare('INSERT INTO submissions (created_at,updated_at,employee_id,employee_name,tenant_id,community_id,data) VALUES (?,?,?,?,?,?,?)').run(t,t,req.session.employeeId,req.session.employeeName,tenantId(req),draft.community_id,JSON.stringify(answers));
+  const answers=handover.cleanAnswersForSubmit(form,raw);
+  const t=now(); const info=db.prepare('INSERT INTO submissions (created_at,updated_at,employee_id,employee_name,tenant_id,community_id,data,form_type) VALUES (?,?,?,?,?,?,?,?)').run(t,t,req.session.employeeId,req.session.employeeName,tenantId(req),draft.community_id,JSON.stringify(answers),formType);
   db.prepare('DELETE FROM drafts WHERE id=? AND employee_id=? AND tenant_id=?').run(draft.id,req.session.employeeId,tenantId(req));
   res.json({success:true,id:info.lastInsertRowid});
 });
@@ -1399,14 +1410,14 @@ app.get('/api/admin/platform-rules/history',requireSuperAdmin,(req,res)=>{
 });
 
 app.get('/api/admin/submissions',requireSuperAdmin,(req,res)=>{
-  const rows=db.prepare(`SELECT s.id,s.created_at,s.updated_at,s.employee_id,s.employee_name,s.tenant_id,s.community_id,s.data,t.name tenant_name,c.name community_name FROM submissions s LEFT JOIN tenants t ON t.id=s.tenant_id LEFT JOIN communities c ON c.id=s.community_id ORDER BY s.id DESC`).all();
-  res.json({submissions:rows.map(r=>({...r,data:JSON.parse(r.data)})),questions:readQuestions()});
+  const rows=db.prepare(`SELECT s.id,s.created_at,s.updated_at,s.employee_id,s.employee_name,s.tenant_id,s.community_id,s.data,COALESCE(s.form_type,'manager') form_type,t.name tenant_name,c.name community_name FROM submissions s LEFT JOIN tenants t ON t.id=s.tenant_id LEFT JOIN communities c ON c.id=s.community_id ORDER BY s.id DESC`).all();
+  res.json({submissions:rows.map(r=>({...r,data:JSON.parse(r.data)})),questions:readQuestions(),forms:{manager:handover.readForm('manager'),secretary:handover.readForm('secretary')}});
 });
 app.delete('/api/admin/submissions/:id',requireSuperAdmin,(req,res)=>{db.prepare('DELETE FROM submissions WHERE id=?').run(req.params.id);res.json({success:true});});
 app.get('/api/admin/questions',requireSuperAdmin,(req,res)=>res.json(readQuestions()));
 app.put('/api/admin/questions',requireSuperAdmin,(req,res)=>{const list=req.body;if(!Array.isArray(list))return res.status(400).json({error:'格式錯誤'});const config=readFormConfig();config.questions=list;writeFormConfig(config);res.json({success:true});});
 app.get('/api/admin/form-config',requireSuperAdmin,(req,res)=>res.json(readFormConfig()));
-app.put('/api/admin/form-config',requireSuperAdmin,(req,res)=>{const config=req.body;if(!config||!Array.isArray(config.pages)||!Array.isArray(config.questions))return res.status(400).json({error:'表單設定格式錯誤'});const pageIds=new Set(config.pages.map(p=>p.id));const ids=config.questions.map(q=>q.id);if(new Set(ids).size!==ids.length)return res.status(400).json({error:'欄位代碼不能重複'});if(config.questions.some(q=>!pageIds.has(q.pageId)))return res.status(400).json({error:'有題目尚未指定有效頁面'});writeFormConfig(config);res.json({success:true});});
+app.put('/api/admin/form-config',requireSuperAdmin,(req,res)=>{try{handover.writeForm('manager',req.body);res.json({success:true});}catch(err){res.status(err.status||500).json({error:err.status?err.message:'儲存失敗'});}});
 
 // 總後臺可查看全部帳號，但一般公司管理操作應在公司後台進行
 app.get('/api/admin/staff',requireSuperAdmin,(req,res)=>{const rows=db.prepare(`SELECT u.id,u.employee_id,u.name,u.is_active,u.role,u.tenant_id,u.created_at,u.updated_at,t.name tenant_name FROM staff_users u LEFT JOIN tenants t ON t.id=u.tenant_id ORDER BY u.tenant_id,u.role DESC,u.employee_id`).all();res.json(rows);});
@@ -1434,7 +1445,7 @@ app.post('/api/company/communities',requireCompanyAdmin,requireCompanyPermission
 app.put('/api/company/communities/:id',requireCompanyAdmin,requireCompanyPermission('manage-communities'),(req,res)=>{const id=Number(req.params.id);const c=db.prepare('SELECT * FROM communities WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!c)return res.status(404).json({error:'找不到社區'});const name=String(req.body?.name||c.name).trim();const status=req.body?.status===undefined?c.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'社區名稱不可空白'});db.prepare('UPDATE communities SET name=?,status=?,updated_at=? WHERE id=? AND tenant_id=?').run(name,status,now(),id,tenantId(req));res.json({success:true});});
 app.get('/api/company/staff/:id/communities',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare('SELECT id FROM staff_users WHERE id=? AND tenant_id=?').get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});const rows=db.prepare('SELECT c.id,c.name,c.status,CASE WHEN sc.staff_id IS NULL THEN 0 ELSE 1 END assigned FROM communities c LEFT JOIN staff_communities sc ON sc.community_id=c.id AND sc.staff_id=? WHERE c.tenant_id=? ORDER BY c.name').all(id,tenantId(req));res.json(rows);});
 app.put('/api/company/staff/:id/communities',requireCompanyAdmin,requireCompanyPermission('manage-staff'),(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT * FROM staff_users WHERE id=? AND tenant_id=?").get(id,tenantId(req));if(!u)return res.status(404).json({error:'找不到人員'});if(u.role==='company_admin')return res.status(400).json({error:'公司管理員不需要設定社區權限'});const ids=Array.isArray(req.body?.community_ids)?req.body.community_ids.map(Number).filter(Boolean):[];const valid=new Set(db.prepare('SELECT id FROM communities WHERE tenant_id=?').all(tenantId(req)).map(x=>x.id));if(ids.some(x=>!valid.has(x)))return res.status(400).json({error:'包含不屬於本公司的社區'});const cats=getJobCategories(u),perms=parsePermissions(u);const tx=db.transaction(()=>{db.prepare('DELETE FROM staff_communities WHERE staff_id=?').run(id);const ins=db.prepare('INSERT INTO staff_communities (staff_id,community_id) VALUES (?,?)');for(const cid of ids)ins.run(id,cid);});tx();syncWorkAssignments(id,tenantId(req),u.work_type==='internal'?'internal':(u.work_type==='hybrid'?'hybrid':'site'),ids,cats,u.job_level||'',perms);res.json({success:true});});
-app.get('/api/company/submissions',requireCompanyAdmin,requireCompanyPermission('view-submissions'),(req,res)=>{const rows=db.prepare(`SELECT s.id,s.created_at,s.updated_at,s.employee_id,s.employee_name,s.community_id,s.data,c.name community_name FROM submissions s LEFT JOIN communities c ON c.id=s.community_id WHERE s.tenant_id=? ORDER BY s.id DESC`).all(tenantId(req));res.json({submissions:rows.map(r=>({...r,data:JSON.parse(r.data)})),questions:readQuestions()});});
+app.get('/api/company/submissions',requireCompanyAdmin,requireCompanyPermission('view-submissions'),(req,res)=>{const rows=db.prepare(`SELECT s.id,s.created_at,s.updated_at,s.employee_id,s.employee_name,s.community_id,s.data,COALESCE(s.form_type,'manager') form_type,c.name community_name FROM submissions s LEFT JOIN communities c ON c.id=s.community_id WHERE s.tenant_id=? ORDER BY s.id DESC`).all(tenantId(req));res.json({submissions:rows.map(r=>({...r,data:JSON.parse(r.data)})),questions:readQuestions(),forms:{manager:handover.readForm('manager'),secretary:handover.readForm('secretary')}});});
 // ===== 案場 SOP／智慧分流 =====
 function cleanSopCategory(v){const s=String(v||'').trim();return ['行政','勤務','應變','案場注意事項'].includes(s)?s:'行政';}
 function cleanSopScope(v){return String(v||'')==='community'?'community':'company_basic';}
@@ -2035,7 +2046,7 @@ function generateForSubmission(req,res,id,templateId){
   if(!submission)return res.status(404).json({error:'找不到該筆紀錄'});
   const template=templateId?db.prepare('SELECT * FROM templates WHERE id=? AND (tenant_id=? OR tenant_id IS NULL)').get(templateId,tenantId(req)):(db.prepare('SELECT * FROM templates WHERE tenant_id=? AND is_active=1').get(tenantId(req))||db.prepare('SELECT * FROM templates WHERE tenant_id IS NULL AND is_active=1').get());
   if(!template)return res.status(400).json({error:'尚未設定公司 Word 範本，請先到「Word 範本」上傳並啟用一份範本'});
-  try{const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),JSON.parse(submission.data));const d=JSON.parse(submission.data);const fileName=`交接清冊_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗，請確認範本內的 {{欄位代碼}} 是否正確',detail:err.message});}
+  try{const d=JSON.parse(submission.data);const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),handover.flattenForDocx(d));const fileName=`${handover.FORM_TYPES[handover.cleanFormType(submission.form_type)].label}_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗，請確認範本內的 {{欄位代碼}} 是否正確',detail:err.message});}
 }
 app.get('/api/company/generate/:submissionId',requireCompanyAdmin,requireCompanyPermission('view-submissions'),(req,res)=>generateForSubmission(req,res,Number(req.params.submissionId),req.query.templateId?Number(req.query.templateId):null));
 app.delete('/api/company/submissions/:id',requireCompanyAdmin,requireCompanyPermission('view-submissions'),(req,res)=>{db.prepare('DELETE FROM submissions WHERE id=? AND tenant_id=?').run(req.params.id,tenantId(req));res.json({success:true});});
@@ -2045,7 +2056,7 @@ app.get('/api/admin/templates',requireSuperAdmin,(req,res)=>res.json(db.prepare(
 app.post('/api/admin/templates',requireSuperAdmin,upload.single('template'),(req,res)=>{if(!req.file)return res.status(400).json({error:'未收到檔案'});const tid=req.body.tenant_id?Number(req.body.tenant_id):null;db.prepare('INSERT INTO templates (name,filename,is_active,created_at,tenant_id) VALUES (?,?,0,?,?)').run(req.body.name||req.file.originalname,req.file.filename,now(),tid);res.json({success:true});});
 app.post('/api/admin/templates/:id/activate',requireSuperAdmin,(req,res)=>{const tpl=db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);if(!tpl)return res.status(404).json({error:'找不到範本'});if(tpl.tenant_id===null) db.prepare('UPDATE templates SET is_active=0 WHERE tenant_id IS NULL').run(); else db.prepare('UPDATE templates SET is_active=0 WHERE tenant_id=?').run(tpl.tenant_id);db.prepare('UPDATE templates SET is_active=1 WHERE id=?').run(req.params.id);res.json({success:true});});
 app.delete('/api/admin/templates/:id',requireSuperAdmin,(req,res)=>{const tpl=db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);if(tpl){const p=path.join(TEMPLATES_DIR,tpl.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM templates WHERE id=?').run(req.params.id);}res.json({success:true});});
-app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const submission=db.prepare('SELECT * FROM submissions WHERE id=?').get(req.params.submissionId);if(!submission)return res.status(404).json({error:'找不到該筆紀錄'});const template=req.query.templateId?db.prepare('SELECT * FROM templates WHERE id=?').get(req.query.templateId):(db.prepare('SELECT * FROM templates WHERE tenant_id=? AND is_active=1').get(submission.tenant_id)||db.prepare('SELECT * FROM templates WHERE tenant_id IS NULL AND is_active=1').get());if(!template)return res.status(400).json({error:'尚未設定該公司的 Word 範本'});try{const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),JSON.parse(submission.data));const d=JSON.parse(submission.data);const fileName=`交接清冊_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗',detail:err.message});}});
+app.get('/api/admin/generate/:submissionId',requireSuperAdmin,(req,res)=>{const submission=db.prepare('SELECT * FROM submissions WHERE id=?').get(req.params.submissionId);if(!submission)return res.status(404).json({error:'找不到該筆紀錄'});const template=req.query.templateId?db.prepare('SELECT * FROM templates WHERE id=?').get(req.query.templateId):(db.prepare('SELECT * FROM templates WHERE tenant_id=? AND is_active=1').get(submission.tenant_id)||db.prepare('SELECT * FROM templates WHERE tenant_id IS NULL AND is_active=1').get());if(!template)return res.status(400).json({error:'尚未設定該公司的 Word 範本'});try{const d=JSON.parse(submission.data);const buffer=generateDocx(path.join(TEMPLATES_DIR,template.filename),handover.flattenForDocx(d));const fileName=`${handover.FORM_TYPES[handover.cleanFormType(submission.form_type)].label}_${d.community_name||submission.id}_${submission.id}.docx`;res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document');res.send(buffer);}catch(err){console.error(err);res.status(500).json({error:'產生 Word 檔失敗',detail:err.message});}});
 
 // ===== 智慧班表模組 V1 =====
 // 三套排班規則完全分離：行政／保全／機動。
@@ -2482,6 +2493,8 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
 })();
 
 // ===== 工作日誌（每日／每週）：路由在 journal-routes.js =====
-require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin});
+// ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
+handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
+require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
 
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));

@@ -3,18 +3,18 @@
 // 經理送出時把當下完整內容存成快照，之後的修改不影響已送出的日誌。
 'use strict';
 
-const DEFAULT_METERS=[
-  {key:'water',label:'自來水表'},{key:'public_power',label:'大公電表'},
-  {key:'a_power',label:'A棟小公電表'},{key:'b_power',label:'B棟小公電表'},{key:'door',label:'鐵捲門次數表'}
-];
-const DEFAULT_ROLES=['總幹事','秘書'];
+const JT=require('./journal-template');
+const DEFAULT_METERS=JT.DEFAULT_METERS;
+const DEFAULT_ROLES=JT.DEFAULT_ROLES;
 const DEFAULT_OVERVIEW={total:'',owner:'',tenant:'',vacant:'',reno_applied:'',reno_working:'',reno_pending:'',car:'',moto:''};
 const TRACK_CATEGORIES={committee:'管理委員會',resident:'住戶交辦事項與問題處置',center:'管理中心待辦事項',facility:'公共設施相關修繕'};
-const DAILY_KEYS=new Set(['construction_units','construction_public','staffing','packages','extra']);
-const WEEKLY_KEYS=new Set(['summary','construction','committee','next_week','extra']);
+const DAILY_KEYS=new Set(['construction_units','construction_public','staffing','packages','extra','custom']);
+const WEEKLY_KEYS=new Set(['summary','construction','committee','next_week','extra','custom']);
 
 module.exports=function registerJournalRoutes(app,d){
-  const {db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin}=d;
+  const {db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin}=d;
+  // 平台預設範本（總後台設定）；沒有傳入檔案路徑時（測試）只用內建預設
+  const template=d.fs&&d.path?JT(d):{read:()=>JT.normalizeTemplate(null),write:()=>{throw new Error('範本無法儲存');},reset:()=>JT.normalizeTemplate(null)};
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS journal_settings (
@@ -57,6 +57,8 @@ module.exports=function registerJournalRoutes(app,d){
     );
     CREATE INDEX IF NOT EXISTS idx_journal_tracking_updates ON journal_tracking_updates(tracking_id,update_date);
   `);
+  // 社區自行調整過哪些設定（mode／meters／roles）；沒調整的沿用平台範本
+  if(!db.prepare('PRAGMA table_info(journal_settings)').all().some(c=>c.name==='custom_keys'))db.exec('ALTER TABLE journal_settings ADD COLUMN custom_keys TEXT');
 
   // ---------- 小工具 ----------
   const parse=(v,f)=>{try{const x=JSON.parse(v||'');return x==null?f:x;}catch{return f;}};
@@ -68,13 +70,39 @@ module.exports=function registerJournalRoutes(app,d){
   const bad=(res,msg,code=400)=>res.status(code).json({error:msg});
   function userName(u){return u?.name||u?.employee_id||'';}
 
+  function customKeys(r){
+    if(!r)return new Set();
+    const saved=parse(r.custom_keys,null);
+    if(Array.isArray(saved))return new Set(saved);
+    // 舊資料（範本功能之前建立）：與當時內建預設不同的才算社區自訂
+    const out=new Set();if(r.mode==='weekly')out.add('mode');
+    if(r.meters_json&&r.meters_json!==JSON.stringify(DEFAULT_METERS))out.add('meters');
+    if(r.roles_json&&r.roles_json!==JSON.stringify(DEFAULT_ROLES))out.add('roles');
+    return out;
+  }
+  function categoryMap(T){return Object.fromEntries((T.tracking_categories||[]).map(c=>[c.key,c.label]));}
+  function catLabel(T,key){return categoryMap(T)[key]||TRACK_CATEGORIES[key]||'其他';}
   function settingsFor(tid,cid){
+    const T=template.read();
     const r=db.prepare('SELECT * FROM journal_settings WHERE tenant_id=? AND community_id=?').get(tid,cid);
+    const custom=customKeys(r);
     const meters=parse(r?.meters_json,null);const roles=parse(r?.roles_json,null);
-    return {mode:r?.mode==='weekly'?'weekly':'daily',meters:Array.isArray(meters)&&meters.length?meters:DEFAULT_METERS,roles:Array.isArray(roles)&&roles.length?roles:DEFAULT_ROLES,overview:{...DEFAULT_OVERVIEW,...parse(r?.overview_json,{})},updated_at:r?.updated_at||'',updated_by:r?.updated_by||''};
+    const useMeters=custom.has('meters')&&Array.isArray(meters);
+    const useRoles=custom.has('roles')&&Array.isArray(roles)&&roles.length;
+    return {mode:custom.has('mode')?(r.mode==='weekly'?'weekly':'daily'):T.mode,meters:useMeters?meters:T.meters,roles:useRoles?roles:T.roles,overview:{...DEFAULT_OVERVIEW,...parse(r?.overview_json,{})},
+      daily_sections:T.daily_sections,weekly_sections:T.weekly_sections,tracking_categories:T.tracking_categories,custom_items:T.custom_items,
+      inherited:{mode:!custom.has('mode'),meters:!useMeters,roles:!useRoles},platform:{mode:T.mode,meters:T.meters,roles:T.roles},
+      updated_at:r?.updated_at||'',updated_by:r?.updated_by||''};
   }
   function saveSettings(tid,cid,body,by){
     const cur=settingsFor(tid,cid);
+    const prev=db.prepare('SELECT * FROM journal_settings WHERE tenant_id=? AND community_id=?').get(tid,cid);
+    const custom=customKeys(prev);
+    // 恢復平台預設：reset=true 全部，或 reset=['mode','meters'] 指定項目
+    if(body.reset){for(const k of (Array.isArray(body.reset)?body.reset:['mode','meters','roles']))custom.delete(k);}
+    if(body.mode!==undefined)custom.add('mode');
+    if(Array.isArray(body.meters))custom.add('meters');
+    if(Array.isArray(body.roles))custom.add('roles');
     const mode=body.mode===undefined?cur.mode:(body.mode==='weekly'?'weekly':'daily');
     let meters=cur.meters;
     if(Array.isArray(body.meters)){
@@ -86,9 +114,9 @@ module.exports=function registerJournalRoutes(app,d){
     if(Array.isArray(body.roles)){roles=[...new Set(body.roles.map(x=>str(x,20)).filter(Boolean))].slice(0,10);if(!roles.length)roles=DEFAULT_ROLES;}
     let overview=cur.overview;
     if(body.overview&&typeof body.overview==='object'){overview={...DEFAULT_OVERVIEW};for(const k of Object.keys(DEFAULT_OVERVIEW))overview[k]=str(body.overview[k]??cur.overview[k],40);}
-    db.prepare(`INSERT INTO journal_settings (tenant_id,community_id,mode,meters_json,roles_json,overview_json,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(tenant_id,community_id) DO UPDATE SET mode=excluded.mode,meters_json=excluded.meters_json,roles_json=excluded.roles_json,overview_json=excluded.overview_json,updated_at=excluded.updated_at,updated_by=excluded.updated_by`)
-      .run(tid,cid,mode,JSON.stringify(meters),JSON.stringify(roles),JSON.stringify(overview),now(),by);
+    db.prepare(`INSERT INTO journal_settings (tenant_id,community_id,mode,meters_json,roles_json,overview_json,updated_at,updated_by,custom_keys) VALUES (?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(tenant_id,community_id) DO UPDATE SET mode=excluded.mode,meters_json=excluded.meters_json,roles_json=excluded.roles_json,overview_json=excluded.overview_json,updated_at=excluded.updated_at,updated_by=excluded.updated_by,custom_keys=excluded.custom_keys`)
+      .run(tid,cid,mode,custom.has('meters')?JSON.stringify(meters):'',custom.has('roles')?JSON.stringify(roles):'',JSON.stringify(overview),now(),by,JSON.stringify([...custom]));
     return settingsFor(tid,cid);
   }
   function journalRow(tid,cid,kind,date){return db.prepare('SELECT * FROM journals WHERE tenant_id=? AND community_id=? AND kind=? AND period_date=?').get(tid,cid,kind,date)||null;}
@@ -126,7 +154,8 @@ module.exports=function registerJournalRoutes(app,d){
   function trackingAsOf(tid,cid,date){
     const items=db.prepare('SELECT * FROM journal_tracking WHERE tenant_id=? AND community_id=? AND opened_on<=? AND (closed_on IS NULL OR closed_on>=?) ORDER BY opened_on,id').all(tid,cid,date,date);
     const upd=db.prepare('SELECT id,update_date,content,created_by FROM journal_tracking_updates WHERE tracking_id=? AND update_date<=? ORDER BY update_date,id');
-    return items.map(t=>({id:t.id,category:t.category,category_label:TRACK_CATEGORIES[t.category]||t.category,opened_on:t.opened_on,content:t.content,closed_on:t.closed_on,closed_today:t.closed_on===date,updates:upd.all(t.id,date)}));
+    const T=template.read();
+    return items.map(t=>({id:t.id,category:t.category,category_label:catLabel(T,t.category),opened_on:t.opened_on,content:t.content,closed_on:t.closed_on,closed_today:t.closed_on===date,updates:upd.all(t.id,date)}));
   }
   function staffingSuggestion(tid,cid,date){
     const q=`SELECT e.shift_code,u.name,COALESCE(NULLIF(u.position,''),u.job_level,'') AS role FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.community_id=? AND e.work_date=? ORDER BY u.employee_id`;
@@ -138,7 +167,7 @@ module.exports=function registerJournalRoutes(app,d){
   }
   function dailyPayload(tid,cid,date){
     const s=settingsFor(tid,cid);const r=journalRow(tid,cid,'daily',date);
-    if(r&&r.status==='submitted'&&r.snapshot_json)return {...parse(r.snapshot_json,{}),journal:journalPublic(r),settings:s,live:false};
+    if(r&&r.status==='submitted'&&r.snapshot_json){const snap=parse(r.snapshot_json,{});return {...snap,journal:journalPublic(r),settings:{...s,...(snap.template||{})},live:false};}
     return {date,journal:journalPublic(r),settings:s,overview:s.overview,meters:meterView(tid,cid,s.meters,date),renovations:renovationList(tid,cid),tracking:trackingAsOf(tid,cid,date),staffing_suggestion:staffingSuggestion(tid,cid,date),live:true};
   }
   function weekSummary(tid,cid,start){
@@ -156,15 +185,16 @@ module.exports=function registerJournalRoutes(app,d){
     const tr=db.prepare('SELECT id,category,opened_on,content,closed_on FROM journal_tracking WHERE tenant_id=? AND community_id=? AND opened_on<=?').all(tid,cid,end);
     const lastUpd=db.prepare('SELECT update_date,content FROM journal_tracking_updates WHERE tracking_id=? AND update_date<=? ORDER BY update_date DESC,id DESC LIMIT 1');
     const age=t=>Math.round((new Date(`${end}T00:00:00Z`)-new Date(`${t.opened_on}T00:00:00Z`))/86400000);
-    const open=tr.filter(t=>!t.closed_on||t.closed_on>end).map(t=>({...t,category_label:TRACK_CATEGORIES[t.category]||t.category,age_days:age(t),last_update:lastUpd.get(t.id,end)||null}));
-    const tracking={new_count:tr.filter(t=>t.opened_on>=start).length,closed:tr.filter(t=>t.closed_on&&t.closed_on>=start&&t.closed_on<=end).map(t=>({content:t.content,category_label:TRACK_CATEGORIES[t.category]||t.category,closed_on:t.closed_on})),open,overdue:open.filter(t=>t.age_days>30).length,resident_new:tr.filter(t=>t.category==='resident'&&t.opened_on>=start).length,by_category:Object.entries(TRACK_CATEGORIES).map(([k,label])=>({key:k,label,new:tr.filter(t=>t.category===k&&t.opened_on>=start).length,open:open.filter(t=>t.category===k).length}))};
+    const T=template.read();const cats=[...(T.tracking_categories||[])];for(const t of tr)if(!cats.some(c=>c.key===t.category))cats.push({key:t.category,label:catLabel(T,t.category)});
+    const open=tr.filter(t=>!t.closed_on||t.closed_on>end).map(t=>({...t,category_label:catLabel(T,t.category),age_days:age(t),last_update:lastUpd.get(t.id,end)||null}));
+    const tracking={new_count:tr.filter(t=>t.opened_on>=start).length,closed:tr.filter(t=>t.closed_on&&t.closed_on>=start&&t.closed_on<=end).map(t=>({content:t.content,category_label:catLabel(T,t.category),closed_on:t.closed_on})),open,overdue:open.filter(t=>t.age_days>30).length,resident_new:tr.filter(t=>t.category==='resident'&&t.opened_on>=start).length,by_category:cats.map(({key:k,label})=>({key:k,label,new:tr.filter(t=>t.category===k&&t.opened_on>=start).length,open:open.filter(t=>t.category===k).length}))};
     let staffing=[];
     try{staffing=db.prepare(`SELECT u.name,COALESCE(NULLIF(u.position,''),u.job_level,'') role,SUM(CASE WHEN e.shift_code IN ('off','leave') THEN 0 ELSE 1 END) work_days,SUM(CASE WHEN e.shift_code IN ('off','leave') THEN 1 ELSE 0 END) off_days FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.community_id=? AND e.work_date BETWEEN ? AND ? GROUP BY e.staff_id ORDER BY u.employee_id`).all(tid,cid,start,end).map(r=>({...r,role:String(r.role||'').split('｜')[0]}));}catch{}
     return {week_start:start,week_end:end,days,construction,construction_total:{unit_people:construction.reduce((a,x)=>a+x.unit_people,0),public_people:construction.reduce((a,x)=>a+x.public_people,0)},daily_count:dailies.length,daily_submitted:dailies.filter(r=>r.status==='submitted').length,meters,renovation,tracking,staffing,overview:s.overview};
   }
   function weeklyPayload(tid,cid,start){
     const s=settingsFor(tid,cid);const r=journalRow(tid,cid,'weekly',start);
-    if(r&&r.status==='submitted'&&r.snapshot_json)return {...parse(r.snapshot_json,{}),journal:journalPublic(r),settings:s,live:false};
+    if(r&&r.status==='submitted'&&r.snapshot_json){const snap=parse(r.snapshot_json,{});return {...snap,journal:journalPublic(r),settings:{...s,...(snap.template||{})},live:false};}
     return {week_start:start,journal:journalPublic(r),settings:s,summary:weekSummary(tid,cid,start),meters:meterView(tid,cid,s.meters,addDays(start,6),7),renovations:renovationList(tid,cid),tracking:trackingAsOf(tid,cid,addDays(start,6)),live:true};
   }
   function submitJournal(tid,cid,kind,date,by){
@@ -172,6 +202,8 @@ module.exports=function registerJournalRoutes(app,d){
     if(!r){patchJournal(tid,cid,kind,date,{},by);r=journalRow(tid,cid,kind,date);}
     if(r.status==='submitted')return r;
     const snap=kind==='weekly'?weeklyPayload(tid,cid,date):dailyPayload(tid,cid,date);
+    // 送出時把當下的區塊設定一起凍結，之後總後台改範本不會影響已送出的日誌
+    const st=snap.settings||{};snap.template={roles:st.roles,daily_sections:st.daily_sections,weekly_sections:st.weekly_sections,tracking_categories:st.tracking_categories,custom_items:st.custom_items};
     delete snap.settings;snap.journal={...journalPublic(r),status:'submitted'};
     const t=now();
     db.prepare("UPDATE journals SET status='submitted',snapshot_json=?,submitted_at=?,submitted_by=?,updated_at=? WHERE id=?").run(JSON.stringify(snap),t,by,t,r.id);
@@ -208,7 +240,7 @@ module.exports=function registerJournalRoutes(app,d){
   app.get(`${S}/context`,requireStaff,wrap((req,res)=>{
     const u=getUser(req);const list=staffCommunities(u);
     res.set('Cache-Control','no-store');
-    res.json({communities:list.map(c=>({...c,mode:settingsFor(u.tenant_id,c.id).mode})),manager:isSiteManager(u),today:todayTW(),categories:TRACK_CATEGORIES});
+    res.json({communities:list.map(c=>({...c,mode:settingsFor(u.tenant_id,c.id).mode})),manager:isSiteManager(u),today:todayTW(),categories:categoryMap(template.read())});
   }));
   app.get(`${S}/settings`,requireStaff,wrap((req,res)=>{const c=staffCtx(req,res,req.query.community_id);if(!c)return;res.json(settingsFor(c.tid,c.cid));}));
   app.put(`${S}/settings`,requireStaff,wrap((req,res)=>{
@@ -255,14 +287,14 @@ module.exports=function registerJournalRoutes(app,d){
   app.delete(`${S}/renovations/:id`,requireStaff,wrap((req,res)=>{const c=staffCtx(req,res,req.query.community_id);if(!c)return;db.prepare('DELETE FROM journal_renovations WHERE id=? AND tenant_id=? AND community_id=?').run(Number(req.params.id),c.tid,c.cid);res.json({success:true,renovations:renovationList(c.tid,c.cid)});}));
   app.post(`${S}/tracking`,requireStaff,wrap((req,res)=>{
     const c=staffCtx(req,res,req.body?.community_id);if(!c)return;const content=str(req.body?.content,1000);if(!content)return bad(res,'請輸入交辦或問題內容');
-    const cat=TRACK_CATEGORIES[req.body?.category]?req.body.category:'center';const on=isDate(req.body?.opened_on)?req.body.opened_on:todayTW();const t=now();
+    const cm=categoryMap(template.read());const cat=cm[req.body?.category]?req.body.category:(Object.keys(cm)[0]||'center');const on=isDate(req.body?.opened_on)?req.body.opened_on:todayTW();const t=now();
     db.prepare('INSERT INTO journal_tracking (tenant_id,community_id,category,opened_on,content,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').run(c.tid,c.cid,cat,on,content,c.by,t,t);
     res.json({success:true,tracking:trackingAsOf(c.tid,c.cid,isDate(req.body?.date)?req.body.date:on)});
   }));
   app.put(`${S}/tracking/:id`,requireStaff,wrap((req,res)=>{
     const c=staffCtx(req,res,req.body?.community_id);if(!c)return;const t=db.prepare('SELECT * FROM journal_tracking WHERE id=? AND tenant_id=? AND community_id=?').get(Number(req.params.id),c.tid,c.cid);if(!t)return bad(res,'找不到這筆追蹤事項',404);
     const content=req.body?.content===undefined?t.content:str(req.body.content,1000);if(!content)return bad(res,'內容不可空白');
-    const cat=TRACK_CATEGORIES[req.body?.category]?req.body.category:t.category;
+    const cat=categoryMap(template.read())[req.body?.category]?req.body.category:t.category;
     const opened=isDate(req.body?.opened_on)?req.body.opened_on:t.opened_on;
     const closed=req.body?.closed_on===undefined?t.closed_on:(isDate(req.body.closed_on)?req.body.closed_on:null);
     db.prepare('UPDATE journal_tracking SET category=?,content=?,opened_on=?,closed_on=?,updated_at=? WHERE id=?').run(cat,content,opened,closed,now(),t.id);
@@ -279,7 +311,7 @@ module.exports=function registerJournalRoutes(app,d){
 
   // ---------- 公司內勤 API（唯讀＋社區設定） ----------
   const C='/api/company/journal';
-  app.get(`${C}/communities`,requireCompanyAdmin,wrap((req,res)=>{const c=companyCtx(req,res);if(!c)return;const rows=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,name").all(c.tid);const last=db.prepare('SELECT MAX(period_date) d FROM journals WHERE tenant_id=? AND community_id=?');res.json({communities:rows.map(r=>({...r,mode:settingsFor(c.tid,r.id).mode,last_journal:last.get(c.tid,r.id).d||''})),today:todayTW()});}));
+  app.get(`${C}/communities`,requireCompanyAdmin,wrap((req,res)=>{const c=companyCtx(req,res);if(!c)return;const rows=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,name").all(c.tid);const last=db.prepare('SELECT MAX(period_date) d FROM journals WHERE tenant_id=? AND community_id=?');const T=template.read();res.json({communities:rows.map(r=>{const st=settingsFor(c.tid,r.id);return {...r,mode:st.mode,mode_inherited:st.inherited.mode,last_journal:last.get(c.tid,r.id).d||''};}),today:todayTW(),platform_mode:T.mode});}));
   app.get(`${C}/list`,requireCompanyAdmin,wrap((req,res)=>{
     const c=companyCtx(req,res);if(!c)return;const params=[c.tid];let sql='SELECT j.id,j.community_id,cm.name community_name,j.kind,j.period_date,j.status,j.updated_at,j.updated_by,j.submitted_at,j.submitted_by FROM journals j JOIN communities cm ON cm.id=j.community_id WHERE j.tenant_id=?';
     if(Number(req.query.community_id)){sql+=' AND j.community_id=?';params.push(Number(req.query.community_id));}
@@ -296,6 +328,16 @@ module.exports=function registerJournalRoutes(app,d){
   }));
   app.get(`${C}/settings`,requireCompanyAdmin,wrap((req,res)=>{const c=companyCtx(req,res,req.query.community_id);if(!c)return;res.json(settingsFor(c.tid,c.cid));}));
   app.put(`${C}/settings`,requireCompanyAdmin,wrap((req,res)=>{const c=companyCtx(req,res,req.body?.community_id);if(!c)return;res.json({success:true,settings:saveSettings(c.tid,c.cid,req.body||{},c.by)});}));
+
+  // ---------- 總後台：平台預設範本 ----------
+  if(requireSuperAdmin){
+    const A='/api/admin/journal-template';
+    const builtins={daily_sections:JT.DAILY_SECTIONS,weekly_sections:JT.WEEKLY_SECTIONS,custom_types:JT.CUSTOM_TYPES,default:JT.defaultTemplate()};
+    const usage=()=>{const rows=db.prepare('SELECT * FROM journal_settings').all();const n=k=>rows.filter(r=>customKeys(r).has(k)).length;return {communities:db.prepare("SELECT COUNT(*) c FROM communities WHERE status='active'").get().c,custom_mode:n('mode'),custom_meters:n('meters'),custom_roles:n('roles')};};
+    app.get(A,requireSuperAdmin,wrap((req,res)=>{res.set('Cache-Control','no-store');res.json({template:template.read(),builtins,usage:usage()});}));
+    app.put(A,requireSuperAdmin,wrap((req,res)=>{res.json({success:true,template:template.write(req.body||{}),usage:usage()});}));
+    app.post(`${A}/reset`,requireSuperAdmin,wrap((req,res)=>{res.json({success:true,template:template.reset(),usage:usage()});}));
+  }
 
   return {settingsFor,weekSummary,dailyPayload,weeklyPayload,weekStart,addDays};
 };
