@@ -11,7 +11,7 @@ function dayLabel(v){const d=new Date(v),now=new Date();if(d.toDateString()===no
 function workLabel(r){if(r?.scope_label)return r.scope_label;if(r?.role==='company_admin')return '公司管理員';if(r?.work_type==='hybrid')return '內勤＋駐點';if(r?.work_type==='internal')return '公司內勤';return '社區駐點';}
 const AVATAR_TONES=['#2f7d5b','#3b6fa8','#a0573a','#7a5aa6','#2d8a8a','#b07a1d','#a8466a','#4f6d3a'];
 function avatar(p,cls=''){const n=String(p?.name||'?');let h=0;for(const ch of String(p?.id??n))h=(h*31+ch.charCodeAt(0))>>>0;return `<span class="conversation-avatar ${cls}" style="--avatar-tone:${AVATAR_TONES[h%AVATAR_TONES.length]}" aria-hidden="true">${esc(n.slice(0,1))}</span>`;}
-function previewText(m){if(!m)return '';if(m.message_type==='image')return '📷 圖片';if(m.message_type==='sticker')return `${m.attachment?.emoji||'💬'} 貼圖`;return String(m.body||'').replace(/\n/g,' ');}
+function previewText(m){if(!m)return '';if(m.message_type==='image')return '📷 圖片';if(m.message_type==='sticker')return `${m.attachment?.image?'🖼':(m.attachment?.emoji||'💬')} 貼圖`;return String(m.body||'').replace(/\n/g,' ');}
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
 function setBadge(n){const b=$('messageBadge'),w=$('messageCenterWrap');if(!b||!w)return;n=Number(n||0);b.textContent=n>99?'99+':String(n);b.hidden=n<=0;w.style.display='flex';}
 async function refreshBadge(){try{const d=await api('/api/messages/unread-count');setBadge(d.count);}catch(e){if(/登入|權限|帳號/.test(e.message||'')){const w=$('messageCenterWrap');if(w)w.style.display='none';}}}
@@ -23,7 +23,9 @@ async function loadLists(q=''){
   conversations=[...map.values()].sort((a,b)=>new Date(b.last.created_at)-new Date(a.last.created_at));
   await refreshBadge();
 }
-async function loadStickers(){if(stickers)return stickers;try{const d=await api('/api/messages/stickers');stickers=Array.isArray(d.stickers)?d.stickers:[];}catch{stickers=[];}return stickers;}
+let myStickers=[],stickerTab='all';
+async function loadStickers(force=false){if(stickers&&!force)return stickers;try{const d=await api('/api/messages/stickers');stickers=Array.isArray(d.stickers)?d.stickers:[];myStickers=Array.isArray(d.mine)?d.mine:[];}catch{stickers=stickers||[];}return stickers;}
+function stickerFace(s){return s.image?`<img class="chat-sticker-img" src="${esc(s.image)}" alt="${esc(s.text||'貼圖')}" loading="lazy">`:`<span class="chat-sticker-emoji">${esc(s.emoji)}</span><span class="chat-sticker-text">${esc(s.text)}</span>`;}
 
 // ---------- 外框 ----------
 function ensureModal(){
@@ -127,7 +129,7 @@ function messageHtml(m,first,last){
   const out=m.direction==='out';
   const meta=`<span class="chat-meta">${fmtTime(m.created_at)}${out?` <span class="read-state ${m.read_at?'read':''}">${m.read_at?'已讀':'已送出'}</span>`:''}</span>`;
   let inner;
-  if(m.message_type==='sticker'&&m.attachment){const a=m.attachment;inner=`<div class="chat-sticker tone-${esc(a.tone||'gray')}" role="img" aria-label="貼圖：${esc(a.text)}"><span class="chat-sticker-emoji">${esc(a.emoji)}</span><span class="chat-sticker-text">${esc(a.text)}</span></div>`;}
+  if(m.message_type==='sticker'&&m.attachment){const a=m.attachment;inner=`<div class="chat-sticker ${a.image?'is-image':`tone-${esc(a.tone||'gray')}`}" role="img" aria-label="貼圖：${esc(a.text)}">${stickerFace(a)}</div>`;}
   else if(m.message_type==='image'&&m.attachment){const a=m.attachment;const ratio=a.width&&a.height?` style="aspect-ratio:${Number(a.width)}/${Number(a.height)}"`:'';const cap=String(m.body||'').replace(/^\[圖片\]\s*/,'');inner=`<button type="button" class="chat-image" data-image="${esc(a.url)}" data-name="${esc(a.name||'')}"${ratio}><img src="${esc(a.url)}" alt="圖片訊息" loading="lazy"></button>${cap?`<div class="chat-bubble ${out?'out':'in'} chat-caption">${esc(cap).replace(/\n/g,'<br>')}</div>`:''}`;}
   else inner=`<div class="chat-bubble ${out?'out':'in'}${first?' is-first':''}">${linkify(esc(m.body)).replace(/\n/g,'<br>')}</div>`;
   return `<div class="chat-bubble-row ${out?'out':'in'} type-${m.message_type||'text'}${first?' group-first':''}${last?' group-last':''}"><div class="chat-bubble-stack">${inner}${last?meta:''}</div></div>`;
@@ -194,10 +196,26 @@ async function sendImages(files){
     }catch(err){tmp.status='error';tmp.error=err.message||'傳送失敗';chatSignature='';renderChatMessages(true);setTimeout(()=>{pending=pending.filter(x=>x!==tmp);chatSignature='';renderChatMessages();},6000);}
   }
 }
+function renderStickerPanel(){
+  const panel=$('stickerPanel');if(!panel)return;
+  const list=stickerTab==='mine'?myStickers:stickers;
+  const tile=s=>`<div class="sticker-tile"><button type="button" class="chat-sticker ${s.image?'is-image':`tone-${esc(s.tone)}`}" data-sticker="${esc(s.id)}" title="${esc(s.text)}">${stickerFace(s)}</button>${stickerTab==='mine'?`<button type="button" class="sticker-del" data-del-sticker="${esc(s.id)}" title="刪除這張貼圖" aria-label="刪除這張貼圖">×</button>`:''}</div>`;
+  panel.innerHTML=`<div class="sticker-tabs" role="tablist"><button type="button" role="tab" aria-selected="${stickerTab==='all'}" data-st-tab="all">貼圖</button><button type="button" role="tab" aria-selected="${stickerTab==='mine'}" data-st-tab="mine">我的貼圖${myStickers.length?`（${myStickers.length}）`:''}</button></div>
+    <div class="sticker-grid">${stickerTab==='mine'?`<label class="sticker-upload" title="上傳自己的 GIF 或圖片貼圖（2MB 以內）"><input type="file" accept="image/gif,image/png,image/jpeg,image/webp" hidden id="stickerFile"><span>＋</span><small>上傳 GIF／圖片</small></label>`:''}${list.map(tile).join('')}</div>
+    ${stickerTab==='mine'&&!myStickers.length?'<div class="chat-list-empty" style="padding:8px 0 0">還沒有自己的貼圖。可以上傳 GIF 動圖或圖片，之後在這裡一點就能傳送。</div>':''}${stickerTab==='all'&&!list.length?'<div class="chat-list-empty">目前沒有可用的貼圖。</div>':''}`;
+  panel.querySelectorAll('[data-st-tab]').forEach(b=>b.addEventListener('click',()=>{stickerTab=b.dataset.stTab;renderStickerPanel();}));
+  panel.querySelectorAll('[data-sticker]').forEach(b=>b.addEventListener('click',()=>sendSticker(b.dataset.sticker)));
+  panel.querySelectorAll('[data-del-sticker]').forEach(b=>b.addEventListener('click',async e=>{e.stopPropagation();if(!confirm('刪除這張貼圖？已經傳出去的訊息不受影響。'))return;try{await api(`/api/messages/stickers/${encodeURIComponent(b.dataset.delSticker)}`,{method:'DELETE'});await loadStickers(true);renderStickerPanel();}catch(err){alert(err.message);}}));
+  panel.querySelector('#stickerFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){alert('貼圖檔案最多 2MB，請換一張小一點的 GIF／圖片');e.target.value='';return;}
+    const name=prompt('幫這張貼圖取個名字（例如：收到、辛苦了），可以留白：','')??null;if(name===null){e.target.value='';return;}
+    const fd=new FormData();fd.append('image',f);fd.append('text',name.trim());
+    const lab=panel.querySelector('.sticker-upload');if(lab)lab.classList.add('is-busy');
+    try{await api('/api/messages/stickers',{method:'POST',body:fd});await loadStickers(true);renderStickerPanel();}catch(err){alert(err.message);if(lab)lab.classList.remove('is-busy');}});
+}
 async function toggleStickers(force){
   const panel=$('stickerPanel'),btn=$('chatStickerBtn');if(!panel)return;
   const show=force===undefined?panel.hidden:force;
-  if(show){const list=await loadStickers();panel.innerHTML=list.length?`<div class="sticker-panel-head">貼圖</div><div class="sticker-grid">${list.map(s=>`<button type="button" class="chat-sticker tone-${esc(s.tone)}" data-sticker="${esc(s.id)}" title="${esc(s.text)}"><span class="chat-sticker-emoji">${esc(s.emoji)}</span><span class="chat-sticker-text">${esc(s.text)}</span></button>`).join('')}</div>`:'<div class="chat-list-empty">目前沒有可用的貼圖。</div>';panel.querySelectorAll('[data-sticker]').forEach(b=>b.addEventListener('click',()=>sendSticker(b.dataset.sticker)));}
+  if(show){await loadStickers();renderStickerPanel();}
   panel.hidden=!show;btn?.setAttribute('aria-expanded',show?'true':'false');btn?.classList.toggle('active',show);
 }
 

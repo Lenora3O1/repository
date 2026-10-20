@@ -149,3 +149,19 @@ body.admin-console td .secondary,body.admin-console td .danger{margin:2px 4px 2p
 .question-card input:not([type=checkbox]):not([type=radio]),.page-card input,.jta-row input:not([type=checkbox]):not([type=radio]),.jta-custom input{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--line,#d9e2dd);border-radius:8px;background:#fff;font:inherit}
 .jta-row input:not([type=checkbox]):not([type=radio]){width:auto;flex:1}
 .question-card input:focus,.page-card input:focus,.jta-row input:focus,.jta-custom input:focus{outline:2px solid rgba(46,107,79,.25);border-color:var(--accent,#2E6B4F)}
+
+/* ===== 貼圖管理 ===== */
+.stk-upload{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin-top:10px}
+.stk-drop{width:150px;height:120px;border:2px dashed #b9cfc4;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;background:#fbfdfc;margin:0}
+.stk-drop span{font-size:2rem;line-height:1;color:#2E6B4F}.stk-drop small{color:#6a7a73}.stk-drop:hover{background:#f0f7f3}
+.stk-name{display:flex;flex-direction:column;gap:6px;font-weight:700;font-size:.88rem;min-width:240px;margin:0}
+.stk-name input{margin:0;padding:9px 12px;border:1px solid var(--line,#d9e2dd);border-radius:8px}
+.stk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.stk-card{border:1px solid var(--line,#ddd);border-radius:14px;padding:10px;background:#fff;display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.stk-card img{width:100%;aspect-ratio:1;object-fit:contain;background:#f6f8f7;border-radius:10px}
+.stk-card input{margin:0;padding:7px 9px;border:1px solid var(--line,#d9e2dd);border-radius:8px;text-align:center;font-weight:700}
+.stk-actions{display:flex;gap:6px;justify-content:space-between}.stk-actions .danger{padding:5px 10px;min-height:0;font-size:.82rem}
+.stk-builtin{display:flex;flex-wrap:wrap;gap:10px}
+.stk-b{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line,#ddd);border-radius:999px;padding:6px 14px 6px 10px;margin:0;font-weight:700;cursor:pointer;background:#fff}
+.stk-b input{width:auto;margin:0}.stk-b-emoji{font-size:1.3rem}
+.stk-b:has(input:not(:checked)){opacity:.45}
