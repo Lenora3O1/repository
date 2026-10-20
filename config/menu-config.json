@@ -178,6 +178,14 @@
       "enabled": true
     },
     {
+      "id": "gifts",
+      "parentId": null,
+      "icon": "🎁",
+      "label": "禮品推放",
+      "action": "gifts",
+      "enabled": true
+    },
+    {
       "id": "staff-sop",
       "parentId": null,
       "icon": "📚",
@@ -313,6 +321,14 @@
       "icon": "🧰",
       "label": "總務管理",
       "action": "company-resources",
+      "enabled": true
+    },
+    {
+      "id": "company-gifts",
+      "parentId": null,
+      "icon": "🎁",
+      "label": "禮品推放",
+      "action": "gifts",
       "enabled": true
     },
     {

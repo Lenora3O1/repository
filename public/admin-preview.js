@@ -111,6 +111,7 @@
     [/^\/api\/messages\/recipients$/,()=>PEOPLE.filter(p=>p.id!==801).map(p=>({...p,role:'staff',communities:p.work_type==='internal'?[]:[COMMUNITIES[0].name],scope_label:p.work_type==='internal'?'公司內勤':'社區駐點'}))],
     [/^\/api\/messages\/conversation\/\d+/,()=>({partner:{...MEI,scope_label:'公司內勤'},messages:msgFor(scope==='company'?804:801)})],
     [/^\/api\/messages$/,()=>msgFor(scope==='company'?804:801).slice().reverse()],
+    [/^\/api\/gifts$/,()=>({gifts:[['中秋精緻禮盒','#c0392b','月','企業團購 9 折，可客製祝福卡片'],['手工茶葉禮盒','#2e7d4f','茶','台灣高山茶，送禮自用兩相宜'],['節慶花禮','#b0457a','花',''],['精品咖啡組','#6b4a2f','啡','精選單品豆，附濾掛']].map(([name,color,ch,desc],i)=>({id:i+1,name,description:desc,website_url:'https://example.com/gift-'+(i+1),line_url:i===2?'':'https://lin.ee/example',logo_url:'data:image/svg+xml;utf8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180"><rect width="240" height="180" rx="18" fill="#fff"/><circle cx="120" cy="80" r="52" fill="${color}"/><text x="120" y="98" font-size="52" text-anchor="middle" fill="#fff" font-family="sans-serif">${ch}</text><text x="120" y="160" font-size="20" text-anchor="middle" fill="${color}" font-family="sans-serif">示意 LOGO</text></svg>`)}))})],
     // 公司內勤
     [/^\/api\/company\/session$/,()=>({loggedIn:true,entry:'company',user:companyUser(),tenant:{id:ctx.tenant.id,name:ctx.tenant.name}})],
     [/^\/api\/company\/branding$/,()=>ctx.branding||{}],

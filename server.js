@@ -409,6 +409,14 @@ function readMenuConfig(){
   if(!c.admin.some(x=>String(x.id)==='platform-rules-schedule')) c.admin.push({...DEFAULT_ADMIN_MENU[1]});
   if(!c.admin.some(x=>String(x.id)==='platform-rules-attendance')) c.admin.push({id:'platform-rules-attendance',parentId:'platform-rules',icon:'↳',label:'出勤與巡邏規則',action:'platform-rules-attendance',enabled:true});
   c.tenants=(c.tenants&&typeof c.tenants==='object')?c.tenants:{};
+  // 一次性升級：平台預設目錄補上「禮品推放」（企業覆寫會依 _base 規則自動取得新項目）。
+  if(!c._giftsMenuAdded){
+    const addAfter=(list,item,afterId)=>{if(list.some(x=>String(x.id)===item.id||String(x.action)==='gifts'&&!x.parentId))return;let i=list.findIndex(x=>String(x.id)===afterId);if(i<0){list.push(item);return;}i++;while(i<list.length&&String(list[i].parentId||'')===afterId)i++;list.splice(i,0,item);};
+    addAfter(c.staff,{id:'gifts',parentId:null,icon:'🎁',label:'禮品推放',action:'gifts',enabled:true},'company-resources');
+    addAfter(c.company,{id:'company-gifts',parentId:null,icon:'🎁',label:'禮品推放',action:'gifts',enabled:true},'company-general-affairs');
+    c._giftsMenuAdded=1;
+    try{writeMenuConfig(c);}catch(e){console.error('gifts menu migration error',e);}
+  }
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
   // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
@@ -1176,6 +1184,102 @@ app.get('/api/admin/ui-copy',requireSuperAdmin,(req,res)=>res.json({scope:'platf
 app.put('/api/admin/ui-copy',requireSuperAdmin,(req,res)=>{const copy=sanitizePlatformUiCopy(req.body||{});const saved=writePlatformUiCopy(copy);res.json({success:true,scope:'platform',copy:saved});});
 app.get('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});res.json({tenant_id:id,copy:readStaffUiCopy(id)});});
 app.put('/api/admin/tenants/:id/ui-copy',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);if(!db.prepare('SELECT id FROM tenants WHERE id=?').get(id))return res.status(404).json({error:'找不到公司'});const copy=sanitizeStaffUiCopy(req.body||{},id);writeStaffUiCopy(id,copy);res.json({success:true,tenant_id:id,copy});});
+
+// ===== 禮品推放 =====
+// 總後台登記禮品（LOGO、禮品網頁、官方 LINE）；公司內勤與現場人員可在「禮品推放」目錄瀏覽。
+const GIFT_UPLOADS_DIR=path.join(DATA_DIR,'uploads','gifts');
+fs.mkdirSync(GIFT_UPLOADS_DIR,{recursive:true});
+const GIFT_LOGO_TYPES={'image/jpeg':'.jpg','image/png':'.png','image/gif':'.gif','image/webp':'.webp'};
+const giftLogoUpload=multer({
+  storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,GIFT_UPLOADS_DIR),filename:(req,file,cb)=>cb(null,`${Date.now()}-${crypto.randomBytes(6).toString('hex')}${GIFT_LOGO_TYPES[file.mimetype]||'.img'}`)}),
+  limits:{fileSize:3*1024*1024,files:1},
+  fileFilter:(req,file,cb)=>GIFT_LOGO_TYPES[file.mimetype]?cb(null,true):cb(new Error('LOGO 只能上傳 JPG、PNG、GIF 或 WEBP 圖片'))
+});
+function giftImageLooksValid(file){
+  try{const fd=fs.openSync(file,'r');const b=Buffer.alloc(12);fs.readSync(fd,b,0,12,0);fs.closeSync(fd);
+    return (b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF)||b.slice(0,8).equals(Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]))||b.slice(0,4).toString('ascii')==='GIF8'||(b.slice(0,4).toString('ascii')==='RIFF'&&b.slice(8,12).toString('ascii')==='WEBP');
+  }catch{return false;}
+}
+// 只接受 http(s) 連結，避免 javascript: 等危險網址。
+function cleanGiftUrl(v,label){
+  const s=String(v||'').trim();if(!s)return '';
+  let u;try{u=new URL(/^[a-z][a-z0-9+.-]*:/i.test(s)?s:`https://${s}`);}catch{throw new Error(`${label}格式不正確`);}
+  if(!['http:','https:'].includes(u.protocol))throw new Error(`${label}只能是 http 或 https 網址`);
+  return u.toString().slice(0,1000);
+}
+function giftPayload(g,admin=false){
+  const out={id:g.id,name:g.name,description:g.description||'',website_url:g.website_url||'',line_url:g.line_url||'',logo_url:g.logo_file?`/api/gifts/${g.id}/logo?v=${encodeURIComponent(g.updated_at||'')}`:''};
+  if(admin)Object.assign(out,{sort_order:g.sort_order,is_active:!!g.is_active,created_at:g.created_at,updated_at:g.updated_at});
+  return out;
+}
+function removeGiftLogo(file){if(!file)return;try{const p=path.join(GIFT_UPLOADS_DIR,path.basename(file));if(fs.existsSync(p))fs.unlinkSync(p);}catch(e){console.warn('gift logo cleanup:',e.message);}}
+function requireWorkspaceUser(req,res,next){
+  const u=getUser(req);const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null;
+  if(u&&u.is_active&&u.tenant_id&&t?.status==='active')return next();
+  if(req.session?.isAdmin)return next();
+  return res.status(401).json({error:'請先登入'});
+}
+// 讀取（內勤／現場／總後台）
+app.get('/api/gifts',requireWorkspaceUser,(req,res)=>{
+  res.set('Cache-Control','no-store');
+  res.json({gifts:db.prepare('SELECT * FROM gifts WHERE is_active=1 ORDER BY sort_order ASC,id ASC').all().map(g=>giftPayload(g))});
+});
+app.get('/api/gifts/:id/logo',requireWorkspaceUser,(req,res)=>{
+  const g=db.prepare('SELECT logo_file FROM gifts WHERE id=?').get(Number(req.params.id));
+  const file=g?.logo_file?path.join(GIFT_UPLOADS_DIR,path.basename(g.logo_file)):'';
+  if(!file||!fs.existsSync(file))return res.status(404).json({error:'找不到 LOGO'});
+  const ext=path.extname(file).toLowerCase();
+  res.set('Cache-Control','private, max-age=604800');res.set('X-Content-Type-Options','nosniff');
+  res.type({'.jpg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp'}[ext]||'application/octet-stream');
+  res.sendFile(file);
+});
+// 管理（總後台）
+app.get('/api/admin/gifts',requireSuperAdmin,(req,res)=>{
+  res.set('Cache-Control','no-store');
+  res.json({gifts:db.prepare('SELECT * FROM gifts ORDER BY sort_order ASC,id ASC').all().map(g=>giftPayload(g,true))});
+});
+function saveGift(req,res,id){
+  giftLogoUpload.single('logo')(req,res,err=>{
+    const cleanup=()=>{if(req.file)removeGiftLogo(req.file.filename);};
+    try{
+      if(err)throw new Error(err.code==='LIMIT_FILE_SIZE'?'LOGO 圖片最多 3MB':(err.message||'LOGO 上傳失敗'));
+      const existing=id?db.prepare('SELECT * FROM gifts WHERE id=?').get(id):null;
+      if(id&&!existing)throw Object.assign(new Error('找不到這個禮品'),{status:404});
+      const name=String(req.body?.name||'').trim().slice(0,80);
+      if(!name)throw new Error('請輸入禮品名稱');
+      const description=String(req.body?.description||'').trim().slice(0,300);
+      const website=cleanGiftUrl(req.body?.website_url,'禮品網頁連結');
+      const line=cleanGiftUrl(req.body?.line_url,'官方 LINE 連結');
+      if(req.file&&!giftImageLooksValid(req.file.path))throw new Error('LOGO 檔案不是可辨識的圖片');
+      if(!id&&!req.file)throw new Error('請上傳禮品 LOGO');
+      const active=req.body?.is_active===undefined?(existing?existing.is_active:1):(String(req.body.is_active)==='false'||String(req.body.is_active)==='0'?0:1);
+      const t=now();
+      if(existing){
+        const logo=req.file?req.file.filename:existing.logo_file;
+        db.prepare('UPDATE gifts SET name=?,description=?,website_url=?,line_url=?,logo_file=?,is_active=?,updated_at=? WHERE id=?').run(name,description,website,line,logo,active,t,id);
+        if(req.file&&existing.logo_file)removeGiftLogo(existing.logo_file);
+        return res.json({success:true,gift:giftPayload(db.prepare('SELECT * FROM gifts WHERE id=?').get(id),true)});
+      }
+      const max=db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM gifts').get().m;
+      const info=db.prepare('INSERT INTO gifts (name,description,logo_file,website_url,line_url,sort_order,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(name,description,req.file.filename,website,line,Number(max)+1,active,t,t);
+      res.json({success:true,gift:giftPayload(db.prepare('SELECT * FROM gifts WHERE id=?').get(info.lastInsertRowid),true)});
+    }catch(e){cleanup();res.status(e.status||400).json({error:e.message||'儲存失敗'});}
+  });
+}
+app.post('/api/admin/gifts',requireSuperAdmin,(req,res)=>saveGift(req,res,null));
+app.put('/api/admin/gifts/:id',requireSuperAdmin,(req,res)=>saveGift(req,res,Number(req.params.id)));
+app.put('/api/admin/gifts-order',requireSuperAdmin,(req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?req.body.ids.map(Number).filter(Boolean):[];
+  const t=now();const stmt=db.prepare('UPDATE gifts SET sort_order=?,updated_at=updated_at WHERE id=?');
+  db.transaction(()=>ids.forEach((id,i)=>stmt.run(i+1,id)))();
+  res.json({success:true});
+});
+app.delete('/api/admin/gifts/:id',requireSuperAdmin,(req,res)=>{
+  const g=db.prepare('SELECT * FROM gifts WHERE id=?').get(Number(req.params.id));
+  if(!g)return res.status(404).json({error:'找不到這個禮品'});
+  db.prepare('DELETE FROM gifts WHERE id=?').run(g.id);removeGiftLogo(g.logo_file);
+  res.json({success:true});
+});
 
 // ===== 總後台：模組預覽用的實際目錄（唯讀） =====
 // 依指定公司的目錄設定（含企業覆寫）回傳現場／內勤會看到的目錄；不套用個人權限過濾。

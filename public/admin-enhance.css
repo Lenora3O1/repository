@@ -100,3 +100,37 @@ body.admin-console td .secondary,body.admin-console td .danger{margin:2px 4px 2p
   body.admin-console .panel table td:first-child{min-width:130px}
   .dash-filter{display:flex;width:100%;box-sizing:border-box}.dash-filter button{flex:1;padding:7px 4px;white-space:nowrap;font-size:.85rem}
 }
+
+/* ---- 禮品推放（總後台） ---- */
+.gift-admin-summary{display:flex;gap:16px;color:var(--adm-muted);font-size:.86rem;margin:14px 0 10px}
+.gift-admin-list{display:flex;flex-direction:column;gap:10px}
+.gift-admin-row{display:grid;grid-template-columns:96px minmax(0,1fr) auto auto;gap:16px;align-items:center;border:1px solid var(--adm-line);border-radius:14px;padding:12px 14px;background:#fff}
+.gift-admin-row.is-off{background:#f7f8f7}
+.gift-admin-row.is-off .gift-admin-logo img{filter:grayscale(1);opacity:.6}
+.gift-admin-logo{width:96px;height:72px;border-radius:10px;background:var(--adm-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:2rem}
+.gift-admin-logo img{max-width:88%;max-height:88%;object-fit:contain}
+.gift-admin-info{display:flex;flex-direction:column;gap:4px;min-width:0}
+.gift-admin-info strong{font-size:1.02rem}
+.gift-admin-info .muted{font-size:.84rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gift-admin-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.gift-admin-link{font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;text-decoration:none;white-space:nowrap}
+.gift-admin-link.web{background:var(--adm-accent-soft);color:var(--adm-accent)}
+.gift-admin-link.line{background:#e3f7ea;color:#05873b}
+.gift-admin-link.is-empty{background:#f1f2f1;color:#8a9691;font-weight:500}
+.gift-admin-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.gift-admin-actions button{padding:7px 12px;min-height:0;font-size:.86rem}
+.gift-editor{max-width:760px;width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box}
+.gift-form .modal-actions{position:static;margin:0;padding-top:14px;border-top:1px solid var(--adm-line);background:transparent}
+.gift-form{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px;margin-top:12px}
+.gift-form .modal-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:10px}
+.gift-form .modal-actions #giftFormMsg{margin-right:auto}
+.gift-logo-preview{aspect-ratio:4/3;border:1px dashed #c8d6cf;border-radius:14px;background:var(--adm-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--adm-muted);font-size:.86rem;margin-bottom:10px}
+.gift-logo-preview img{max-width:90%;max-height:90%;object-fit:contain}
+.gift-logo-pick{display:inline-flex;align-items:center;justify-content:center;width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--adm-accent);border-radius:10px;color:var(--adm-accent);font-weight:700;cursor:pointer}
+.gift-logo-pick:hover{background:var(--adm-accent-soft)}
+.gift-form-logo .hint{font-size:.78rem;margin:8px 0 0}
+.gift-form-fields{display:flex;flex-direction:column;gap:12px}
+.gift-form-fields label{display:flex;flex-direction:column;gap:6px;font-weight:700;font-size:.9rem}
+.gift-form-fields input:not([type=checkbox]),.gift-form-fields textarea{width:100%;box-sizing:border-box;margin:0;font-weight:400}
+.gift-form-fields .check-row{flex-direction:row;align-items:center;gap:8px;font-weight:600}
+@media(max-width:760px){.gift-form-logo{display:grid;grid-template-columns:120px minmax(0,1fr);gap:4px 12px;align-items:start}.gift-form-logo .gift-logo-preview{grid-row:1/3;margin:0}.gift-form-logo .hint{margin:0}.gift-form .modal-actions{position:sticky;bottom:-1px;background:#fff;padding-bottom:4px}.gift-admin-row{grid-template-columns:72px minmax(0,1fr);}.gift-admin-logo{width:72px;height:56px}.gift-admin-status{grid-column:2}.gift-admin-actions{grid-column:1/-1;justify-content:flex-start}.gift-form{grid-template-columns:1fr}}
