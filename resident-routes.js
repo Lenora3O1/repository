@@ -1,0 +1,292 @@
+// 住戶名冊（智慧版）：住戶聯繫表／區分所有權人／承租人
+// - 三份格式相同（棟別、戶號、樓層、姓名、電話、門牌、其他資料），承租人多了租約起訖。
+// - 每份都可以上傳 Excel 整批更新，也可以逐筆新增／修改（過戶、登錄租約、退租）。
+// - 住戶聯繫表可以「從區分所有權人＋承租人自動更新」：
+//   有有效租約的戶別 → 聯繫人是承租人；沒有 → 聯繫人是所有權人。上傳檔裡其他戶別保持不動。
+// - 每次異動都留下紀錄（誰、何時、改了什麼）。
+'use strict';
+
+const LABELS = { 'residents-contact': '住戶聯繫表', 'residents-owners': '區分所有權人', 'residents-tenants': '承租人' };
+const FIELDS = ['building', 'unit', 'floor', 'name', 'phone', 'address', 'extra'];
+
+function todayTW() { return new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); }
+function addDays(iso, n) { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+// 支援 2026-01-31、2026/1/31、115/1/31（民國）、1/31/26（Excel 文字格式）、20260131
+function normalizeDate(v) {
+  const s = String(v ?? '').trim().replace(/[年月.]/g, '/').replace(/日/g, '');
+  if (!s) return '';
+  let m;
+  if ((m = s.match(/^(\d{8})$/))) return `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}-${m[1].slice(6, 8)}`;
+  if ((m = s.match(/^(\d{2,4})[-/](\d{1,2})[-/](\d{1,2})/))) {
+    let y = Number(m[1]); if (y < 1911) y += 1911;
+    return `${y}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+  }
+  if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/))) {
+    let y = Number(m[3]); if (y < 100) y += 2000;
+    return `${y}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
+  }
+  return '';
+}
+// 「2026/1/1-2026/12/31」「115.1.1~116.12.31」這種租期欄位
+function splitLeaseRange(v) {
+  const parts = String(v ?? '').split(/\s*(?:~|～|至|到|－|—|–|\s-\s)\s*/).filter(Boolean);
+  if (parts.length === 2) return [normalizeDate(parts[0]), normalizeDate(parts[1])];
+  const m = String(v ?? '').match(/^(\S+?)-(\d{2,4}[/.]\S+)$/);
+  if (m) return [normalizeDate(m[1]), normalizeDate(m[2])];
+  return ['', ''];
+}
+function normPart(v) { return String(v ?? '').toUpperCase().replace(/[\s　]/g, '').replace(/[棟號樓FＦ之]+$/g, '').replace(/[Ａ-Ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)); }
+function unitKey(r) { const u = normPart(r.unit); if (!u) return ''; const b = normPart(r.building); return `${b}|${u}`; }
+function unitLabel(r) { return [r.building, r.unit].filter(x => String(x || '').trim()).join(' ') || '（未填戶號）'; }
+function cleanText(v, max = 200) { return String(v ?? '').trim().slice(0, max); }
+
+module.exports = function registerResidentRoutes(app, d) {
+  const { db, getUser, tenantId, now, requireStaffFiller, residentCategory, residentActiveCommunity, residentCanEdit, residentParseFile, residentUpload, RESIDENT_IMPORTS_DIR, path } = d;
+
+  // ---------- 資料表 ----------
+  const cols = db.prepare('PRAGMA table_info(resident_records)').all().map(c => c.name);
+  for (const [c, def] of [['lease_start', "TEXT DEFAULT ''"], ['lease_end', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'active'"], ['source', "TEXT DEFAULT 'import'"], ['updated_at', "TEXT DEFAULT ''"], ['updated_by', "TEXT DEFAULT ''"]]) {
+    if (!cols.includes(c)) db.exec(`ALTER TABLE resident_records ADD COLUMN ${c} ${def}`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS resident_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, category TEXT NOT NULL,
+      record_id INTEGER, unit_label TEXT DEFAULT '', action TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+      before_json TEXT DEFAULT '', after_json TEXT DEFAULT '', by_name TEXT DEFAULT '', at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_resident_changes ON resident_changes(tenant_id,community_id,category,id);
+    CREATE TABLE IF NOT EXISTS resident_settings (
+      tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, auto_sync INTEGER NOT NULL DEFAULT 1, updated_at TEXT,
+      PRIMARY KEY (tenant_id,community_id)
+    );
+  `);
+  const tx = fn => (db.transaction ? db.transaction(fn) : fn);
+
+  // ---------- 共用 ----------
+  function ctx(req, res, { edit = false } = {}) {
+    let category; try { category = residentCategory(req); } catch (e) { res.status(400).json({ error: e.message }); return null; }
+    const c = residentActiveCommunity(req);
+    if (!c) { res.status(400).json({ error: '請先選擇目前要操作的案場' }); return null; }
+    const u = getUser(req);
+    if (edit && !residentCanEdit(u)) { res.status(403).json({ error: '目前帳號沒有修改住戶名冊的權限（經理、秘書可以修改）' }); return null; }
+    return { tid: tenantId(req), cid: c.id, community: c, category, u, by: u?.name || u?.employee_id || '' };
+  }
+  function activeImport(tid, cid, category) { return db.prepare('SELECT * FROM resident_imports WHERE tenant_id=? AND community_id=? AND category=? AND is_active=1 ORDER BY id DESC LIMIT 1').get(tid, cid, category) || null; }
+  function ensureImport(tid, cid, category, by, uid, note) {
+    const cur = activeImport(tid, cid, category); if (cur) return cur;
+    const info = db.prepare('INSERT INTO resident_imports(tenant_id,community_id,category,original_filename,imported_at,imported_by,imported_by_name,row_count,detected_fields_json,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)').run(tid, cid, category, note || '手動建立', now(), uid || null, by || '', 0, '[]');
+    return db.prepare('SELECT * FROM resident_imports WHERE id=?').get(Number(info.lastInsertRowid));
+  }
+  function records(tid, cid, category, { includeEnded = true } = {}) {
+    const imp = activeImport(tid, cid, category); if (!imp) return [];
+    const rows = db.prepare('SELECT id,building,unit,floor,name,phone,address,extra,lease_start,lease_end,status,source,updated_at,updated_by FROM resident_records WHERE import_id=? ORDER BY id').all(imp.id);
+    return rows.map(r => ({ ...r, status: r.status || 'active', source: r.source || 'import' })).filter(r => includeEnded || r.status !== 'ended');
+  }
+  function log(t, { category, record_id = null, unit = '', action, summary, before = null, after = null }) {
+    db.prepare('INSERT INTO resident_changes(tenant_id,community_id,category,record_id,unit_label,action,summary,before_json,after_json,by_name,at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+      .run(t.tid, t.cid, category, record_id, unit, action, summary, before ? JSON.stringify(before) : '', after ? JSON.stringify(after) : '', t.by, now());
+  }
+  function settings(tid, cid) { const r = db.prepare('SELECT auto_sync FROM resident_settings WHERE tenant_id=? AND community_id=?').get(tid, cid); return { auto_sync: r ? !!r.auto_sync : true }; }
+  function cleanRecord(b, category) {
+    const out = {}; for (const f of FIELDS) out[f] = cleanText(b?.[f], f === 'extra' || f === 'address' ? 500 : 100);
+    if (category === 'residents-tenants') { out.lease_start = normalizeDate(b?.lease_start); out.lease_end = normalizeDate(b?.lease_end); }
+    return out;
+  }
+  // 租約狀態：active（有效）、expiring（30 天內到期）、expired（已過期但還沒辦退租）、ended（已退租）
+  function leaseState(r, today = todayTW()) {
+    if (r.status === 'ended') return 'ended';
+    if (r.lease_end && r.lease_end < today) return 'expired';
+    if (r.lease_end && r.lease_end <= addDays(today, 30)) return 'expiring';
+    if (r.lease_start && r.lease_start > today) return 'upcoming';
+    return 'active';
+  }
+
+  // ---------- 住戶聯繫表 自動更新 ----------
+  // 依所有權人＋有效租約，算出每一戶「應該」的聯繫人
+  function desiredContacts(tid, cid) {
+    const today = todayTW();
+    const owners = records(tid, cid, 'residents-owners', { includeEnded: false });
+    const tenants = records(tid, cid, 'residents-tenants', { includeEnded: false }).filter(r => { const s = leaseState(r, today); return s === 'active' || s === 'expiring'; });
+    const byKey = new Map();
+    const slot = r => { const k = unitKey(r); if (!k) return null; if (!byKey.has(k)) byKey.set(k, { key: k, owners: [], tenants: [], base: r }); return byKey.get(k); };
+    for (const o of owners) slot(o)?.owners.push(o);
+    for (const t of tenants) slot(t)?.tenants.push(t);
+    const out = new Map();
+    for (const s of byKey.values()) {
+      const pick = s.tenants.length ? s.tenants : s.owners;
+      const ref = { ...s.base, ...(s.owners[0] || {}), ...(pick[0] || {}) };
+      const join = (list, f) => [...new Set(list.map(x => String(x[f] || '').trim()).filter(Boolean))].join('、');
+      const ownerTxt = s.owners.length ? `所有權人：${join(s.owners, 'name')}${join(s.owners, 'phone') ? ` ${join(s.owners, 'phone')}` : ''}` : '';
+      const extra = s.tenants.length
+        ? [`承租人${s.tenants[0].lease_end ? `（租約至 ${s.tenants[0].lease_end}）` : ''}`, ownerTxt].filter(Boolean).join('；')
+        : '所有權人';
+      out.set(s.key, {
+        building: ref.building || '', unit: ref.unit || '', floor: ref.floor || s.owners[0]?.floor || '',
+        name: join(pick, 'name'), phone: join(pick, 'phone'), address: ref.address || s.owners[0]?.address || '', extra,
+        source: s.tenants.length ? 'sync-tenant' : 'sync-owner',
+      });
+    }
+    return out;
+  }
+  // 比對聯繫表現況，算出要新增／更新的戶別；onlyKeys 只處理指定戶別（單筆異動時用）
+  function syncPlan(tid, cid, onlyKeys = null) {
+    const want = desiredContacts(tid, cid);
+    const contacts = records(tid, cid, 'residents-contact', { includeEnded: false });
+    const byKey = new Map();
+    for (const r of contacts) { const k = unitKey(r); if (!k) continue; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(r); }
+    const add = [], update = []; let same = 0;
+    for (const [k, w] of want) {
+      if (onlyKeys && !onlyKeys.has(k)) continue;
+      const list = byKey.get(k) || [];
+      const target = list.find(r => String(r.source || '').startsWith('sync')) || list[0];
+      if (!target) { add.push({ key: k, after: w }); continue; }
+      const changed = ['name', 'phone', 'extra'].some(f => String(target[f] || '') !== String(w[f] || ''));
+      if (!changed) { same++; continue; }
+      update.push({ key: k, id: target.id, before: { building: target.building, unit: target.unit, name: target.name, phone: target.phone, extra: target.extra }, after: { ...w, floor: target.floor || w.floor, address: target.address || w.address } });
+    }
+    return { add, update, unchanged: same, total_units: want.size };
+  }
+  function applySync(t, plan, reason) {
+    if (!plan.add.length && !plan.update.length) return 0;
+    const imp = ensureImport(t.tid, t.cid, 'residents-contact', t.by, t.u?.id, '由區分所有權人／承租人自動建立');
+    const ins = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,source,status,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    const upd = db.prepare('UPDATE resident_records SET floor=?,name=?,phone=?,address=?,extra=?,source=?,updated_at=?,updated_by=? WHERE id=?');
+    tx(() => {
+      for (const a of plan.add) { const w = a.after; const info = ins.run(imp.id, t.tid, t.cid, 'residents-contact', w.building, w.unit, w.floor, w.name, w.phone, w.address, w.extra, '{}', w.source, 'active', now(), t.by); log(t, { category: 'residents-contact', record_id: Number(info.lastInsertRowid), unit: unitLabel(w), action: 'sync-add', summary: `自動新增：${w.name || '—'}${w.phone ? ` ${w.phone}` : ''}（${w.source === 'sync-tenant' ? '承租人' : '所有權人'}）`, after: w }); }
+      for (const u of plan.update) { const w = u.after; upd.run(w.floor, w.name, w.phone, w.address, w.extra, w.source, now(), t.by, u.id); log(t, { category: 'residents-contact', record_id: u.id, unit: unitLabel(w), action: 'sync-update', summary: `自動更新：${u.before.name || '—'} → ${w.name || '—'}${w.source === 'sync-tenant' ? '（承租人）' : '（所有權人）'}${reason ? `｜${reason}` : ''}`, before: u.before, after: w }); }
+      db.prepare('UPDATE resident_imports SET row_count=(SELECT COUNT(*) FROM resident_records WHERE import_id=?) WHERE id=?').run(imp.id, imp.id);
+    })();
+    return plan.add.length + plan.update.length;
+  }
+  // 所有權人／承租人有異動時，若開啟自動同步就更新聯繫表對應的戶別
+  function autoSync(t, keys, reason) {
+    if (!settings(t.tid, t.cid).auto_sync) return 0;
+    const ks = new Set([...keys].filter(Boolean));
+    if (!ks.size) return 0;
+    return applySync(t, syncPlan(t.tid, t.cid, ks), reason);
+  }
+
+  // ---------- API ----------
+  app.get('/api/staff/residents', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res); if (!t) return;
+    try {
+      const imp = activeImport(t.tid, t.cid, t.category);
+      const today = todayTW();
+      const rows = records(t.tid, t.cid, t.category).map(r => t.category === 'residents-tenants' ? { ...r, lease_state: leaseState(r, today) } : r);
+      const pref = db.prepare('SELECT sort_key FROM resident_sort_preferences WHERE staff_id=? AND tenant_id=? AND community_id=? AND category=?').get(t.u.id, t.tid, t.cid, t.category);
+      const out = { community: t.community, category: t.category, records: rows, preference: { sort: pref?.sort_key || 'building' }, last_import: imp || null, viewer: { can_upload: residentCanEdit(t.u), can_edit: residentCanEdit(t.u) }, settings: settings(t.tid, t.cid), today };
+      if (t.category === 'residents-contact') {
+        const plan = syncPlan(t.tid, t.cid);
+        out.sync = { pending: plan.add.length + plan.update.length, add: plan.add.length, update: plan.update.length, units: plan.total_units, owners: records(t.tid, t.cid, 'residents-owners', { includeEnded: false }).length, tenants: records(t.tid, t.cid, 'residents-tenants', { includeEnded: false }).filter(r => ['active', 'expiring'].includes(leaseState(r, today))).length };
+      }
+      if (t.category === 'residents-tenants') out.lease_summary = ['active', 'expiring', 'expired', 'upcoming', 'ended'].reduce((a, k) => ({ ...a, [k]: rows.filter(r => r.lease_state === k).length }), {});
+      if (t.category === 'residents-owners' || t.category === 'residents-tenants') {
+        // 給表單用：戶別清單（從所有權人＋聯繫表），方便登錄租約時選戶別、自動帶入所有權人
+        const units = new Map();
+        for (const cat of ['residents-owners', 'residents-contact']) for (const r of records(t.tid, t.cid, cat, { includeEnded: false })) { const k = unitKey(r); if (k && !units.has(k)) units.set(k, { building: r.building, unit: r.unit, floor: r.floor, address: r.address, owner: cat === 'residents-owners' ? r.name : '', owner_phone: cat === 'residents-owners' ? r.phone : '' }); else if (k && cat === 'residents-owners') { const u = units.get(k); if (u && !u.owner.includes(r.name)) u.owner = [u.owner, r.name].filter(Boolean).join('、'); } }
+        out.units = [...units.values()];
+      }
+      res.set('Cache-Control', 'no-store');
+      res.json(out);
+    } catch (e) { console.error('residents load', e); res.status(400).json({ error: e.message || '無法載入住戶資料' }); }
+  });
+
+  app.post('/api/staff/residents/import', requireStaffFiller, residentUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: '請選擇 Excel／CSV 檔案' });
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    try {
+      const parsed = residentParseFile(path.join(RESIDENT_IMPORTS_DIR, req.file.filename), t.category);
+      const at = now();
+      const info = db.prepare('INSERT INTO resident_imports(tenant_id,community_id,category,original_filename,imported_at,imported_by,imported_by_name,row_count,detected_fields_json,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)').run(t.tid, t.cid, t.category, req.file.originalname, at, t.u.id, t.by, parsed.rows.length, JSON.stringify(parsed.detected));
+      const importId = Number(info.lastInsertRowid);
+      db.prepare('UPDATE resident_imports SET is_active=0 WHERE tenant_id=? AND community_id=? AND category=? AND id<>?').run(t.tid, t.cid, t.category, importId);
+      const ins = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+      tx(rows => { for (const r of rows) ins.run(importId, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, [r.relation, r.extra].filter(Boolean).join('；'), JSON.stringify(r.raw), r.lease_start || '', r.lease_end || '', 'active', 'import', at, t.by); })(parsed.rows);
+      log(t, { category: t.category, action: 'import', summary: `上傳檔案「${req.file.originalname}」，共 ${parsed.rows.length} 筆（取代原本資料）` });
+      let synced = 0;
+      if (t.category !== 'residents-contact') synced = autoSync(t, new Set(desiredContacts(t.tid, t.cid).keys()), `${LABELS[t.category]}上傳更新`);
+      res.json({ success: true, imported: parsed.rows.length, detected_fields: parsed.detected, synced, message: `已匯入 ${parsed.rows.length} 筆，並成為目前這個案場的最新${LABELS[t.category]}。${synced ? `住戶聯繫表已自動更新 ${synced} 戶。` : ''}` });
+    } catch (e) { res.status(400).json({ error: e.message || '匯入失敗' }); }
+  });
+
+  app.post('/api/staff/residents/records', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    const r = cleanRecord(req.body?.record, t.category);
+    if (!r.unit && !r.name) return res.status(400).json({ error: '請至少填寫戶號與姓名' });
+    if (t.category === 'residents-tenants' && r.lease_start && r.lease_end && r.lease_end < r.lease_start) return res.status(400).json({ error: '租約到期日不能早於起租日' });
+    const imp = ensureImport(t.tid, t.cid, t.category, t.by, t.u.id);
+    const info = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(imp.id, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, r.extra, '{}', r.lease_start || '', r.lease_end || '', 'active', 'manual', now(), t.by);
+    db.prepare('UPDATE resident_imports SET row_count=row_count+1 WHERE id=?').run(imp.id);
+    const id = Number(info.lastInsertRowid);
+    const summary = t.category === 'residents-tenants' ? `登錄租約：${r.name}${r.lease_start || r.lease_end ? `（${r.lease_start || '—'}～${r.lease_end || '—'}）` : ''}` : t.category === 'residents-owners' ? `新增所有權人：${r.name}` : `新增聯繫人：${r.name}`;
+    log(t, { category: t.category, record_id: id, unit: unitLabel(r), action: 'add', summary, after: r });
+    const synced = t.category === 'residents-contact' ? 0 : autoSync(t, new Set([unitKey(r)]), summary);
+    res.json({ success: true, id, synced });
+  });
+
+  app.put('/api/staff/residents/records/:id', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    const cur = db.prepare('SELECT * FROM resident_records WHERE id=? AND tenant_id=? AND community_id=? AND category=?').get(Number(req.params.id), t.tid, t.cid, t.category);
+    if (!cur) return res.status(404).json({ error: '找不到這筆資料' });
+    const r = cleanRecord({ ...cur, ...(req.body?.record || {}) }, t.category);
+    if (t.category === 'residents-tenants' && r.lease_start && r.lease_end && r.lease_end < r.lease_start) return res.status(400).json({ error: '租約到期日不能早於起租日' });
+    const transfer = t.category === 'residents-owners' && req.body?.transfer && r.name !== cur.name;
+    const status = req.body?.status === 'ended' ? 'ended' : req.body?.status === 'active' ? 'active' : (cur.status || 'active');
+    db.prepare('UPDATE resident_records SET building=?,unit=?,floor=?,name=?,phone=?,address=?,extra=?,lease_start=?,lease_end=?,status=?,source=?,updated_at=?,updated_by=? WHERE id=?')
+      .run(r.building, r.unit, r.floor, r.name, r.phone, r.address, r.extra, r.lease_start ?? cur.lease_start ?? '', r.lease_end ?? cur.lease_end ?? '', status, cur.source === 'import' ? 'import-edited' : (cur.source || 'manual'), now(), t.by, cur.id);
+    const changes = FIELDS.concat(t.category === 'residents-tenants' ? ['lease_start', 'lease_end'] : []).filter(f => String(cur[f] || '') !== String(r[f] || ''));
+    const names = { building: '棟別', unit: '戶號', floor: '樓層', name: '姓名', phone: '電話', address: '門牌', extra: '其他資料', lease_start: '起租日', lease_end: '租約到期日' };
+    let action = 'update', summary;
+    if (transfer) { action = 'transfer'; summary = `過戶：${cur.name || '—'} → ${r.name}${req.body.transfer_date ? `（${normalizeDate(req.body.transfer_date) || req.body.transfer_date}）` : ''}`; }
+    else if (status === 'ended' && cur.status !== 'ended') { action = 'end'; summary = `退租：${cur.name || '—'}${req.body?.end_date ? `（${normalizeDate(req.body.end_date)}）` : ''}`; if (req.body?.end_date) db.prepare('UPDATE resident_records SET lease_end=? WHERE id=?').run(normalizeDate(req.body.end_date) || r.lease_end || '', cur.id); }
+    else if (t.category === 'residents-tenants' && changes.includes('lease_end') && cur.lease_end && r.lease_end > cur.lease_end) { action = 'renew'; summary = `續約：${r.name} 租約延長至 ${r.lease_end}`; }
+    else summary = changes.length ? `修改${changes.map(f => names[f]).join('、')}${changes.includes('name') ? `：${cur.name || '—'} → ${r.name}` : changes.includes('phone') ? `：${cur.phone || '—'} → ${r.phone}` : ''}` : '確認資料（無變更）';
+    log(t, { category: t.category, record_id: cur.id, unit: unitLabel(r), action, summary, before: cur, after: { ...r, status } });
+    const synced = t.category === 'residents-contact' ? 0 : autoSync(t, new Set([unitKey(cur), unitKey(r)]), summary);
+    res.json({ success: true, synced });
+  });
+
+  app.delete('/api/staff/residents/records/:id', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    const cur = db.prepare('SELECT * FROM resident_records WHERE id=? AND tenant_id=? AND community_id=? AND category=?').get(Number(req.params.id), t.tid, t.cid, t.category);
+    if (!cur) return res.status(404).json({ error: '找不到這筆資料' });
+    db.prepare('DELETE FROM resident_records WHERE id=?').run(cur.id);
+    db.prepare('UPDATE resident_imports SET row_count=MAX(row_count-1,0) WHERE id=?').run(cur.import_id);
+    const summary = `刪除：${cur.name || '—'}`;
+    log(t, { category: t.category, record_id: cur.id, unit: unitLabel(cur), action: 'delete', summary, before: cur });
+    const synced = t.category === 'residents-contact' ? 0 : autoSync(t, new Set([unitKey(cur)]), summary);
+    res.json({ success: true, synced });
+  });
+
+  app.get('/api/staff/residents/history', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res); if (!t) return;
+    const rows = db.prepare('SELECT id,unit_label,action,summary,by_name,at FROM resident_changes WHERE tenant_id=? AND community_id=? AND category=? ORDER BY id DESC LIMIT 200').all(t.tid, t.cid, t.category);
+    res.json({ rows });
+  });
+
+  // 住戶聯繫表：預覽／執行「從所有權人＋承租人更新」
+  app.get('/api/staff/residents/sync-preview', requireStaffFiller, (req, res) => {
+    req.query.category = 'residents-contact';
+    const t = ctx(req, res); if (!t) return;
+    const p = syncPlan(t.tid, t.cid);
+    res.json({ add: p.add.map(x => x.after), update: p.update.map(x => ({ before: x.before, after: x.after })), unchanged: p.unchanged, units: p.total_units });
+  });
+  app.post('/api/staff/residents/sync', requireStaffFiller, (req, res) => {
+    req.body = { ...(req.body || {}), category: 'residents-contact' };
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    const n = applySync(t, syncPlan(t.tid, t.cid), '手動執行同步');
+    res.json({ success: true, synced: n });
+  });
+  app.put('/api/staff/residents/settings', requireStaffFiller, (req, res) => {
+    req.body = { ...(req.body || {}), category: req.body?.category || 'residents-contact' };
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    const on = req.body.auto_sync ? 1 : 0;
+    db.prepare('INSERT INTO resident_settings(tenant_id,community_id,auto_sync,updated_at) VALUES(?,?,?,?) ON CONFLICT(tenant_id,community_id) DO UPDATE SET auto_sync=excluded.auto_sync,updated_at=excluded.updated_at').run(t.tid, t.cid, on, now());
+    log(t, { category: 'residents-contact', action: 'settings', summary: on ? '開啟自動同步' : '關閉自動同步' });
+    res.json({ success: true, settings: settings(t.tid, t.cid) });
+  });
+
+  return { desiredContacts, syncPlan };
+};
+Object.assign(module.exports, { normalizeDate, splitLeaseRange, unitKey });
