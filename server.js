@@ -956,7 +956,7 @@ function messagePayload(r){
   const type=['image','sticker'].includes(r.message_type)?r.message_type:'text';
   let attachment=null;
   if(type==='image'&&a)attachment={url:`/api/messages/${r.id}/image`,name:a.name||'',size:a.size||0,width:a.width||null,height:a.height||null};
-  if(type==='sticker'&&a){const st=MESSAGE_STICKERS.find(x=>x.id===a.sticker_id);attachment=st?{...st}:{id:a.sticker_id,emoji:'💬',text:String(r.body||'').replace(/^\[貼圖\]\s*/,''),tone:'gray'};}
+  if(type==='sticker'&&a)attachment=stickerApi.attachmentFor(a.sticker_id,r.body);
   return {...rest,message_type:type,attachment};
 }
 
@@ -1013,7 +1013,7 @@ app.post('/api/messages',requireMessageUser,(req,res)=>{
   const recipientId=Number(req.body?.recipient_id);
   const subject=String(req.body?.subject||'').trim().slice(0,120);
   const stickerId=String(req.body?.sticker_id||'').trim();
-  const sticker=req.body?.message_type==='sticker'?MESSAGE_STICKERS.find(x=>x.id===stickerId):null;
+  const found=req.body?.message_type==='sticker'?stickerApi.findForSend(stickerId,u):null;const sticker=found?found.sticker:null;
   if(req.body?.message_type==='sticker'&&!sticker)return res.status(400).json({error:'找不到這張貼圖'});
   const body=sticker?`[貼圖] ${sticker.text}`:String(req.body?.body||'').trim();
   if(!recipientId)return res.status(400).json({error:'請選擇收件人'});
@@ -1029,7 +1029,8 @@ app.post('/api/messages',requireMessageUser,(req,res)=>{
 
 // ===== 內部訊息：圖片 =====
 // 圖片存放於 DATA_DIR/uploads/messages，只能由對話雙方或公司授權的訊息稽核人員讀取。
-app.get('/api/messages/stickers',requireMessageUser,(req,res)=>res.json({stickers:MESSAGE_STICKERS}));
+// 貼圖：內建＋總後台上傳的平台貼圖＋人員自己上傳的「我的貼圖」（sticker-routes.js）
+const stickerApi=require('./sticker-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireMessageUser,requireSuperAdmin,BUILTIN:MESSAGE_STICKERS,imageLooksValid:messageImageLooksValid});
 app.post('/api/messages/image',requireMessageUser,(req,res)=>{
   messageImageUpload.single('image')(req,res,err=>{
     if(err){const msg=err.code==='LIMIT_FILE_SIZE'?'圖片太大，單張最多 10MB':(err.message||'圖片上傳失敗');return res.status(400).json({error:msg});}
