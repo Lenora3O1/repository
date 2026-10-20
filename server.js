@@ -207,7 +207,8 @@ const sopUpload=multer({
 
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// HTML 一律重新驗證，避免瀏覽器沿用舊頁面而載入舊版程式（JS/CSS 以 ?v= 版本號控制快取）
+app.use(express.static(path.join(__dirname, 'public'),{setHeaders:(res,file)=>{if(file.endsWith('.html'))res.setHeader('Cache-Control','no-cache');}}));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
   resave: false, saveUninitialized: false,
@@ -558,6 +559,36 @@ function normalizeMenuForCompare(items){
 // - 只有「企業覆寫存檔之後平台才新增」的項目會自動補上，避免舊覆寫漏掉新功能。
 //   存檔時記錄當下平台項目代碼（baseIds）；不在 baseIds 裡的平台項目才算新增。
 // - 沒有 baseIds 的舊覆寫沿用舊行為，總後台重新儲存一次該公司目錄即可改用新規則。
+// 企業自訂目錄的修復：
+// 1) 功能代碼空白或「placeholder」的項目，若名稱（或代碼）和平台目錄相同，就補上平台的功能代碼，
+//    避免企業早期存檔的「工作日誌」等項目點了只看到「建置中」。
+// 2) 同一層出現同名的重複項目時只保留一個（子目錄併到保留的那一個）。
+function repairMenuItems(items,platformItems){
+  const list=(Array.isArray(items)?items:[]).map(x=>({...x}));
+  const plat=Array.isArray(platformItems)?platformItems:[];
+  const platById=new Map(plat.map(x=>[String(x.id),x]));
+  const labelOf=(arr,id)=>{const x=arr.find(y=>String(y.id)===String(id));return x?String(x.label||'').trim():'';};
+  const platByLabel=new Map();
+  for(const x of plat){if(!x.action||x.action==='placeholder')continue;const k=`${labelOf(plat,x.parentId)}::${String(x.label||'').trim()}`;if(!platByLabel.has(k))platByLabel.set(k,x);const k2=`*::${String(x.label||'').trim()}`;if(!platByLabel.has(k2))platByLabel.set(k2,x);}
+  for(const x of list){
+    const a=String(x.action||'').trim();
+    if(a&&a!=='placeholder')continue;
+    const byId=platById.get(String(x.id));
+    const match=(byId&&byId.action&&byId.action!=='placeholder')?byId:(platByLabel.get(`${labelOf(list,x.parentId)}::${String(x.label||'').trim()}`)||platByLabel.get(`*::${String(x.label||'').trim()}`));
+    if(match)x.action=match.action;
+  }
+  const keep=[];const seen=new Map();const remap=new Map();
+  for(const x of list){
+    const parent=remap.get(String(x.parentId))??x.parentId??null;
+    if(parent!==x.parentId)x.parentId=parent;
+    const k=`${String(parent??'')}::${String(x.label||'').trim()}`;
+    if(String(x.label||'').trim()&&seen.has(k)){const kept=seen.get(k);const ka=String(kept.action||'');if((!ka||ka==='placeholder')&&x.action&&x.action!=='placeholder')kept.action=x.action;remap.set(String(x.id),kept.id);continue;}
+    seen.set(k,x);keep.push(x);
+  }
+  // 子目錄可能排在母目錄之前，再跑一次父代碼對應
+  for(const x of keep){const r=remap.get(String(x.parentId));if(r!==undefined)x.parentId=r;}
+  return keep;
+}
 function mergeTenantMenuWithPlatform(platformItems,overrideItems,baseIds){
   const base=Array.isArray(platformItems)?platformItems:[];
   if(!Array.isArray(overrideItems)) return base;
@@ -607,6 +638,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   const baseIds=tenantCfg?._base?.[scope];
   // 以企業覆寫為準，只補上覆寫存檔後平台才新增的目錄項目。
   let items=mergeTenantMenuWithPlatform(platformItems,override,baseIds);
+  items=repairMenuItems(items,platformItems);
   items=items.filter(x=>x.enabled!==false);
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectiveMenuPermissions(staffUser,scope));
