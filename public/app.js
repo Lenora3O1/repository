@@ -29,6 +29,8 @@ async function boot(){
     console.warn('Staff boot failed',err);
   }
 }
+// 登入頁頂端顯示系統名稱（取自登入卡片上的系統名稱，例如「鶴絲物業管理系統」），登入後才換成所屬公司名稱
+const LOGIN_SYSTEM_NAME=(()=>{const t=(document.querySelector('.login-company')?.textContent||document.getElementById('platformBrand')?.textContent||'').trim();return t&&!t.includes('公司名稱')?t:'鶴絲物業管理系統';})();
 function setTopbarCompany(name){
   const brand=$('platformBrand');
   const sub=$('platformSub');
@@ -39,7 +41,7 @@ function showLogin(){
   window.__workspaceAuthenticated=false;window.setMessageCenterVisible?.(false);
   $('loginView').style.display='block';$('homeView').style.display='none';$('editorView').style.display='none';$('staffTop').style.display='none';
   $('loginInternal').style.display='flex';
-  setTopbarCompany('（公司名稱）');
+  setTopbarCompany(LOGIN_SYSTEM_NAME);
   document.body.classList.remove('is-authenticated');
 }
 function showCompanyHint(user){ location.href='company.html'; }
@@ -356,12 +358,12 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
 const WORKSPACE_ACTION_ALIASES={'handover':'checklist','handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
 // 企業自訂目錄若沒有設定功能代碼（placeholder），依名稱對應到已上線的功能
 const WORKSPACE_LABEL_ACTIONS=[['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop']];
+function labelWorkspaceAction(label){const t=String(label||'');const hit=WORKSPACE_LABEL_ACTIONS.find(([k])=>t.includes(k));return hit?hit[1]:'';}
 function resolveWorkspaceAction(detail){
-  const raw=String(detail?.action||'');
+  // 舊設定常把連字號存成底線（work_journal），一律轉回平台代碼
+  const raw=String(detail?.action||'').trim().replace(/_/g,'-');
   if(raw&&raw!=='placeholder')return WORKSPACE_ACTION_ALIASES[raw]||raw;
-  const label=String(detail?.label||'');
-  const hit=WORKSPACE_LABEL_ACTIONS.find(([k])=>label.includes(k));
-  return hit?hit[1]:raw;
+  return labelWorkspaceAction(detail?.label)||raw;
 }
 async function handleWorkspaceMenu(e){
   const {label}=e.detail||{};const action=resolveWorkspaceAction(e.detail);
@@ -418,6 +420,9 @@ async function handleWorkspaceMenu(e){
     try{if(!window.GiftsModule)throw new Error('禮品模組尚未載入，請重新整理頁面');await window.GiftsModule.render($('staffHome'),label||'禮品推放');}catch(err){showWorkspaceError(label||'禮品推放',err);}
     return;
   }
+  // 目錄的功能代碼對不上任何已上線功能時，再用項目名稱找一次（例如企業自訂的「工作日誌」）
+  const byLabel=labelWorkspaceAction(label);
+  if(byLabel&&byLabel!==action&&!e.__byLabel){return handleWorkspaceMenu({detail:{...e.detail,action:byLabel},__byLabel:true});}
   showWorkspacePlaceholder(label||'工作功能');
 }
 document.addEventListener('workspace-menu',e=>{handleWorkspaceMenu(e).catch(err=>showWorkspaceError(e.detail?.label||'工作功能',err));});
