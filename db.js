@@ -705,6 +705,21 @@ repairDuplicateNamedTenants();
 addColumnIfMissing('messages', 'message_type', "TEXT NOT NULL DEFAULT 'text'");
 addColumnIfMissing('messages', 'attachment_json', "TEXT NOT NULL DEFAULT ''");
 
+// 禮品推放：總後台登記，所有公司的內勤與現場人員可瀏覽。
+db.exec(`CREATE TABLE IF NOT EXISTS gifts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  logo_file TEXT NOT NULL DEFAULT '',
+  website_url TEXT NOT NULL DEFAULT '',
+  line_url TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gifts_active ON gifts(is_active,sort_order,id);`);
+
 module.exports = db;
 module.exports.makePassword = makePassword;
 module.exports.verifyPassword = verifyPassword;

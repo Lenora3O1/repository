@@ -5,7 +5,7 @@ async function checkSession(){try{const r=await api('/api/admin/session');if(r.i
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});showMain();await loadAll()}catch(err){$('loginMsg').innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('logoutBtn').addEventListener('click',async()=>{await api('/api/admin/logout',{method:'POST'});location.reload()});
 function showMain(){$('loginView').style.display='none';$('mainView').style.display='block';$('logoutWrap').style.display='block'}
-for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit','moduleTest'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}if(b.dataset.tab==='moduleTest'){renderModuleTest();}try{localStorage.setItem('admin-last-tab',b.dataset.tab)}catch{}document.body.classList.remove('sidebar-open');window.scrollTo({top:0});});
+for(const b of document.querySelectorAll('.nav-tabs button'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit','gifts','moduleTest'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}if(b.dataset.tab==='moduleTest'){renderModuleTest();}if(b.dataset.tab==='gifts'){loadGiftsAdmin();}try{localStorage.setItem('admin-last-tab',b.dataset.tab)}catch{}document.body.classList.remove('sidebar-open');window.scrollTo({top:0});});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
   for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料…</div></div>';}
@@ -695,3 +695,67 @@ async function deletePlatformResource(id){if(!confirm('確定刪除這份平台�
 
 // 重新整理後回到上次使用的分頁
 function restoreAdminTab(){let t='';try{t=localStorage.getItem('admin-last-tab')||''}catch{}if(t&&t!=='tenants')switchAdminTab(t);}
+
+// ===== 禮品推放（總後台登記，內勤與現場人員瀏覽） =====
+state.gifts=[];
+async function loadGiftsAdmin(){
+ const el=$('tab-gifts');if(!el)return;
+ el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取禮品…</div></div>';
+ try{const d=await api('/api/admin/gifts');state.gifts=d.gifts||[];renderGiftsAdmin();}
+ catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${escapeHtml(e.message)}</div></div>`;}
+}
+function renderGiftsAdmin(){
+ const el=$('tab-gifts');if(!el)return;
+ const list=state.gifts;const active=list.filter(g=>g.is_active).length;
+ const link=(u,label,cls)=>u?`<a class="gift-admin-link ${cls}" href="${escapeAttr(u)}" target="_blank" rel="noopener noreferrer" title="${escapeAttr(u)}">${label}</a>`:`<span class="gift-admin-link is-empty">${label}：未設定</span>`;
+ const rows=list.map((g,i)=>`<div class="gift-admin-row ${g.is_active?'':'is-off'}">
+   <div class="gift-admin-logo">${g.logo_url?`<img src="${escapeAttr(g.logo_url)}" alt="">`:'🎁'}</div>
+   <div class="gift-admin-info"><strong>${escapeHtml(g.name)}</strong>${g.description?`<span class="muted">${escapeHtml(g.description)}</span>`:''}<div class="gift-admin-links">${link(g.website_url,'🌐 禮品網頁','web')}${link(g.line_url,'💬 官方 LINE','line')}</div></div>
+   <div class="gift-admin-status">${g.is_active?'<span class="tag success">上架中</span>':'<span class="tag">已下架</span>'}</div>
+   <div class="gift-admin-actions">
+     <button type="button" class="icon-btn" onclick="moveGift(${g.id},-1)" ${i===0?'disabled':''} title="往前" aria-label="往前">↑</button>
+     <button type="button" class="icon-btn" onclick="moveGift(${g.id},1)" ${i===list.length-1?'disabled':''} title="往後" aria-label="往後">↓</button>
+     <button type="button" class="secondary" onclick="toggleGift(${g.id})">${g.is_active?'下架':'上架'}</button>
+     <button type="button" class="secondary" onclick="openGiftEditor(${g.id})">編輯</button>
+     <button type="button" class="danger" onclick="deleteGift(${g.id})">刪除</button>
+   </div></div>`).join('');
+ el.innerHTML=`<div class="panel"><div class="dash-head"><div><div class="section-title">🎁 禮品推放</div><p class="hint">在這裡登記的禮品，會出現在所有公司內勤與現場人員的「禮品推放」目錄。每個禮品顯示 LOGO，並提供禮品網頁與官方 LINE 連結。排序就是前台顯示的順序。</p></div><button type="button" onclick="openGiftEditor()">＋ 新增禮品</button></div>
+   <div class="gift-admin-summary"><span>共 ${list.length} 個禮品</span><span>上架中 ${active} 個</span></div>
+   <div class="gift-admin-list">${rows||'<div class="empty">目前還沒有禮品。按右上角「新增禮品」開始登記。</div>'}</div></div>`;
+}
+function openGiftEditor(id){
+ const g=id?state.gifts.find(x=>x.id===id):null;
+ const box=document.createElement('div');box.className='modal-backdrop';box.id='giftEditor';
+ box.innerHTML=`<div class="modal gift-editor" role="dialog" aria-modal="true" aria-labelledby="giftEditorTitle"><button type="button" class="modal-close" aria-label="關閉">×</button>
+  <h2 id="giftEditorTitle">${g?'編輯禮品':'＋ 新增禮品'}</h2>
+  <form id="giftForm" class="gift-form">
+   <div class="gift-form-logo"><div class="gift-logo-preview" id="giftLogoPreview">${g?.logo_url?`<img src="${escapeAttr(g.logo_url)}" alt="">`:'<span>尚未上傳 LOGO</span>'}</div>
+     <label class="secondary gift-logo-pick">${g?'更換 LOGO':'上傳 LOGO'}<input type="file" id="giftLogo" accept="image/jpeg,image/png,image/gif,image/webp" hidden></label><p class="hint">JPG／PNG／GIF／WEBP，最多 3MB。建議使用去背 PNG 或正方形圖片。</p></div>
+   <div class="gift-form-fields">
+     <label>禮品名稱<input id="giftName" type="text" maxlength="80" required value="${escapeAttr(g?.name||'')}" placeholder="例如：中秋禮盒"></label>
+     <label>簡短說明（選填）<textarea id="giftDesc" maxlength="300" rows="2" placeholder="例如：企業團購 9 折，可客製卡片">${escapeHtml(g?.description||'')}</textarea></label>
+     <label>禮品網頁連結<input id="giftWeb" type="text" inputmode="url" autocomplete="url" value="${escapeAttr(g?.website_url||'')}" placeholder="https://"></label>
+     <label>官方 LINE 連結<input id="giftLine" type="text" inputmode="url" autocomplete="url" value="${escapeAttr(g?.line_url||'')}" placeholder="https://lin.ee/… 或 https://line.me/R/ti/p/@…"></label>
+     <label class="check-row"><input type="checkbox" id="giftActive" ${!g||g.is_active?'checked':''}> 上架（內勤與現場人員看得到）</label>
+   </div>
+   <div class="modal-actions"><span id="giftFormMsg"></span><button type="button" class="secondary" data-close>取消</button><button type="submit" id="giftSave">💾 儲存</button></div>
+  </form></div>`;
+ document.body.appendChild(box);
+ const close=()=>box.remove();
+ box.querySelector('.modal-close').onclick=close;box.querySelector('[data-close]').onclick=close;box.addEventListener('click',e=>{if(e.target===box)close();});
+ box.querySelector('#giftLogo').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;if(f.size>3*1024*1024){alert('LOGO 圖片最多 3MB');e.target.value='';return;}const url=URL.createObjectURL(f);box.querySelector('#giftLogoPreview').innerHTML=`<img src="${url}" alt="">`;});
+ box.querySelector('#giftForm').addEventListener('submit',async e=>{
+  e.preventDefault();const msg=box.querySelector('#giftFormMsg'),btn=box.querySelector('#giftSave');
+  const fd=new FormData();fd.append('name',box.querySelector('#giftName').value.trim());fd.append('description',box.querySelector('#giftDesc').value.trim());fd.append('website_url',box.querySelector('#giftWeb').value.trim());fd.append('line_url',box.querySelector('#giftLine').value.trim());fd.append('is_active',box.querySelector('#giftActive').checked?'1':'0');
+  const file=box.querySelector('#giftLogo').files[0];if(file)fd.append('logo',file);
+  if(!g&&!file){msg.innerHTML='<span class="msg error inline-msg">請上傳禮品 LOGO</span>';return;}
+  if(!box.querySelector('#giftWeb').value.trim()&&!box.querySelector('#giftLine').value.trim()&&!confirm('還沒有填禮品網頁或官方 LINE 連結，前台只會顯示 LOGO。確定要儲存嗎？'))return;
+  btn.disabled=true;msg.innerHTML='<span class="hint">儲存中…</span>';
+  try{await api(g?`/api/admin/gifts/${g.id}`:'/api/admin/gifts',{method:g?'PUT':'POST',body:fd});close();await loadGiftsAdmin();}
+  catch(err){msg.innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`;btn.disabled=false;}
+ });
+ setTimeout(()=>box.querySelector('#giftName').focus(),0);
+}
+async function toggleGift(id){const g=state.gifts.find(x=>x.id===id);if(!g)return;const fd=new FormData();fd.append('name',g.name);fd.append('description',g.description||'');fd.append('website_url',g.website_url||'');fd.append('line_url',g.line_url||'');fd.append('is_active',g.is_active?'0':'1');try{await api(`/api/admin/gifts/${id}`,{method:'PUT',body:fd});await loadGiftsAdmin();}catch(e){alert(e.message)}}
+async function moveGift(id,d){const list=state.gifts.slice();const i=list.findIndex(x=>x.id===id),j=i+d;if(i<0||j<0||j>=list.length)return;[list[i],list[j]]=[list[j],list[i]];state.gifts=list;renderGiftsAdmin();try{await api('/api/admin/gifts-order',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:list.map(x=>x.id)})});}catch(e){alert(e.message);await loadGiftsAdmin();}}
+async function deleteGift(id){const g=state.gifts.find(x=>x.id===id);if(!g)return;if(!confirm(`確定刪除「${g.name}」嗎？刪除後內勤與現場人員就看不到，LOGO 也會一併刪除。\n\n如果只是暫時不想顯示，可以改用「下架」。`))return;try{await api(`/api/admin/gifts/${id}`,{method:'DELETE'});await loadGiftsAdmin();}catch(e){alert(e.message)}}
