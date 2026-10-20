@@ -40,8 +40,8 @@
   ];
   const residents=(()=>{const names=['曲采姿','古博翔','何靖閔','李佳穎','吳承恩','周子瑜','鄭家豪','蔡依林','許志明','謝雅雯','劉冠廷','楊淑芬'];return names.map((n,i)=>({id:i+1,building:i<6?'A棟':'B棟',unit:`${Math.floor(i/2)+1}F-${(i%2)+1}`,floor:String(Math.floor(i/2)+1),name:n,phone:`09${String(12345678+i*1111).slice(0,2)}-${String(345678+i*731).slice(0,3)}-${String(100+i*37).padStart(3,'0')}`,address:'',extra:i%3===0?'承租人；機車位 B1-'+(100+i):''}));})();
   const sops=[
-    {id:1,title:'颱風季防災應變流程',category:'行政 SOP',description:'颱風警報發布後的巡查、沙包與通報流程',version:'v2',original_filename:'颱風應變SOP.pdf',updated_at:iso(-10),updated_by:'公司總務',scope_type:'company',review_status:'published',is_active:1},
-    {id:2,title:'夜間巡邏勤務規範',category:'勤務 SOP',description:'夜班巡邏路線、打卡點與異常通報',version:'v1',original_filename:'夜間巡邏規範.docx',updated_at:iso(-20),updated_by:'勤務主管',scope_type:'company',review_status:'published',is_active:1},
+    {id:1,title:'颱風季防災應變流程',category:'行政',description:'颱風警報發布後的巡查、沙包與通報流程',version:'v2',original_filename:'颱風應變SOP.pdf',updated_at:iso(-10),updated_by:'公司總務',scope_type:'company_basic',review_status:'published',is_active:1},
+    {id:2,title:'夜間巡邏勤務規範',category:'勤務',description:'夜班巡邏路線、打卡點與異常通報',version:'v1',original_filename:'夜間巡邏規範.docx',updated_at:iso(-20),updated_by:'勤務主管',scope_type:'company_basic',review_status:'published',is_active:1},
     {id:3,title:'包裹代收注意事項',category:'案場注意事項',description:'本社區包裹登記與領取規則',version:'v1',original_filename:'包裹代收.pdf',updated_at:iso(-3),updated_by:'王小明',scope_type:'community',review_status:'published',is_active:1}
   ];
   const resources=[
@@ -96,7 +96,7 @@
     [/^\/api\/staff\/residents$/,(u)=>({community:COMMUNITIES[0],category:u.searchParams.get('category')||'residents-contact',records:residents,preference:{sort:'building'},last_import:{original_filename:'住戶資料表(示意).xlsx',imported_at:iso(-5),imported_by_name:'王小明'},viewer:{can_upload:true}})],
     [/^\/api\/staff\/platform-resources$/,()=>({platformResources:resources,companyResources:[]})],
     [/^\/api\/staff\/company-resources$/,()=>({platformResources:resources,companyResources:[],resources})],
-    [/^\/api\/staff\/sops$/,()=>({sops,viewer:{job_level:'經理',manager:true,can_upload:true,upload_communities:COMMUNITIES,upload_scope:'assigned'}})],
+    [/^\/api\/staff\/sops$/,(u)=>{const cat=u.searchParams.get('category')||'',sc=u.searchParams.get('scope')||'';return {sops:sops.filter(x=>(!cat||x.category===cat)&&(!sc||x.scope_type===sc)).map(x=>({...x,target_jobs:x.scope_type==='community'?['秘書','保全']:[],source_type:x.scope_type==='community'?'manager':'company',uploader_name:x.scope_type==='community'?'王小明':''})),viewer:{job_level:'經理',manager:true,can_upload:true,upload_communities:COMMUNITIES.map(c=>({id:c.id,name:c.name})),upload_scope:'assigned'}};}],
     [/^\/api\/staff\/manager-checklist$/,async()=>{const r=await realFetch('/api/form-config',{credentials:'same-origin'});const c=r.ok?await r.json():{pages:[],questions:[]};return {version:'central-manager',formConfig:{title:c.title||'社區交接清冊',subtitle:c.subtitle||'',pages:c.pages||[],questions:c.questions||[]},communities:COMMUNITIES};}],
     [/^\/api\/staff\/schedule\/community-view$/,()=>({month,communities:COMMUNITIES,selected_community_id:901,staff:PEOPLE.filter(p=>p.work_type!=='internal'),entries:scheduleEntries(),profile:scheduleProfile,self_off_dates:[],off_conflicts:[]})],
     [/^\/api\/staff\/schedule\/(month|community)$/,()=>({month,category:'admin',profile:scheduleProfile,entries:scheduleEntries().filter(e=>e.staff_id===801),communities:COMMUNITIES,problems:[],rules:[]})],
