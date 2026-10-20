@@ -364,6 +364,11 @@ async function handleWorkspaceMenu(e){
     try{if(!window.SOPStaffModule)throw new Error('案場 SOP 模組尚未載入，請重新整理頁面');await window.SOPStaffModule.render(action,label,$('staffHome'));}catch(err){showWorkspaceError(label||'案場 SOP',err);}
     return;
   }
+  if(action==='work-journal'){
+    showWorkspaceLoading(label||'工作日誌');
+    try{if(!window.WorkJournalModule)throw new Error('工作日誌模組尚未載入，請重新整理頁面');await window.WorkJournalModule.render($('staffHome'),label||'工作日誌');}catch(err){showWorkspaceError(label||'工作日誌',err);}
+    return;
+  }
   if(action==='gifts'){
     showWorkspaceLoading(label||'禮品推放');
     try{if(!window.GiftsModule)throw new Error('禮品模組尚未載入，請重新整理頁面');await window.GiftsModule.render($('staffHome'),label||'禮品推放');}catch(err){showWorkspaceError(label||'禮品推放',err);}

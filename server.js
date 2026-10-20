@@ -2481,4 +2481,7 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
   }
 })();
 
+// ===== 工作日誌（每日／每週）：路由在 journal-routes.js =====
+require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin});
+
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
