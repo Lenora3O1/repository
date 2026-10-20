@@ -215,59 +215,89 @@ async function loadPinnedWork(){
   }catch(e){list.innerHTML=`<div class="empty">暫時無法載入釘選工作。</div>`;console.warn(e)}
 }
 
-async function loadCentralManagerChecklist(){
-  const d=await api('/api/staff/manager-checklist');
-  if(!d.formConfig || !Array.isArray(d.formConfig.pages) || !d.formConfig.pages.length){
-    throw new Error('中央交接清冊沒有可用的頁面，請到總後臺檢查設定。');
-  }
-  formConfig=d.formConfig;
-  communities=Array.isArray(d.communities)?d.communities:[];
+// ===== 交接清冊：經理版／秘書版分開（題目、草稿、送出紀錄各自獨立） =====
+const HANDOVER_TYPES={manager:{label:'經理交接清冊',icon:'👔',hint:'現場經理（總幹事）離任或交接時填寫：社區基本資料、財務、待辦、鑰匙門禁、設施與聯絡窗口。'},secretary:{label:'秘書交接清冊',icon:'🗂',hint:'社區秘書／行政人員交接時填寫：管理費帳務、住戶資料、印鑑文件、櫃台收發與系統帳號。'}};
+let handoverType='manager', handoverLabel='經理交接清冊', handoverDrafts=[];
+function injectHandoverStyle(){
+  if(document.getElementById('handoverStyle'))return;
+  const s=document.createElement('style');s.id='handoverStyle';
+  s.textContent=`
+.ho-hub{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:14px}
+.ho-hub-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;border:1px solid #dbe7e1;border-radius:16px;padding:18px;background:#fff;color:inherit;cursor:pointer;min-height:0;box-shadow:none}
+.ho-hub-card:hover{border-color:#8fbfa8;background:#f6fbf8}
+.ho-hub-card .ho-hub-icon{font-size:1.8rem}
+.ho-hub-card strong{font-size:1.1rem}
+.ho-hub-card small{color:#5f7068;line-height:1.6;font-weight:400}
+.ho-badge{display:inline-block;padding:2px 10px;border-radius:999px;background:#fff3e0;color:#a35a00;font-weight:700;font-size:.78rem}
+.ho-switch{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.ho-switch button{padding:6px 12px;min-height:0;font-size:.85rem}
+.ho-recent{list-style:none;margin:0;padding:0}
+.ho-recent li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px dashed #e1e9e5}
+.ho-recent li:last-child{border-bottom:0}
+.field .field-help{display:block;margin:-2px 0 6px;color:#6a7a73;font-size:.85rem;line-height:1.5}
+.field .prefill-tag{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:#e6f2fb;color:#1e5f8c;font-size:.72rem;font-weight:700;vertical-align:middle}
+.field.is-conditional{border-left:3px solid #cfe3d8;padding-left:12px;margin-left:2px}
+.choice-pills{display:flex;flex-wrap:wrap;gap:8px}
+.choice-pills label{display:inline-flex;align-items:center;gap:6px;margin:0;padding:8px 14px;border:1px solid #cbded7;border-radius:999px;background:#fff;cursor:pointer;font-weight:600;user-select:none}
+.choice-pills input{width:auto;margin:0;accent-color:#1f6b43}
+.choice-pills label:has(input:checked){background:#e3f2e9;border-color:#5fa883;color:#174f34}
+.money-wrap{display:flex;align-items:center;gap:8px}.money-wrap input{flex:1}.money-wrap span{color:#5f7068;font-weight:700}
+`;
+  document.head.appendChild(s);
+}
+async function loadHandoverConfig(type){
+  const t=HANDOVER_TYPES[type]?type:'manager';
+  const d=await api(`/api/staff/handover/${t}/config`);
+  if(!d.formConfig||!Array.isArray(d.formConfig.pages)||!d.formConfig.pages.length) throw new Error(`${HANDOVER_TYPES[t].label}沒有可用的頁面，請到總後台「中央表單設計中心」檢查設定。`);
+  handoverType=t;formConfig=d.formConfig;communities=Array.isArray(d.communities)?d.communities:[];
   return d;
 }
+// 舊名稱保留，避免其他地方呼叫失敗
+async function loadCentralManagerChecklist(){return loadHandoverConfig('manager');}
 async function startDraftForCommunity(cid){
-  if(!formConfig || !Array.isArray(formConfig.pages) || !formConfig.pages.length || !Array.isArray(formConfig.questions)){
-    await loadCentralManagerChecklist();
-  }
+  if(!formConfig||formConfig.formType!==handoverType) await loadHandoverConfig(handoverType);
   const community=communities.find(c=>c.id===Number(cid));
   if(!community){showMessage('找不到可用的駐點社區。','error');return;}
-  const initial={};
-  if(formConfig.questions.some(q=>q.id==='community_name')) initial.community_name=community.name||'';
-  const r=await api('/api/staff/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:initial,current_page:0,community_id:Number(cid)})});
-  draftId=r.id;draftCommunityId=Number(cid);answers=initial;currentPage=0;showEditor();
+  const r=await api('/api/staff/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{},current_page:0,community_id:Number(cid),form_type:handoverType,prefill:true})});
+  draftId=r.id;draftCommunityId=Number(cid);answers=r.data||{};currentPage=0;showEditor();
+  const n=(answers.__prefilled||[]).length;
+  if(n) showMessage(`已自動帶入 ${n} 題（社區、日期、填寫人與上次交接的答案），請確認內容是否仍正確。`,'success');
 }
-
-async function openManagerChecklist(label='經理交接清冊'){
-  // 這裡直接讀取總後臺的中央經理版，不再依賴登入頁當下是否已經載入 formConfig。
-  await loadCentralManagerChecklist();
-  if(communities.length===0){
-    const el=$('staffHome');
-    el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(label)}</div><h1>尚未開通駐點案場</h1><p>目前這個人員帳號沒有被指定任何啟用中的社區，因此暫時無法開啟經理交接清冊。</p><p class="hint">請由公司後台為此人員設定駐點社區；設定完成後，重新登入即可看到完整的中央經理版交接清冊。</p></div>`;
-    return;
+function handoverSwitchButtons(current){
+  return `<div class="ho-switch">${Object.entries(HANDOVER_TYPES).filter(([k])=>k!==current).map(([k,m])=>`<button type="button" class="secondary" data-ho-switch="${k}">${m.icon} 改看${escapeHtml(m.label)}</button>`).join('')}</div>`;
+}
+function bindHandoverSwitch(el){el.querySelectorAll('[data-ho-switch]').forEach(b=>b.addEventListener('click',()=>{showWorkspaceLoading(HANDOVER_TYPES[b.dataset.hoSwitch].label);loadHandoverHome(b.dataset.hoSwitch).catch(err=>showWorkspaceError(HANDOVER_TYPES[b.dataset.hoSwitch].label,err));}));}
+// 交接清冊總覽（目錄「交接清冊」本身）：選擇經理版或秘書版
+async function loadHandoverHub(label='交接清冊'){
+  injectHandoverStyle();
+  const el=$('staffHome');if(!el)return;
+  const d=await api('/api/staff/handover/forms').catch(()=>({forms:Object.entries(HANDOVER_TYPES).map(([id,m])=>({id,...m,drafts:0}))}));
+  el.innerHTML=`<div class="panel"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label)}</h1><p class="hint">經理與秘書的交接清冊是兩份不同的表單，草稿與送出紀錄也分開保存。請選擇要填寫哪一份。</p><div class="ho-hub">${(d.forms||[]).map(f=>`<button type="button" class="ho-hub-card" data-ho-open="${f.id}"><span class="ho-hub-icon">${HANDOVER_TYPES[f.id]?.icon||'📋'}</span><strong>${escapeHtml(HANDOVER_TYPES[f.id]?.label||f.label)}</strong><small>${escapeHtml(HANDOVER_TYPES[f.id]?.hint||'')}</small>${f.drafts?`<span class="ho-badge">${f.drafts} 份未完成</span>`:''}</button>`).join('')}</div></div>`;
+  el.querySelectorAll('[data-ho-open]').forEach(b=>b.addEventListener('click',()=>{const t=b.dataset.hoOpen;showWorkspaceLoading(HANDOVER_TYPES[t].label);loadHandoverHome(t).catch(err=>showWorkspaceError(HANDOVER_TYPES[t].label,err));}));
+}
+async function loadHandoverHome(type='manager',label=''){
+  injectHandoverStyle();
+  await loadHandoverConfig(type);
+  handoverLabel=label||HANDOVER_TYPES[handoverType].label;
+  const meta=HANDOVER_TYPES[handoverType];
+  const [drafts,subs]=await Promise.all([api(`/api/staff/drafts?form_type=${handoverType}`),api(`/api/staff/handover/${handoverType}/submissions`).catch(()=>({submissions:[]}))]);
+  handoverDrafts=drafts;
+  const el=$('staffHome');if(!el)return;
+  $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';
+  const total=formConfig.pages.length;
+  if(!communities.length){
+    el.innerHTML=`<div class="panel workspace-error"><div class="eyebrow">${escapeHtml(handoverLabel)}</div><h1>尚未開通駐點案場</h1><p>目前這個人員帳號沒有被指定任何啟用中的社區，因此暫時無法開啟${escapeHtml(meta.label)}。</p><p class="hint">請由公司後台為此人員設定駐點社區；設定完成後重新登入即可。</p>${handoverSwitchButtons(handoverType)}</div>`;
+    bindHandoverSwitch(el);return;
   }
-  const drafts=await api('/api/staff/drafts');
-  if(communities.length===1){
-    const cid=communities[0].id;
-    const existing=drafts.find(d=>Number(d.community_id)===Number(cid));
-    if(existing){await continueDraft(existing.id);}else{await startDraftForCommunity(cid);}
-    return;
-  }
-  const options=communities.map(c=>`<button type="button" class="community-choice" data-community-id="${c.id}"><span>🏠</span><strong>${escapeHtml(c.name)}</strong><span>→</span></button>`).join('');
-  const modal=document.createElement('div');modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><div class="eyebrow">${escapeHtml(label)}</div><h2>請選擇這次要交接的社區</h2><p class="modal-note">您同時服務多個社區，因此才需要選擇；如果只有一個社區，會直接進入完整交接清冊。</p><div class="community-choice-list">${options}</div></div>`;
-  document.body.appendChild(modal);document.body.classList.add('modal-open');
-  const close=()=>{modal.remove();document.body.classList.remove('modal-open')};
-  modal.querySelector('.modal-close').addEventListener('click',close);modal.addEventListener('click',e=>{if(e.target===modal)close()});
-  modal.querySelectorAll('.community-choice').forEach(btn=>btn.addEventListener('click',async()=>{const cid=Number(btn.dataset.communityId);close();const existing=drafts.find(d=>Number(d.community_id)===cid);if(existing)await continueDraft(existing.id);else await startDraftForCommunity(cid);}));
+  const cards=drafts.length?drafts.map(d=>{const pct=Math.min(99,Math.round(((d.current_page+1)/total)*100));const community=communities.find(c=>c.id===d.community_id)?.name||d.data.community_name||'尚未指定社區';return `<div class="draft-card"><div><div class="draft-title">🏠 ${escapeHtml(community)}</div><div class="hint">最後儲存：${formatDate(d.updated_at)}　｜　目前第 ${Math.min(d.current_page+1,total)} / ${total} 頁</div><div class="progress-mini"><span style="width:${pct}%"></span></div></div><div class="draft-actions"><button onclick="continueDraft(${d.id})">繼續填寫</button><button class="danger" onclick="deleteDraft(${d.id})">刪除草稿</button></div></div>`}).join(''):'<div class="empty">目前沒有未完成的'+escapeHtml(meta.label)+'。</div>';
+  const communityOptions=communities.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}${drafts.some(d=>d.community_id===c.id)?'（有草稿）':''}</option>`).join('');
+  const recent=(subs.submissions||[]).length?`<div class="panel"><div class="section-title">✅ 我最近送出的${escapeHtml(meta.label)}</div><ul class="ho-recent">${subs.submissions.map(s=>`<li><span>🏠 ${escapeHtml(s.community_name||'—')}</span><small class="muted">單號 ${s.id}　${formatDate(s.created_at)}</small></li>`).join('')}</ul></div>`:'';
+  el.innerHTML=`<div class="panel"><div class="eyebrow">交接清冊</div><h1>${meta.icon} ${escapeHtml(handoverLabel)}</h1><p class="hint">${escapeHtml(meta.hint)}<br>共 ${total} 頁。社區名稱、日期、填寫人與上次交接的答案會自動帶入，只要確認或修改即可；草稿會自動儲存。</p><div class="new-draft-box"><label>選擇要交接的社區</label><select id="newCommunity">${communityOptions}</select><button class="big-action" onclick="newDraft()">＋ 開始新的${escapeHtml(meta.label)}</button></div>${handoverSwitchButtons(handoverType)}</div><div class="panel"><div class="section-title">🟡 未完成的${escapeHtml(meta.label)}</div>${cards}</div>${recent}`;
+  bindHandoverSwitch(el);
 }
-
-async function loadChecklistModule(label='交接清冊'){
-  await loadCentralManagerChecklist();
-  const drafts=await api('/api/staff/drafts');
-  const el=$('staffHome');
-  if(!el)return;
-  const cards=drafts.length?drafts.map(d=>{const pct=Math.min(99,Math.round(((d.current_page+1)/formConfig.pages.length)*100));const community=d.data.community_name||communities.find(c=>c.id===d.community_id)?.name||'尚未指定社區';return `<div class="draft-card"><div><div class="draft-title">🏠 ${escapeHtml(community)}</div><div class="hint">最後儲存：${formatDate(d.updated_at)}　｜　目前第 ${Math.min(d.current_page+1,formConfig.pages.length)} / ${formConfig.pages.length} 頁</div><div class="progress-mini"><span style="width:${pct}%"></span></div></div><div class="draft-actions"><button onclick="continueDraft(${d.id})">繼續填寫</button><button class="danger" onclick="deleteDraft(${d.id})">刪除草稿</button></div></div>`}).join(''):'<div class="empty">目前沒有未完成的交接紀錄。</div>';
-  const communityOptions=communities.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  el.innerHTML=`<div class="panel"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label)}</h1><p class="hint">交接相關工作集中在這裡；完成後不會一直顯示在工作台首頁。</p><div class="new-draft-box"><label>選擇要交接的社區</label><select id="newCommunity">${communityOptions||'<option value="">目前尚無可用社區</option>'}</select><button class="big-action" onclick="newDraft()" ${communities.length?'':'disabled'}>＋ 開始新的交接</button></div></div><div class="panel"><div class="section-title">🟡 未完成交接清冊</div>${cards}</div>`;
-}
+async function openManagerChecklist(label='經理交接清冊'){return loadHandoverHome('manager',label);}
+async function openSecretaryChecklist(label='秘書交接清冊'){return loadHandoverHome('secretary',label);}
+async function loadChecklistModule(label='交接清冊'){return loadHandoverHub(label);}
 function showWorkspacePlaceholder(label){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
   const el=$('staffHome');el.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">工作項目</div><h1>🚧 ${escapeHtml(label||'工作功能')}</h1><p>這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。</p><div class="placeholder-note">您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。</div></div>`;
@@ -323,7 +353,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
 }
 
 // 目錄設定使用的動作代碼與程式內部代碼對照（目錄的 handover-manager 等原本沒有對應，點了只會看到「建置中」）。
-const WORKSPACE_ACTION_ALIASES={'handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
+const WORKSPACE_ACTION_ALIASES={'handover':'checklist','handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
 async function handleWorkspaceMenu(e){
   const {label}=e.detail||{};const action=WORKSPACE_ACTION_ALIASES[e.detail?.action]||e.detail?.action;
   if(['staff-schedule','staff-schedule-community','staff-schedule-self-select'].includes(action)){
@@ -344,7 +374,12 @@ async function handleWorkspaceMenu(e){
     try{await openManagerChecklist(label||'經理交接清冊');}catch(err){showWorkspaceError(label||'經理交接清冊',err);}
     return;
   }
-  if(action==='checklist'||action==='secretary-checklist'){
+  if(action==='secretary-checklist'){
+    showWorkspaceLoading(label||'秘書交接清冊');
+    try{await openSecretaryChecklist(label||'秘書交接清冊');}catch(err){showWorkspaceError(label||'秘書交接清冊',err);}
+    return;
+  }
+  if(action==='checklist'){
     showWorkspaceLoading(label||'交接清冊');
     try{await loadChecklistModule(label||'交接清冊');}catch(err){showWorkspaceError(label||'交接清冊',err);}
     return;
@@ -379,39 +414,105 @@ async function handleWorkspaceMenu(e){
 document.addEventListener('workspace-menu',e=>{handleWorkspaceMenu(e).catch(err=>showWorkspaceError(e.detail?.label||'工作功能',err));});
 document.addEventListener('dashboard-pins-changed',()=>{if($('homeView')&&getComputedStyle($('homeView')).display!=='none')loadPinnedWork();});
 
-async function newDraft(){const cid=Number($('newCommunity')?.value||0);if(!cid){showMessage('請先選擇社區。','error');return}await startDraftForCommunity(cid);}
-async function continueDraft(id){const d=await api(`/api/staff/drafts/${id}`);draftId=d.id;draftCommunityId=d.community_id||null;answers=d.data||{};currentPage=Math.max(0,Math.min(Number(d.current_page)||0,formConfig.pages.length-1));showEditor();}
-async function deleteDraft(id){if(!confirm('確定刪除這份未完成草稿嗎？刪除後無法復原。'))return;await api(`/api/staff/drafts/${id}`,{method:'DELETE'});loadChecklistModule('交接清冊');}
-function showEditor(){ $('homeView').style.display='none';$('editorView').style.display='block';dirty=false;renderPage();window.scrollTo({top:0}); }
+async function newDraft(){
+  const cid=Number($('newCommunity')?.value||0);if(!cid){showMessage('請先選擇社區。','error');return}
+  const existing=handoverDrafts.find(d=>Number(d.community_id)===cid);
+  if(existing&&confirm('這個社區已經有一份還沒送出的草稿。\n\n按「確定」繼續填寫那份草稿；按「取消」另外開一份新的。')){await continueDraft(existing.id);return;}
+  await startDraftForCommunity(cid);
+}
+async function continueDraft(id){
+  const d=await api(`/api/staff/drafts/${id}`);
+  const type=HANDOVER_TYPES[d.form_type]?d.form_type:'manager';
+  if(!formConfig||formConfig.formType!==type) await loadHandoverConfig(type);
+  if(!handoverLabel||!handoverLabel.includes(HANDOVER_TYPES[type].label.slice(0,2))) handoverLabel=HANDOVER_TYPES[type].label;
+  draftId=d.id;draftCommunityId=d.community_id||null;answers=d.data||{};currentPage=Math.max(0,Math.min(Number(d.current_page)||0,formConfig.pages.length-1));showEditor();
+}
+async function deleteDraft(id){if(!confirm('確定刪除這份未完成草稿嗎？刪除後無法復原。'))return;await api(`/api/staff/drafts/${id}`,{method:'DELETE'});await loadHandoverHome(handoverType,handoverLabel);}
+function showEditor(){ injectHandoverStyle();$('homeView').style.display='none';$('editorView').style.display='block';dirty=false;renderPage();window.scrollTo({top:0}); }
 function getPageQuestions(pageId){return formConfig.questions.filter(q=>q.pageId===pageId)}
 function groupedQuestions(pageId){const groups=[],map={};for(const q of getPageQuestions(pageId)){const key=q.group||'填寫資料';if(!map[key]){map[key]={title:key,questions:[]};groups.push(map[key])}map[key].questions.push(q)}return groups;}
+// ---- 智慧題目：條件顯示 ----
+function hoValues(v){return (Array.isArray(v)?v:(v===undefined||v===null||v===''?[]:[v])).map(x=>String(x));}
+function hoEmpty(v){return Array.isArray(v)?!v.some(x=>String(x??'').trim()):!String(v??'').trim();}
+function questionVisible(q,depth=0){
+  const c=q&&q.showIf;if(!c||!c.q||depth>10)return true;
+  const src=formConfig.questions.find(x=>x.id===c.q);if(!src)return true;
+  if(!questionVisible(src,depth+1))return false;
+  const vals=hoValues(answers[c.q]);
+  if(c.op==='filled')return vals.some(x=>x.trim());
+  if(c.op==='neq')return vals.length>0&&!vals.includes(String(c.value??''));
+  return vals.includes(String(c.value??''));
+}
+function applyVisibility(){
+  const form=$('checklistForm');if(!form)return;
+  form.querySelectorAll('[data-qid]').forEach(w=>{const q=formConfig.questions.find(x=>x.id===w.dataset.qid);w.hidden=!questionVisible(q);});
+  form.querySelectorAll('section.panel[data-group]').forEach(p=>{p.hidden=!p.querySelector('[data-qid]:not([hidden])');});
+}
+function readField(q){
+  const form=$('checklistForm');
+  if(q.type==='checkbox')return [...form.querySelectorAll(`input[type=checkbox][name="${CSS.escape(q.id)}"]:checked`)].map(x=>x.value);
+  if(['radio','yesno'].includes(q.type))return form.querySelector(`input[type=radio][name="${CSS.escape(q.id)}"]:checked`)?.value||'';
+  const el=form.querySelector(`[name="${CSS.escape(q.id)}"]`);return el?el.value:(answers[q.id]??'');
+}
 function renderPage(){
  const form=$('checklistForm'),page=formConfig.pages[currentPage],total=formConfig.pages.length;form.innerHTML='';renderProgress();
- $('draftBar').innerHTML=`<div><strong>🟡 草稿模式</strong><span id="saveStatus">${dirty?'尚未儲存':'已儲存'}</span></div><div class="draft-bar-actions"><button type="button" class="secondary" onclick="saveNow()">💾 儲存草稿</button><button type="button" class="secondary" onclick="backHome()">← 返回交接清冊</button></div>`;
+ $('draftBar').innerHTML=`<div><strong>🟡 草稿模式</strong><span id="saveStatus">${dirty?'尚未儲存':'已儲存'}</span></div><div class="draft-bar-actions"><button type="button" class="secondary" onclick="saveNow()">💾 儲存草稿</button><button type="button" class="secondary" onclick="backHome()">← 返回${escapeHtml(HANDOVER_TYPES[handoverType]?.label||'交接清冊')}</button></div>`;
  const communityName=communities.find(c=>c.id===draftCommunityId)?.name || answers.community_name || '未指定';
- const header=document.createElement('div');header.className='page-header';header.innerHTML=`<div class="eyebrow">${escapeHtml(communityName)}　｜　第 ${currentPage+1} 頁／共 ${total} 頁</div><h1>${escapeHtml(page.title)}</h1>${page.description?`<p>${escapeHtml(page.description)}</p>`:''}`;form.appendChild(header);
- for(const group of groupedQuestions(page.id)){const panel=document.createElement('section');panel.className='panel';const title=document.createElement('div');title.className='section-title';title.textContent=group.title;panel.appendChild(title);for(const q of group.questions)panel.appendChild(renderField(q));form.appendChild(panel)}
+ const header=document.createElement('div');header.className='page-header';header.innerHTML=`<div class="eyebrow">${escapeHtml(HANDOVER_TYPES[handoverType]?.label||'')}　｜　${escapeHtml(communityName)}　｜　第 ${currentPage+1} 頁／共 ${total} 頁</div><h1>${escapeHtml(page.title)}</h1>${page.description?`<p>${escapeHtml(page.description)}</p>`:''}`;form.appendChild(header);
+ for(const group of groupedQuestions(page.id)){const panel=document.createElement('section');panel.className='panel';panel.dataset.group=group.title;const title=document.createElement('div');title.className='section-title';title.textContent=group.title;panel.appendChild(title);for(const q of group.questions)panel.appendChild(renderField(q));form.appendChild(panel)}
  const nav=document.createElement('div');nav.className='form-nav';nav.innerHTML=`<button type="button" class="secondary" id="prevBtn" ${currentPage===0?'disabled':''}>← 上一頁</button>${currentPage<total-1?'<button type="button" id="nextBtn">儲存並下一頁 →</button>':'<button type="submit" id="submitBtn">確認並正式送出 ✓</button>'}`;form.appendChild(nav);
- form.querySelectorAll('input,textarea,select').forEach(input=>{input.value=answers[input.name]??'';input.addEventListener('input',()=>markDirty(input.name,input.value));input.addEventListener('change',()=>markDirty(input.name,input.value));});
+ for(const q of getPageQuestions(page.id)){
+   const onChange=()=>{markDirty(q.id,readField(q));applyVisibility();};
+   form.querySelectorAll(`[name="${CSS.escape(q.id)}"]`).forEach(input=>{input.addEventListener('input',onChange);input.addEventListener('change',onChange);});
+ }
+ applyVisibility();
  $('prevBtn').addEventListener('click',async()=>{savePageAnswers();await saveNow(true);currentPage--;renderPage();window.scrollTo({top:0,behavior:'smooth'})});
  const next=$('nextBtn');if(next)next.addEventListener('click',async()=>{if(!validateCurrentPage())return;savePageAnswers();await saveNow(true);currentPage++;renderPage();window.scrollTo({top:0,behavior:'smooth'})});
  form.onsubmit=onSubmit;
 }
 function renderProgress(){$('progressArea').innerHTML=formConfig.pages.map((p,i)=>`<div class="progress-step ${i===currentPage?'current':i<currentPage?'done':''}"><span>${i<currentPage?'✓':i+1}</span><small>${escapeHtml(p.title)}</small></div>`).join('<div class="progress-line"></div>')}
-function renderField(q){const wrap=document.createElement('div');wrap.className='field';const label=document.createElement('label');label.setAttribute('for',q.id);label.innerHTML=escapeHtml(q.label)+(q.required?'<span class="req">*</span>':'');wrap.appendChild(label);let input;if(q.type==='textarea')input=document.createElement('textarea');else{input=document.createElement('input');input.type=['number','date'].includes(q.type)?q.type:'text'}input.id=q.id;input.name=q.id;input.required=!!q.required;wrap.appendChild(input);return wrap}
-function markDirty(k,v){answers[k]=v;dirty=true;$('saveStatus').textContent='儲存中…';clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>saveNow(true),900)}
-function savePageAnswers(){const form=$('checklistForm');for(const[k,v]of new FormData(form).entries())answers[k]=v;dirty=true}
-async function saveNow(silent=false){if(!draftId||saving)return;savePageAnswers();saving=true;try{const r=await api(`/api/staff/drafts/${draftId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:answers,current_page:currentPage,community_id:draftCommunityId})});dirty=false;if($('saveStatus'))$('saveStatus').textContent=`✓ 已儲存 ${new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`;if(!silent)showMessage('草稿已儲存，下次登入可以繼續填寫。','success')}catch(e){if(!silent)showMessage(e.message,'error');if($('saveStatus'))$('saveStatus').textContent='⚠ 儲存失敗'}finally{saving=false}}
-function validateCurrentPage(){savePageAnswers();const missing=getPageQuestions(formConfig.pages[currentPage].id).filter(q=>q.required&&!String(answers[q.id]??'').trim());if(missing.length){showMessage(`請先完成必填欄位：${missing.map(q=>q.label).join('、')}`,'error');const first=$(missing[0].id);if(first)first.focus();return false}return true}
-async function onSubmit(e){e.preventDefault();if(!validateCurrentPage())return;await saveNow(true);const btn=$('submitBtn');btn.disabled=true;btn.textContent='送出中…';try{const r=await api(`/api/staff/drafts/${draftId}/submit`,{method:'POST'});showMessage(`🎉 交接清冊已正式送出！單號：${r.id}`,'success');draftId=null;draftCommunityId=null;answers={};currentPage=0;setTimeout(()=>showHomeAfterSubmit(),900)}catch(err){showMessage(err.message,'error');btn.disabled=false;btn.textContent='確認並正式送出 ✓'}}
+function renderField(q){
+  const wrap=document.createElement('div');wrap.className='field'+(q.showIf&&q.showIf.q?' is-conditional':'');wrap.dataset.qid=q.id;
+  const prefilled=(answers.__prefilled||[]).includes(q.id);
+  const label=document.createElement('label');label.setAttribute('for',q.id);label.innerHTML=escapeHtml(q.label)+(q.required?'<span class="req">*</span>':'')+(prefilled?'<span class="prefill-tag" title="系統自動帶入，可直接修改">自動帶入</span>':'');wrap.appendChild(label);
+  if(q.help){const h=document.createElement('small');h.className='field-help';h.textContent=q.help;wrap.appendChild(h);}
+  const value=answers[q.id];
+  if(['yesno','radio','checkbox'].includes(q.type)){
+    const opts=q.type==='yesno'?['是','否']:(q.options||[]);const multi=q.type==='checkbox';const vals=hoValues(value);
+    const box=document.createElement('div');box.className='choice-pills';box.setAttribute('role',multi?'group':'radiogroup');box.setAttribute('aria-label',q.label);
+    opts.forEach((o,i)=>{const l=document.createElement('label');const inp=document.createElement('input');inp.type=multi?'checkbox':'radio';inp.name=q.id;inp.value=o;if(i===0)inp.id=q.id;inp.checked=vals.includes(String(o));l.appendChild(inp);l.appendChild(document.createTextNode(o));box.appendChild(l);});
+    wrap.appendChild(box);return wrap;
+  }
+  let input;
+  if(q.type==='textarea')input=document.createElement('textarea');
+  else if(q.type==='select'){input=document.createElement('select');input.appendChild(new Option('請選擇…',''));for(const o of q.options||[])input.appendChild(new Option(o,o));}
+  else{input=document.createElement('input');input.type=q.type==='money'?'number':(['number','date','tel'].includes(q.type)?q.type:'text');if(q.type==='money'){input.step='1';input.inputMode='numeric';}if(q.type==='tel')input.inputMode='tel';}
+  input.id=q.id;input.name=q.id;if(q.placeholder)input.placeholder=q.placeholder;input.value=Array.isArray(value)?value.join('、'):(value??'');
+  if(q.type==='money'){const m=document.createElement('div');m.className='money-wrap';m.appendChild(input);const u=document.createElement('span');u.textContent='元';m.appendChild(u);wrap.appendChild(m);}else wrap.appendChild(input);
+  return wrap;
+}
+function markDirty(k,v){answers[k]=v;dirty=true;if($('saveStatus'))$('saveStatus').textContent='儲存中…';clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>saveNow(true),900)}
+function savePageAnswers(){if(!formConfig||!$('checklistForm'))return;const page=formConfig.pages[currentPage];if(!page)return;for(const q of getPageQuestions(page.id)){if($('checklistForm').querySelector(`[name="${CSS.escape(q.id)}"]`))answers[q.id]=readField(q);}dirty=true}
+async function saveNow(silent=false){if(!draftId||saving)return;savePageAnswers();saving=true;try{await api(`/api/staff/drafts/${draftId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:answers,current_page:currentPage,community_id:draftCommunityId})});dirty=false;if($('saveStatus'))$('saveStatus').textContent=`✓ 已儲存 ${new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`;if(!silent)showMessage('草稿已儲存，下次登入可以繼續填寫。','success')}catch(e){if(!silent)showMessage(e.message,'error');if($('saveStatus'))$('saveStatus').textContent='⚠ 儲存失敗'}finally{saving=false}}
+function missingOnPage(pageId){return getPageQuestions(pageId).filter(q=>q.required&&questionVisible(q)&&hoEmpty(answers[q.id]));}
+function validateCurrentPage(){savePageAnswers();const missing=missingOnPage(formConfig.pages[currentPage].id);if(missing.length){showMessage(`請先完成必填欄位：${missing.map(q=>q.label).join('、')}`,'error');const first=$(missing[0].id);if(first)first.focus();return false}return true}
+async function onSubmit(e){
+  e.preventDefault();if(!validateCurrentPage())return;
+  // 送出前檢查全部頁面，直接跳到還沒填完的那一頁
+  const firstMissing=formConfig.pages.findIndex(p=>missingOnPage(p.id).length);
+  if(firstMissing>=0){await saveNow(true);currentPage=firstMissing;renderPage();showMessage(`第 ${firstMissing+1} 頁「${formConfig.pages[firstMissing].title}」還有必填欄位：${missingOnPage(formConfig.pages[firstMissing].id).map(q=>q.label).join('、')}`,'error');window.scrollTo({top:0,behavior:'smooth'});return;}
+  await saveNow(true);const btn=$('submitBtn');btn.disabled=true;btn.textContent='送出中…';
+  try{const r=await api(`/api/staff/drafts/${draftId}/submit`,{method:'POST'});draftId=null;draftCommunityId=null;answers={};currentPage=0;dirty=false;await loadHandoverHome(handoverType,handoverLabel);const ok=document.createElement('div');ok.className='msg success';ok.textContent=`🎉 ${HANDOVER_TYPES[handoverType].label}已正式送出！單號：${r.id}`;$('staffHome')?.prepend(ok);setTimeout(()=>ok.remove(),8000);window.scrollTo({top:0});}
+  catch(err){showMessage(err.message,'error');btn.disabled=false;btn.textContent='確認並正式送出 ✓'}
+}
 function showHomeAfterSubmit(){api('/api/staff/session').then(s=>showHome(s.user)).catch(showLogin)}
-async function backHome(){await saveNow(true);await loadChecklistModule('交接清冊');}
+async function backHome(){await saveNow(true);await loadHandoverHome(handoverType,handoverLabel);}
 $('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('staffLogout')?.addEventListener('click',async()=>{if(dirty&&draftId)await saveNow(true);await api('/api/staff/logout',{method:'POST'});showLogin();$('employeePassword').value='';});
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function escapeHtml(str){return String(str??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-window.newDraft=newDraft;window.continueDraft=continueDraft;window.deleteDraft=deleteDraft;window.saveNow=saveNow;window.backHome=backHome;
+window.newDraft=newDraft;window.continueDraft=continueDraft;window.openSecretaryChecklist=openSecretaryChecklist;window.deleteDraft=deleteDraft;window.saveNow=saveNow;window.backHome=backHome;
 window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&draftId&&dirty)saveNow(true)});
 window.addEventListener('beforeunload',()=>{if(!draftId||!dirty)return;savePageAnswers();fetch(`/api/staff/drafts/${draftId}`,{method:'PUT',keepalive:true,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:answers,current_page:currentPage,community_id:draftCommunityId})}).catch(()=>{})});
 boot().catch(e=>showMessage(e.message,'error'));

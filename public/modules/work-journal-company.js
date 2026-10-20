@@ -54,7 +54,7 @@
       <label>狀態<select id="wjcStatus"><option value="">全部</option><option value="submitted">已送出</option><option value="draft">草稿</option></select></label>
       <label>從<input type="date" id="wjcFrom" value="${from}"></label><label>到<input type="date" id="wjcTo" value="${today}"></label><button type="button" id="wjcSearch">查詢</button></div>
       <div id="wjcList"></div>
-      <details style="margin-top:18px"><summary style="font-weight:800;cursor:pointer">⚙ 各社區日誌類型（依管委會習慣選擇每日或每週）</summary><div class="wjc-modes">${ctx.communities.filter(c=>c.status==='active').map(c=>`<div class="wjc-mode"><div><b>${esc(c.name)}</b><small>最近一份：${c.last_journal?longDate(c.last_journal):'尚無'}</small></div><select data-mode="${c.id}"><option value="daily" ${c.mode!=='weekly'?'selected':''}>每日</option><option value="weekly" ${c.mode==='weekly'?'selected':''}>每週</option></select></div>`).join('')}</div></details>`;
+      <details style="margin-top:18px"><summary style="font-weight:800;cursor:pointer">⚙ 各社區日誌類型（依管委會習慣選擇每日或每週）</summary><div class="wjc-modes">${ctx.communities.filter(c=>c.status==='active').map(c=>`<div class="wjc-mode"><div><b>${esc(c.name)}</b><small>最近一份：${c.last_journal?longDate(c.last_journal):'尚無'}</small></div><select data-mode="${c.id}"><option value="inherit" ${c.mode_inherited?'selected':''}>沿用平台預設（${ctx.platform_mode==='weekly'?'每週':'每日'}）</option><option value="daily" ${!c.mode_inherited&&c.mode!=='weekly'?'selected':''}>每日</option><option value="weekly" ${!c.mode_inherited&&c.mode==='weekly'?'selected':''}>每週</option></select></div>`).join('')}</div></details>`;
     const search=async()=>{
       const q=new URLSearchParams();for(const [k,id] of [['community_id','wjcCommunity'],['kind','wjcKind'],['status','wjcStatus'],['from','wjcFrom'],['to','wjcTo']]){const v=el.querySelector('#'+id).value;if(v)q.set(k,v);}
       const box=el.querySelector('#wjcList');box.innerHTML='<div class="profile-loading">查詢中…</div>';
@@ -64,7 +64,7 @@
       }catch(e){box.innerHTML=`<div class="msg error">${esc(e.message)}</div>`;}
     };
     el.querySelector('#wjcSearch').addEventListener('click',search);
-    el.querySelectorAll('[data-mode]').forEach(sel=>sel.addEventListener('change',async()=>{try{await api('/api/company/journal/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(sel.dataset.mode),mode:sel.value})});}catch(e){alert(e.message);}}));
+    el.querySelectorAll('[data-mode]').forEach(sel=>sel.addEventListener('change',async()=>{try{await api('/api/company/journal/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(sel.value==='inherit'?{community_id:Number(sel.dataset.mode),reset:['mode']}:{community_id:Number(sel.dataset.mode),mode:sel.value})});}catch(e){alert(e.message);}}));
     await search();
   }
   window.WorkJournalCompanyModule={render};

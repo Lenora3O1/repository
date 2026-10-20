@@ -10,7 +10,10 @@
   const addDays=(iso,n)=>{const d=new Date(`${iso}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
   const weekStart=iso=>{const d=new Date(`${iso}T00:00:00Z`);return addDays(iso,-((d.getUTCDay()+6)%7));};
   const time=v=>{const d=new Date(v);return Number.isNaN(d.getTime())?'':d.toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});};
-  const CATS=[['committee','管理委員會'],['resident','住戶交辦事項與問題處置'],['center','管理中心待辦事項'],['facility','公共設施相關修繕']];
+  const BASE_CATS=[['committee','管理委員會'],['resident','住戶交辦事項與問題處置'],['center','管理中心待辦事項'],['facility','公共設施相關修繕']];
+  // 待辦分類由總後台平台範本決定；已移除分類但仍有舊事項時，照樣顯示出來
+  function cats(){const list=(S.payload?.settings?.tracking_categories||[]).map(c=>[c.key,c.label]);const out=list.length?list:BASE_CATS.slice();for(const t of S.payload?.tracking||[])if(!out.some(([k])=>k===t.category))out.push([t.category,t.category_label||'其他']);return out;}
+  const secOn=(list,key)=>(list||[]).find(x=>x.key===key);
   const S={el:null,ctx:null,cid:0,date:'',mode:'daily',payload:null,saveTimers:{},saving:0,lastSaved:'',readonly:false};
 
   function injectStyle(){
@@ -112,6 +115,13 @@
 .wj-settings .wj-list-edit div{display:flex;gap:6px}
 .wj-settings .wj-list-edit input{margin:0}
 .wj-hist{max-height:60vh;overflow:auto}
+.wj-custom{display:flex;flex-direction:column;gap:10px}
+.wj-custom-item{display:grid;grid-template-columns:minmax(160px,30%) minmax(0,1fr);gap:12px;align-items:start;border:1px solid var(--wj-line);border-radius:12px;padding:10px 14px;background:#fff}
+.wj-custom-label{font-weight:700;padding-top:6px}.wj-custom-label small{display:block;font-weight:400;color:var(--wj-muted);font-size:.8rem}
+.wj-choice{display:flex;flex-wrap:wrap;gap:14px;padding-top:6px}
+.wj-inherit{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:.72rem;font-weight:700;background:#e6f2fb;color:#1e5f8c}
+.wj-inherit.own{background:#fff3e0;color:#a35a00}
+@media(max-width:640px){.wj-custom-item{grid-template-columns:1fr}}
 .wj-hist button{display:flex;justify-content:space-between;width:100%;text-align:left;border:0;border-bottom:1px solid #eef2f0;background:#fff;color:inherit;padding:10px 6px;min-height:0;cursor:pointer;border-radius:0}
 .wj-hist button:hover{background:var(--wj-soft)}
 @media(max-width:900px){.wj-two{grid-template-columns:1fr}.wj-overview{grid-template-columns:repeat(3,minmax(0,1fr))}.wj-meter{grid-template-columns:1fr 1fr}.wj-meter .wj-spark{grid-column:1/-1}}
@@ -156,20 +166,22 @@
   function section(n,title,hint){const sec=document.createElement('section');sec.className='wj-sec panel';sec.innerHTML=`<h2><span class="wj-num">${n}</span>${esc(title)}</h2>${hint?`<p class="wj-hint">${hint}</p>`:''}`;return sec;}
 
   // ---------- 各段 ----------
-  function notesSection(n){
-    const sec=section(n,'案場重要記事','依職務各自填寫本日工作內容，大家可以同時編輯，不會互相覆蓋。');
+  function notesSection(n,cfg={}){
+    const sec=section(n,cfg.label||'案場重要記事','依職務各自填寫本日工作內容，大家可以同時編輯，不會互相覆蓋。');
     const notes=data().notes||{};const roles=[...new Set([...(S.payload.settings.roles||[]),...Object.keys(notes)])];
     for(const role of roles){const h=document.createElement('div');h.className='wj-sub';h.textContent=role;sec.appendChild(h);
       const rows=(notes[role]||[]).map(x=>({...x}));sec.appendChild(rowsTable([{key:'text',label:'本日工作內容',type:'textarea',ph:'例如：巡視公設、處理住戶反映…'},{key:'remark',label:'備註',width:'24%'}],rows,r=>queuePatch(`notes.${role}`,r.filter(x=>x.text||x.remark))));}
     return sec;
   }
-  function constructionSection(n){
-    const sec=section(n,'施工管制','裝潢施工戶清單會自動延續到之後的日誌；只要更新有變動的戶別。');
+  function constructionSection(n,cfg={}){
+    const parts=cfg.parts||{stats:true,renovations:true};
+    const sec=section(n,cfg.label||'施工管制',parts.renovations!==false?'裝潢施工戶清單會自動延續到之後的日誌；只要更新有變動的戶別。':'');
     const two=document.createElement('div');two.className='wj-two';
     const mk=(title,key,cols)=>{const box=document.createElement('div');const rows=(data()[key]||[]).map(x=>({...x}));const total=document.createElement('div');total.className='wj-total';const upd=r=>{total.textContent=`當日施工人數統計：${r.reduce((a,x)=>a+(Number(String(x.people||'').replace(/[^\d.]/g,''))||0),0)} 人`;};box.innerHTML=`<div class="wj-sub">${title}</div>`;box.appendChild(rowsTable(cols,rows,r=>{upd(r);queuePatch(key,r.filter(x=>Object.values(x).some(Boolean)));}));upd(rows);box.appendChild(total);return box;};
     two.appendChild(mk('專有戶施工統計','construction_units',[{key:'unit',label:'戶別',width:'22%',ph:'4A5'},{key:'work',label:'工程內容',ph:'油漆'},{key:'people',label:'人數',type:'num'}]));
     two.appendChild(mk('公共區域施工統計','construction_public',[{key:'place',label:'施工地點',width:'26%',ph:'公設'},{key:'work',label:'工程內容',ph:'水電'},{key:'people',label:'人數',type:'num'}]));
-    sec.appendChild(two);
+    if(parts.stats!==false)sec.appendChild(two);
+    if(parts.renovations===false)return sec;
     const h=document.createElement('div');h.className='wj-sub';h.textContent='專有戶施工資訊（裝潢戶清單）';sec.appendChild(h);
     const box=document.createElement('div');sec.appendChild(box);
     const draw=()=>{
@@ -185,8 +197,8 @@
     };
     draw();return sec;
   }
-  function staffingSection(n){
-    const sec=section(n,'人員管制','已依「班表」自動帶入今天的上班／休假人員，可以直接修改。');
+  function staffingSection(n,cfg={}){
+    const sec=section(n,cfg.label||'人員管制','已依「班表」自動帶入今天的上班／休假人員，可以直接修改。');
     const st=data().staffing||JSON.parse(JSON.stringify(S.payload.staffing_suggestion||{rows:[],tomorrow_off:''}));
     const save=()=>queuePatch('staffing',{rows:st.rows.filter(r=>r.role||r.name),tomorrow_off:st.tomorrow_off||''});
     const box=document.createElement('div');sec.appendChild(box);
@@ -215,24 +227,26 @@
     };
     draw();return sec;
   }
-  function recordSection(n){
-    const sec=section(n,'本日工作記錄與交辦事項','社區概況會自動沿用，有變動時直接修改即可。');
+  function recordSection(n,cfg={}){
+    const parts=cfg.parts||{overview:true,packages:true};
+    const sec=section(n,cfg.label||'本日工作記錄與交辦事項',parts.overview!==false?'社區概況會自動沿用，有變動時直接修改即可。':'');
     const ov={...(S.payload.settings.overview||{})};
     const F=[['total','總戶數'],['owner','自住'],['tenant','承租'],['vacant','空屋'],['reno_applied','裝潢已申請'],['reno_working','施工中'],['reno_pending','待驗退'],['car','汽車位'],['moto','機車位']];
-    const o=document.createElement('div');o.innerHTML=`<div class="wj-sub">社區概況說明</div><div class="wj-overview">${F.map(([k,l])=>`<label>${l}<input data-k="${k}" value="${esc(ov[k]||'')}"></label>`).join('')}</div>`;sec.appendChild(o);
-    let t;o.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',()=>{ov[inp.dataset.k]=inp.value;clearTimeout(t);setSave('儲存中…');t=setTimeout(()=>act(async()=>{const r=await api('/api/staff/journal/settings',J('PUT',{community_id:S.cid,overview:ov}));S.payload.settings.overview=r.settings.overview;setSave(`✓ 已自動儲存 ${time(new Date().toISOString())}`,'ok');}),700);}));
+    if(parts.overview!==false){const o=document.createElement('div');o.innerHTML=`<div class="wj-sub">社區概況說明</div><div class="wj-overview">${F.map(([k,l])=>`<label>${l}<input data-k="${k}" value="${esc(ov[k]||'')}"></label>`).join('')}</div>`;sec.appendChild(o);
+    let t;o.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',()=>{ov[inp.dataset.k]=inp.value;clearTimeout(t);setSave('儲存中…');t=setTimeout(()=>act(async()=>{const r=await api('/api/staff/journal/settings',J('PUT',{community_id:S.cid,overview:ov}));S.payload.settings.overview=r.settings.overview;setSave(`✓ 已自動儲存 ${time(new Date().toISOString())}`,'ok');}),700);}));}
+    if(parts.packages===false)return sec;
     const pk=JSON.parse(JSON.stringify(data().packages||{}));
     const p=document.createElement('div');p.innerHTML=`<div class="wj-sub">包裹／掛號／寄物未領統計</div><table class="wj-table wj-pk"><thead><tr><th>項目</th><th class="num">包裹</th><th class="num">掛號</th><th class="num">寄物</th><th>備註（戶別）</th></tr></thead><tbody>${[['d3','3日以上未領'],['d5','5日以上未領'],['d7','7日以上未領']].map(([k,l])=>`<tr data-r="${k}"><td style="white-space:nowrap;padding-top:13px">${l}</td>${['pkg','reg','deposit'].map(f=>`<td class="num"><input data-f="${f}" inputmode="numeric" value="${esc(pk[k]?.[f]??'')}"></td>`).join('')}<td><textarea rows="1" data-f="note" placeholder="包：21B6*2、25B6；掛：5B6">${esc(pk[k]?.note??'')}</textarea></td></tr>`).join('')}</tbody></table>`;sec.appendChild(p);
     p.querySelectorAll('tr[data-r]').forEach(tr=>tr.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',()=>{pk[tr.dataset.r]=pk[tr.dataset.r]||{};pk[tr.dataset.r][inp.dataset.f]=inp.value;queuePatch('packages',pk);})));
     return sec;
   }
-  function trackingSection(n,{date,title='待辦追蹤事項及住戶反映事項'}={}){
+  function trackingSection(n,{date,title}={}){title=title||'待辦追蹤事項及住戶反映事項';
     const at=date||S.date;
     const sec=section(n,title,'尚未結案的事項會自動帶到之後的日誌。有新進度就在下面加一筆；處理完成請勾「結案」。');
     const box=document.createElement('div');sec.appendChild(box);
     const draw=()=>{
       const list=S.payload.tracking||[];
-      box.innerHTML=CATS.map(([k,label])=>{const items=list.filter(t=>t.category===k);return `<div class="wj-cat" data-cat="${k}"><div class="wj-cat-head"><span>${label}</span><small>${items.filter(t=>!t.closed_on).length} 件追蹤中</small></div>
+      box.innerHTML=cats().map(([k,label])=>{const items=list.filter(t=>t.category===k);return `<div class="wj-cat" data-cat="${k}"><div class="wj-cat-head"><span>${label}</span><small>${items.filter(t=>!t.closed_on).length} 件追蹤中</small></div>
         ${items.map(t=>`<div class="wj-track ${t.closed_on?'closed':''}" data-id="${t.id}"><div class="wj-track-date">${md(t.opened_on)}</div><div><div class="wj-track-content">${esc(t.content)}</div>
           ${(t.updates||[]).length?`<ul class="wj-ups">${t.updates.map(u=>`<li><b>${md(u.update_date)}</b><span>${esc(u.content)}</span><button type="button" class="wj-del" data-up="${u.id}" title="刪除這筆進度" aria-label="刪除這筆進度">×</button></li>`).join('')}</ul>`:''}
           <div class="wj-track-meta"><label class="wj-check"><input type="checkbox" data-close ${t.closed_on?'checked':''}> ${t.closed_on?`已結案（${md(t.closed_on)}）`:'結案'}</label><button type="button" class="wj-link" data-edit>修改內容</button><button type="button" class="wj-link" data-remove>刪除</button></div>
@@ -252,32 +266,57 @@
     draw();return sec;
   }
   function textSection(n,title,key,{hint='',ph=''}={}){const sec=section(n,title,hint);const t=document.createElement('textarea');t.className='wj-text';t.placeholder=ph;t.value=data()[key]||'';t.addEventListener('input',()=>queuePatch(key,t.value));sec.appendChild(t);return sec;}
+  // 總後台「自訂紀錄項目」：依每日／每週顯示
+  function customItems(kind){return (S.payload.settings?.custom_items||[]).filter(c=>c.scope==='both'||c.scope===kind);}
+  function customSection(n,cfg,kind){
+    const items=customItems(kind);if(!items.length)return null;
+    const sec=section(n,cfg.label||'其他紀錄項目','');const vals=JSON.parse(JSON.stringify(data().custom||{}));
+    const save=()=>queuePatch('custom',vals);
+    const grid=document.createElement('div');grid.className='wj-custom';
+    for(const c of items){
+      const row=document.createElement('div');row.className='wj-custom-item';const v=vals[c.id];
+      let ctl='';
+      if(c.type==='textarea')ctl=`<textarea class="wj-text" style="min-height:70px" data-c="${esc(c.id)}">${esc(v||'')}</textarea>`;
+      else if(c.type==='yesno'||c.type==='select'){const opts=c.type==='yesno'?['是','否']:(c.options||[]);ctl=`<div class="wj-choice">${opts.map(o=>`<label class="wj-check"><input type="radio" name="wjc_${esc(c.id)}" value="${esc(o)}" data-c="${esc(c.id)}" ${String(v)===String(o)?'checked':''}> ${esc(o)}</label>`).join('')}</div>`;}
+      else if(c.type==='checklist'){const arr=Array.isArray(v)?v:[];ctl=`<div class="wj-choice">${(c.options||[]).map(o=>`<label class="wj-check"><input type="checkbox" value="${esc(o)}" data-c="${esc(c.id)}" ${arr.includes(o)?'checked':''}> ${esc(o)}</label>`).join('')}</div>`;}
+      else ctl=`<input data-c="${esc(c.id)}" ${c.type==='number'?'inputmode="decimal"':''} value="${esc(v??'')}" style="margin:0">`;
+      row.innerHTML=`<div class="wj-custom-label">${esc(c.label)}${c.hint?`<small>${esc(c.hint)}</small>`:''}</div><div>${ctl}</div>`;
+      row.querySelectorAll('[data-c]').forEach(inp=>inp.addEventListener(inp.type==='radio'||inp.type==='checkbox'?'change':'input',()=>{
+        if(c.type==='checklist')vals[c.id]=[...row.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);
+        else if(inp.type==='radio')vals[c.id]=inp.value;else vals[c.id]=inp.value;save();}));
+      grid.appendChild(row);
+    }
+    sec.appendChild(grid);return sec;
+  }
 
   // ---------- 週報彙整 ----------
   function weeklyAuto(){
     const s=S.payload.summary||{};const t=s.tracking||{};const r=s.renovation||{};
     const wrap=document.createDocumentFragment();
-    wrap.appendChild(textSection(1,'本週重點摘要','summary',{hint:'寫 3～5 點這週最重要的事，給管委會快速掌握。',ph:'1. 完成 B 棟客梯刷卡機查修\n2. 新增 3 戶裝修申請\n3. …'}));
-    const c=section(2,'施工管制週統計','以下由本週每日日誌自動彙整；若本社區只寫週報，可在下方補充施工紀錄。');
-    c.querySelector('h2').insertAdjacentHTML('beforeend','<span class="wj-auto-tag">自動彙整</span>');
-    c.insertAdjacentHTML('beforeend',`<div class="wj-kpis"><div class="wj-kpi"><span>本週專有戶施工人次</span><b>${s.construction_total?.unit_people||0}</b></div><div class="wj-kpi"><span>公共區域施工人次</span><b>${s.construction_total?.public_people||0}</b></div><div class="wj-kpi"><span>目前裝潢中</span><b>${r.working||0}</b> 戶</div><div class="wj-kpi"><span>探測器未復歸</span><b class="${(r.detector_pending||[]).length?'wj-warn':''}">${(r.detector_pending||[]).length}</b> 戶</div></div>
+    const secs=(S.payload.settings?.weekly_sections||[{key:'summary'},{key:'construction'},{key:'meters'},{key:'tracking'},{key:'staffing'},{key:'custom'},{key:'committee'},{key:'next_week'},{key:'extra'}]).filter(x=>x.on!==false);
+    const at=()=>S.payload.summary?.week_end&&S.payload.summary.week_end<todayStr()?S.payload.summary.week_end:todayClamp();
+    const auto=sec=>{sec.querySelector('h2').insertAdjacentHTML('beforeend','<span class="wj-auto-tag">自動彙整</span>');return sec;};
+    let n=0;
+    const B={
+      summary:c=>textSection(++n,c.label||'本週重點摘要','summary',{hint:'寫 3～5 點這週最重要的事，給管委會快速掌握。',ph:'1. 完成 B 棟客梯刷卡機查修\n2. 新增 3 戶裝修申請\n3. …'}),
+      construction:c=>{const sec=auto(section(++n,c.label||'施工管制週統計','以下由本週每日日誌自動彙整；若本社區只寫週報，可在下方補充施工紀錄。'));
+        sec.insertAdjacentHTML('beforeend',`<div class="wj-kpis"><div class="wj-kpi"><span>本週專有戶施工人次</span><b>${s.construction_total?.unit_people||0}</b></div><div class="wj-kpi"><span>公共區域施工人次</span><b>${s.construction_total?.public_people||0}</b></div><div class="wj-kpi"><span>目前裝潢中</span><b>${r.working||0}</b> 戶</div><div class="wj-kpi"><span>探測器未復歸</span><b class="${(r.detector_pending||[]).length?'wj-warn':''}">${(r.detector_pending||[]).length}</b> 戶</div></div>
       <div class="wj-auto">本週新申請裝修：${esc((r.new_units||[]).join('、')||'無')}<br>本週完工：${esc((r.done_units||[]).join('、')||'無')}${(r.detector_pending||[]).length?`<br><span class="wj-warn">消防探測器尚未復歸：${esc(r.detector_pending.join('、'))}</span>`:''}</div>`);
-    const ct=document.createElement('textarea');ct.className='wj-text';ct.style.minHeight='70px';ct.placeholder='補充本週施工紀錄（選填）';ct.value=data().construction||'';ct.addEventListener('input',()=>queuePatch('construction',ct.value));c.appendChild(ct);wrap.appendChild(c);
-    const m=section(3,'社區巡檢（水電用量）週報','本週用量＝週日前最後一次度數－上週最後一次度數；與上週相比變動 30% 以上會標示。');
-    m.querySelector('h2').insertAdjacentHTML('beforeend','<span class="wj-auto-tag">自動彙整</span>');
-    m.insertAdjacentHTML('beforeend',`<table class="wj-table"><thead><tr><th>項目</th><th>本週用量</th><th>上週用量</th><th>增減</th></tr></thead><tbody>${(s.meters||[]).map(x=>`<tr><td>${esc(x.label)}</td><td>${x.usage??'—'}</td><td>${x.prev_usage??'—'}</td><td class="${x.abnormal?'wj-warn':''}">${x.change_pct==null?'—':`${x.change_pct>0?'+':''}${x.change_pct}%${x.abnormal?' ⚠':''}`}</td></tr>`).join('')}</tbody></table>`);
-    wrap.appendChild(m);
-    wrap.appendChild(metersSection('3-1',{date:S.payload.summary?.week_end&&S.payload.summary.week_end<todayStr()?S.payload.summary.week_end:todayClamp(),title:'抄表登錄',hint:'只寫週報的社區，可以在這裡登錄抄表度數（選擇抄表日期）。'}));
-    const tr=section(4,'待辦追蹤週報','');tr.querySelector('h2').insertAdjacentHTML('beforeend','<span class="wj-auto-tag">自動彙整</span>');
-    tr.insertAdjacentHTML('beforeend',`<div class="wj-kpis"><div class="wj-kpi"><span>本週新增</span><b>${t.new_count||0}</b></div><div class="wj-kpi"><span>本週結案</span><b>${(t.closed||[]).length}</b></div><div class="wj-kpi"><span>仍在追蹤</span><b>${(t.open||[]).length}</b></div><div class="wj-kpi"><span>超過 30 天</span><b class="${t.overdue?'wj-warn':''}">${t.overdue||0}</b></div><div class="wj-kpi"><span>本週住戶反映</span><b>${t.resident_new||0}</b></div></div>`);
-    wrap.appendChild(tr);
-    wrap.appendChild(trackingSection('4-1',{date:S.payload.summary?.week_end&&S.payload.summary.week_end<todayStr()?S.payload.summary.week_end:todayClamp(),title:'追蹤事項（可直接更新進度）'}));
-    const st=section(5,'人員出勤週統計','依「班表」自動統計。');st.querySelector('h2').insertAdjacentHTML('beforeend','<span class="wj-auto-tag">自動彙整</span>');
-    st.insertAdjacentHTML('beforeend',(s.staffing||[]).length?`<table class="wj-table"><thead><tr><th>職務</th><th>姓名</th><th>上班天數</th><th>休假天數</th></tr></thead><tbody>${s.staffing.map(x=>`<tr><td>${esc(x.role)}</td><td>${esc(x.name)}</td><td>${x.work_days}</td><td>${x.off_days}</td></tr>`).join('')}</tbody></table>`:'<div class="wj-auto">本週班表尚無資料。</div>');
-    wrap.appendChild(st);
-    wrap.appendChild(textSection(6,'需管委會決議／協助事項','committee',{hint:'需要管委會開會決議、核准或協助的事項。',ph:'例如：18A3 違規充電樁，建議發函限期改善。'}));
-    wrap.appendChild(textSection(7,'下週工作計畫','next_week',{ph:'例如：水塔清洗（待建設公司排程）、春節清運公告張貼'}));
-    wrap.appendChild(textSection(8,'其他事項','extra',{hint:'選填'}));
+        const ct=document.createElement('textarea');ct.className='wj-text';ct.style.minHeight='70px';ct.placeholder='補充本週施工紀錄（選填）';ct.value=data().construction||'';ct.addEventListener('input',()=>queuePatch('construction',ct.value));sec.appendChild(ct);return sec;},
+      meters:c=>{const m=auto(section(++n,c.label||'社區巡檢（水電用量）週報','本週用量＝週日前最後一次度數－上週最後一次度數；與上週相比變動 30% 以上會標示。'));
+        m.insertAdjacentHTML('beforeend',`<table class="wj-table"><thead><tr><th>項目</th><th>本週用量</th><th>上週用量</th><th>增減</th></tr></thead><tbody>${(s.meters||[]).map(x=>`<tr><td>${esc(x.label)}</td><td>${x.usage??'—'}</td><td>${x.prev_usage??'—'}</td><td class="${x.abnormal?'wj-warn':''}">${x.change_pct==null?'—':`${x.change_pct>0?'+':''}${x.change_pct}%${x.abnormal?' ⚠':''}`}</td></tr>`).join('')}</tbody></table>`);
+        const f=document.createDocumentFragment();f.appendChild(m);f.appendChild(metersSection(`${n}-1`,{date:at(),title:'抄表登錄',hint:'只寫週報的社區，可以在這裡登錄抄表度數（選擇抄表日期）。'}));return f;},
+      tracking:c=>{const tr=auto(section(++n,c.label||'待辦追蹤週報',''));
+        tr.insertAdjacentHTML('beforeend',`<div class="wj-kpis"><div class="wj-kpi"><span>本週新增</span><b>${t.new_count||0}</b></div><div class="wj-kpi"><span>本週結案</span><b>${(t.closed||[]).length}</b></div><div class="wj-kpi"><span>仍在追蹤</span><b>${(t.open||[]).length}</b></div><div class="wj-kpi"><span>超過 30 天</span><b class="${t.overdue?'wj-warn':''}">${t.overdue||0}</b></div><div class="wj-kpi"><span>本週住戶反映</span><b>${t.resident_new||0}</b></div></div>`);
+        const f=document.createDocumentFragment();f.appendChild(tr);f.appendChild(trackingSection(`${n}-1`,{date:at(),title:'追蹤事項（可直接更新進度）'}));return f;},
+      staffing:c=>{const st=auto(section(++n,c.label||'人員出勤週統計','依「班表」自動統計。'));
+        st.insertAdjacentHTML('beforeend',(s.staffing||[]).length?`<table class="wj-table"><thead><tr><th>職務</th><th>姓名</th><th>上班天數</th><th>休假天數</th></tr></thead><tbody>${s.staffing.map(x=>`<tr><td>${esc(x.role)}</td><td>${esc(x.name)}</td><td>${x.work_days}</td><td>${x.off_days}</td></tr>`).join('')}</tbody></table>`:'<div class="wj-auto">本週班表尚無資料。</div>');return st;},
+      custom:c=>{if(!customItems('weekly').length)return null;return customSection(++n,c,'weekly');},
+      committee:c=>textSection(++n,c.label||'需管委會決議／協助事項','committee',{hint:'需要管委會開會決議、核准或協助的事項。',ph:'例如：18A3 違規充電樁，建議發函限期改善。'}),
+      next_week:c=>textSection(++n,c.label||'下週工作計畫','next_week',{ph:'例如：水塔清洗（待建設公司排程）、春節清運公告張貼'}),
+      extra:c=>textSection(++n,c.label||'其他事項','extra',{hint:'選填'}),
+    };
+    for(const c of secs){const el=B[c.key]?.(c);if(el)wrap.appendChild(el);}
     return wrap;
   }
   const todayStr=()=>S.ctx?.today||new Date().toISOString().slice(0,10);
@@ -310,21 +349,25 @@
   }
   function openSettings(){
     const st=JSON.parse(JSON.stringify(S.payload.settings));
+    const inh=st.inherited||{};const tag=k=>inh[k]?'<span class="wj-inherit" title="沒有自行調整，跟著總後台平台範本">沿用平台預設</span>':'<span class="wj-inherit own">本社區自訂</span>';
+    const touched=new Set();
     const box=document.createElement('div');box.className='modal-backdrop';
     const draw=()=>{box.innerHTML=`<div class="modal wj-settings" role="dialog" aria-modal="true"><button type="button" class="modal-close" aria-label="關閉">×</button><h2>⚙ ${esc(S.payload.community?.name||'')}｜工作日誌設定</h2>
-      <label>日誌類型（依管委會習慣）</label><div class="wj-radio"><label><input type="radio" name="wjMode" value="daily" ${st.mode!=='weekly'?'checked':''}> 每日工作日誌</label><label><input type="radio" name="wjMode" value="weekly" ${st.mode==='weekly'?'checked':''}> 每週工作日誌</label></div>
-      <label>抄表項目</label><div class="wj-list-edit" id="wjMeterEdit">${st.meters.map((m,i)=>`<div><input value="${esc(m.label)}" data-i="${i}"><button type="button" class="wj-del" data-rm="${i}" aria-label="刪除">×</button></div>`).join('')}</div><button type="button" class="wj-add" id="wjMeterAdd" style="margin-top:6px">＋ 新增抄表項目</button>
-      <label>「案場重要記事」的職務欄</label><div class="wj-list-edit" id="wjRoleEdit">${st.roles.map((r,i)=>`<div><input value="${esc(r)}" data-i="${i}"><button type="button" class="wj-del" data-rm="${i}" aria-label="刪除">×</button></div>`).join('')}</div><button type="button" class="wj-add" id="wjRoleAdd" style="margin-top:6px">＋ 新增職務</button>
-      <div class="modal-actions"><button type="button" class="secondary" data-close>取消</button><button type="button" id="wjSetSave">💾 儲存</button></div></div>`;
+      <p class="hint" style="margin:0">沒有調整的項目會跟著總後台的「平台預設範本」；要記錄哪些區塊、自訂項目由總後台統一設定。</p>
+      <label>日誌類型（依管委會習慣）${tag('mode')}</label><div class="wj-radio"><label><input type="radio" name="wjMode" value="daily" ${st.mode!=='weekly'?'checked':''}> 每日工作日誌</label><label><input type="radio" name="wjMode" value="weekly" ${st.mode==='weekly'?'checked':''}> 每週工作日誌</label></div>
+      <label>抄表項目${tag('meters')}</label><div class="wj-list-edit" id="wjMeterEdit">${st.meters.map((m,i)=>`<div><input value="${esc(m.label)}" data-i="${i}"><button type="button" class="wj-del" data-rm="${i}" aria-label="刪除">×</button></div>`).join('')}</div><button type="button" class="wj-add" id="wjMeterAdd" style="margin-top:6px">＋ 新增抄表項目</button>
+      <label>「案場重要記事」的職務欄${tag('roles')}</label><div class="wj-list-edit" id="wjRoleEdit">${st.roles.map((r,i)=>`<div><input value="${esc(r)}" data-i="${i}"><button type="button" class="wj-del" data-rm="${i}" aria-label="刪除">×</button></div>`).join('')}</div><button type="button" class="wj-add" id="wjRoleAdd" style="margin-top:6px">＋ 新增職務</button>
+      <div class="modal-actions">${inh.mode&&inh.meters&&inh.roles?'':'<button type="button" class="secondary" id="wjSetReset" style="margin-right:auto">↺ 全部恢復平台預設</button>'}<button type="button" class="secondary" data-close>取消</button><button type="button" id="wjSetSave">💾 儲存</button></div></div>`;
       box.querySelector('.modal-close').onclick=()=>box.remove();box.querySelector('[data-close]').onclick=()=>box.remove();
-      box.querySelectorAll('input[name=wjMode]').forEach(r=>r.addEventListener('change',()=>{st.mode=r.value;}));
-      box.querySelectorAll('#wjMeterEdit input').forEach(inp=>inp.addEventListener('input',()=>{st.meters[inp.dataset.i].label=inp.value;}));
-      box.querySelectorAll('#wjRoleEdit input').forEach(inp=>inp.addEventListener('input',()=>{st.roles[inp.dataset.i]=inp.value;}));
-      box.querySelectorAll('#wjMeterEdit [data-rm]').forEach(b=>b.addEventListener('click',()=>{st.meters.splice(Number(b.dataset.rm),1);draw();}));
-      box.querySelectorAll('#wjRoleEdit [data-rm]').forEach(b=>b.addEventListener('click',()=>{st.roles.splice(Number(b.dataset.rm),1);draw();}));
-      box.querySelector('#wjMeterAdd').onclick=()=>{st.meters.push({key:'',label:''});draw();box.querySelector('#wjMeterEdit div:last-child input')?.focus();};
-      box.querySelector('#wjRoleAdd').onclick=()=>{st.roles.push('');draw();box.querySelector('#wjRoleEdit div:last-child input')?.focus();};
-      box.querySelector('#wjSetSave').onclick=()=>act(async()=>{const r=await api('/api/staff/journal/settings',J('PUT',{community_id:S.cid,mode:st.mode,meters:st.meters.filter(m=>m.label.trim()),roles:st.roles.filter(x=>x.trim())}));box.remove();const c=S.ctx.communities.find(x=>Number(x.id)===S.cid);if(c)c.mode=r.settings.mode;S.mode=r.settings.mode;await load();});
+      box.querySelectorAll('input[name=wjMode]').forEach(r=>r.addEventListener('change',()=>{st.mode=r.value;touched.add('mode');}));
+      box.querySelectorAll('#wjMeterEdit input').forEach(inp=>inp.addEventListener('input',()=>{st.meters[inp.dataset.i].label=inp.value;touched.add('meters');}));
+      box.querySelectorAll('#wjRoleEdit input').forEach(inp=>inp.addEventListener('input',()=>{st.roles[inp.dataset.i]=inp.value;touched.add('roles');}));
+      box.querySelectorAll('#wjMeterEdit [data-rm]').forEach(b=>b.addEventListener('click',()=>{st.meters.splice(Number(b.dataset.rm),1);touched.add('meters');draw();}));
+      box.querySelectorAll('#wjRoleEdit [data-rm]').forEach(b=>b.addEventListener('click',()=>{st.roles.splice(Number(b.dataset.rm),1);touched.add('roles');draw();}));
+      box.querySelector('#wjMeterAdd').onclick=()=>{st.meters.push({key:'',label:''});touched.add('meters');draw();box.querySelector('#wjMeterEdit div:last-child input')?.focus();};
+      box.querySelector('#wjRoleAdd').onclick=()=>{st.roles.push('');touched.add('roles');draw();box.querySelector('#wjRoleEdit div:last-child input')?.focus();};
+      box.querySelector('#wjSetReset')?.addEventListener('click',()=>act(async()=>{if(!confirm('把日誌類型、抄表項目、記事職務全部恢復成總後台的平台預設嗎？（已登錄的抄表度數不會刪除）'))return;const r=await api('/api/staff/journal/settings',J('PUT',{community_id:S.cid,reset:true}));box.remove();const c=S.ctx.communities.find(x=>Number(x.id)===S.cid);if(c)c.mode=r.settings.mode;S.mode=r.settings.mode;await load();}));
+      box.querySelector('#wjSetSave').onclick=()=>act(async()=>{const body={community_id:S.cid};if(touched.has('mode'))body.mode=st.mode;if(touched.has('meters'))body.meters=st.meters.filter(m=>m.label.trim());if(touched.has('roles'))body.roles=st.roles.filter(x=>x.trim());if(Object.keys(body).length===1){box.remove();return;}const r=await api('/api/staff/journal/settings',J('PUT',body));box.remove();const c=S.ctx.communities.find(x=>Number(x.id)===S.cid);if(c)c.mode=r.settings.mode;S.mode=r.settings.mode;await load();});
     };
     draw();document.body.appendChild(box);box.addEventListener('click',e=>{if(e.target===box)box.remove();});
   }
@@ -345,7 +388,12 @@
     const body=el.querySelector('#wjBody');body.innerHTML='';body.className=S.readonly?'wj-ro':'';
     if(S.readonly)body.insertAdjacentHTML('beforeend',`<div class="wj-lock">🔒 這份日誌已由 ${esc(S.payload.journal.submitted_by||'經理')} 送出，內容已鎖定${S.ctx.manager?'；需要修改請按上方「退回編輯」':''}。</div>`);
     if(S.mode==='weekly'){body.appendChild(weeklyAuto());}
-    else{[notesSection(1),constructionSection(2),staffingSection(3),metersSection(4),recordSection(5),trackingSection(6),textSection(7,'其他事項','extra',{hint:'選填'})].forEach(x=>body.appendChild(x));}
+    else{
+      const secs=(S.payload.settings?.daily_sections||[{key:'notes'},{key:'construction'},{key:'staffing'},{key:'meters'},{key:'record'},{key:'tracking'},{key:'custom'},{key:'extra'}]).filter(x=>x.on!==false);
+      let n=0;
+      const B={notes:c=>notesSection(++n,c),construction:c=>constructionSection(++n,c),staffing:c=>staffingSection(++n,c),meters:c=>metersSection(++n,{title:c.label}),record:c=>recordSection(++n,c),tracking:c=>trackingSection(++n,{title:c.label}),custom:c=>customItems('daily').length?customSection(++n,c,'daily'):null,extra:c=>textSection(++n,c.label||'其他事項','extra',{hint:'選填'})};
+      for(const c of secs){const x=B[c.key]?.(c);if(x)body.appendChild(x);}
+    }
     if(S.readonly)body.querySelectorAll('input,textarea,select').forEach(x=>{x.disabled=true;});
   }
   async function render(container,label){

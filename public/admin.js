@@ -61,7 +61,7 @@ async function loadTenants(){state.tenants=await api('/api/admin/tenants')}
 async function loadSubmissions(){const r=await api('/api/admin/submissions');state.submissions=r.submissions}
 async function loadTemplates(){state.templates=await api('/api/admin/templates');state.platformResources=await api('/api/admin/platform-resources')}
 async function loadStaff(){state.staff=await api('/api/admin/staff')}
-async function loadConfig(){state.config=await api('/api/admin/form-config');if(!state.config||!Array.isArray(state.config.pages)||!Array.isArray(state.config.questions)){throw new Error('中央表單設定格式不完整，請檢查 /data/form-config.json。')}}
+async function loadConfig(){state.config=await api('/api/admin/form-config');const ho=await api('/api/admin/handover-forms').catch(()=>null);state.handoverForms={manager:state.config,secretary:ho?.forms?.secretary||{title:'秘書交接清冊',pages:[],questions:[]}};state.hoRole=state.hoRole||'manager';if(!state.config||!Array.isArray(state.config.pages)||!Array.isArray(state.config.questions)){throw new Error('中央表單設定格式不完整，請檢查 /data/form-config.json。')}}
 function renderTenants(){
  const el=$('tab-tenants');
  const rows=state.tenants.map(t=>{
@@ -117,7 +117,7 @@ function wireBrandingInputs(){const pairs=[['brandAccent','brandAccentText'],['b
 function updateBrandPreview(){const root=$('brandingPreview');if(!root)return;root.style.setProperty('--preview-accent',$('brandAccentText').value);root.style.setProperty('--preview-dark',$('brandAccentDarkText').value);root.style.setProperty('--preview-bg',$('brandBgText').value);root.style.setProperty('--preview-panel',$('brandPanelText').value);$('previewTitle').textContent=$('brandLogoText').value||$('brandTitle').value;$('previewSubtitle').textContent=$('brandSubtitle').value;$('previewLogin').textContent=$('brandLoginTitle').value;$('previewHint').textContent=$('brandLoginHint').value}
 async function saveBranding(){const msg=$('brandingSaveMsg');const body={title:$('brandTitle').value,subtitle:$('brandSubtitle').value,logoText:$('brandLogoText').value,loginTitle:$('brandLoginTitle').value,loginHint:$('brandLoginHint').value,intro:$('brandIntro').value,accent:$('brandAccentText').value,accentDark:$('brandAccentDarkText').value,bg:$('brandBgText').value,panel:$('brandPanelText').value};try{const r=await api(`/api/admin/tenants/${state.brandingTenantId}/branding`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});state.branding=r.branding;msg.innerHTML='<span class="msg success inline-msg">✓ 已儲存，此設定只套用於這家公司。</span>';setTimeout(()=>msg.innerHTML='',4500)}catch(e){msg.innerHTML=`<span class="msg error inline-msg">${escapeHtml(e.message)}</span>`}}
 
-function renderSubmissions(){const el=$('tab-submissions');if(!state.submissions.length){el.innerHTML='<div class="panel empty">目前還沒有正式送出的填答紀錄。</div>';return}const opts=state.templates.map(t=>`<option value="${t.id}">${escapeHtml(t.name)}${t.is_active?'（預設）':''}</option>`).join('');el.innerHTML=`<div class="panel"><div class="section-title">📋 正式填答紀錄（共 ${state.submissions.length} 筆）</div><p class="hint">這裡只顯示已正式送出的交接清冊。填寫中的草稿會由員工登入後自己繼續。</p><div class="table-wrap"><table><thead><tr><th>編號</th><th>送出時間</th><th>公司</th><th>填寫人員</th><th>社區</th><th>交接人員</th><th>操作</th></tr></thead><tbody>${state.submissions.map(s=>{const d=s.data;return `<tr><td>${s.id}</td><td>${formatDate(s.created_at)}</td><td>${escapeHtml(s.tenant_name||'')}</td><td>${escapeHtml(s.employee_name||'')}<br><span class="muted">${escapeHtml(s.employee_id||'')}</span></td><td>${escapeHtml(d.community_name||'')}</td><td>${escapeHtml(d.outgoing_manager||'')} → ${escapeHtml(d.incoming_manager||'')}</td><td><select id="tpl-${s.id}" ${!state.templates.length?'disabled':''}>${opts||'<option>尚未上傳範本</option>'}</select> <button class="secondary" onclick="downloadDocx(${s.id})" ${!state.templates.length?'disabled':''}>產生 Word</button> <button class="danger" onclick="deleteSubmission(${s.id})">刪除</button></td></tr>`}).join('')}</tbody></table></div></div>`}
+function renderSubmissions(){const el=$('tab-submissions');if(!state.submissions.length){el.innerHTML='<div class="panel empty">目前還沒有正式送出的填答紀錄。</div>';return}const opts=state.templates.map(t=>`<option value="${t.id}">${escapeHtml(t.name)}${t.is_active?'（預設）':''}</option>`).join('');el.innerHTML=`<div class="panel"><div class="section-title">📋 正式填答紀錄（共 ${state.submissions.length} 筆）</div><p class="hint">這裡只顯示已正式送出的交接清冊。填寫中的草稿會由員工登入後自己繼續。</p><div class="table-wrap"><table><thead><tr><th>編號</th><th>類型</th><th>送出時間</th><th>公司</th><th>填寫人員</th><th>社區</th><th>交接人員</th><th>操作</th></tr></thead><tbody>${state.submissions.map(s=>{const d=s.data;return `<tr><td>${s.id}</td><td>${s.form_type==='secretary'?'🗂 秘書':'👔 經理'}</td><td>${formatDate(s.created_at)}</td><td>${escapeHtml(s.tenant_name||'')}</td><td>${escapeHtml(s.employee_name||'')}<br><span class="muted">${escapeHtml(s.employee_id||'')}</span></td><td>${escapeHtml(s.community_name||d.community_name||'')}</td><td>${escapeHtml((s.form_type==='secretary'?d.outgoing_secretary:d.outgoing_manager)||'')} → ${escapeHtml((s.form_type==='secretary'?d.incoming_secretary:d.incoming_manager)||'')}</td><td><select id="tpl-${s.id}" ${!state.templates.length?'disabled':''}>${opts||'<option>尚未上傳範本</option>'}</select> <button class="secondary" onclick="downloadDocx(${s.id})" ${!state.templates.length?'disabled':''}>產生 Word</button> <button class="danger" onclick="deleteSubmission(${s.id})">刪除</button></td></tr>`}).join('')}</tbody></table></div></div>`}
 async function downloadDocx(id){const v=$(`tpl-${id}`)?.value||'';window.open(`/api/admin/generate/${id}?templateId=${encodeURIComponent(v)}`,'_blank')}
 async function deleteSubmission(id){if(!confirm('確定刪除這筆正式紀錄嗎？'))return;await api(`/api/admin/submissions/${id}`,{method:'DELETE'});await loadSubmissions();renderSubmissions()}
 function renderStaff(){const el=$('tab-staff');el.innerHTML=`<div class="panel"><div class="section-title">👥 全系統人員</div><p class="hint">總後臺可以查看所有公司的人員與角色；日常開通一般人員請交給各公司的公司管理員。</p><div class="table-wrap"><table><thead><tr><th>員編</th><th>姓名</th><th>公司</th><th>角色</th><th>狀態</th><th>密碼重設</th><th>操作</th></tr></thead><tbody>${state.staff.map(u=>`<tr><td><strong>${escapeHtml(u.employee_id)}</strong></td><td><input id="staff-name-${u.id}" value="${escapeAttr(u.name)}"></td><td><select id="staff-tenant-${u.id}">${state.tenants.map(t=>`<option value="${t.id}" ${Number(u.tenant_id)===Number(t.id)?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></td><td><select id="staff-role-${u.id}"><option value="staff" ${u.role==='staff'?'selected':''}>一般人員</option><option value="company_admin" ${u.role==='company_admin'?'selected':''}>公司管理員</option></select></td><td><select id="staff-active-${u.id}"><option value="1" ${u.is_active?'selected':''}>啟用</option><option value="0" ${!u.is_active?'selected':''}>停用</option></select></td><td><input id="staff-pass-${u.id}" type="password" placeholder="留白＝不修改"></td><td><button class="secondary" onclick="saveStaff(${u.id})">儲存</button></td></tr>`).join('')}</tbody></table></div></div>`}
@@ -143,12 +143,20 @@ function renderTemplates(){
 }
 async function activateTemplate(id){try{await api(`/api/admin/templates/${id}/activate`,{method:'POST'});await loadTemplates();renderTemplates()}catch(err){alert(err.message)}}
 async function deleteTemplate(id){if(!confirm('確定刪除這份平台制式範本嗎？已經複製到各公司的版本不會受影響。'))return;try{await api(`/api/admin/templates/${id}`,{method:'DELETE'});await loadTemplates();renderTemplates()}catch(err){alert(err.message)}}
+// ===== 中央表單設計中心：交接清冊（經理版／秘書版）＋工作日誌平台預設範本 =====
+const HO_ROLES={manager:{label:'經理交接清冊',icon:'👔'},secretary:{label:'秘書交接清冊',icon:'🗂'}};
+const HO_TYPES=[['text','單行文字'],['textarea','多行文字'],['number','數字'],['money','金額（元）'],['date','日期'],['tel','電話'],['yesno','是／否'],['radio','單選（按鈕）'],['select','單選（下拉）'],['checkbox','複選']];
+const HO_OPTION_TYPES=['radio','select','checkbox'];
+const HO_PREFILL=[['','不自動帶入'],['community','社區名稱'],['today','今天日期'],['user','填寫人姓名'],['user_position','填寫人職稱'],['last','沿用上次交接的答案']];
+function dz(){return state.hoRole==='secretary'?state.handoverForms.secretary:state.config}
 function renderFormDesigner(){
   const el=$('tab-form'),c=state.config||{},u=c.uiTexts||{};
+  const role=state.hoRole||'manager',f=dz()||{pages:[],questions:[]};
+  const open=state.designerOpen||'';
   el.innerHTML=`
   <div class="panel designer-intro">
     <div class="section-title">🛠 中央表單設計中心</div>
-    <p><strong>這裡是平台提供標準雛型的地方。</strong> 目前先分成「交接清冊」與「工作日誌」兩套獨立表單；未來可以再增加其他平台制式表單。各公司採用後，再於自己的公司後台建立公司版本。</p>
+    <p><strong>這裡是平台提供標準雛型的地方。</strong> 交接清冊分成「經理版」與「秘書版」兩份獨立表單；工作日誌則在這裡設定平台預設範本，各社區會自動沿用。</p>
   </div>
 
   <div class="module-card-grid">
@@ -156,8 +164,8 @@ function renderFormDesigner(){
       <div class="module-card-icon">📋</div>
       <div class="module-card-body">
         <div class="section-title">交接清冊</div>
-        <p><strong>目前正式使用中的交接清冊。</strong><br>這套表單已確認可以正常使用，以下設計內容維持獨立，不與工作日誌共用。</p>
-        <button class="secondary" onclick="toggleDesigner('checklistDesigner','checklistBtn')" id="checklistBtn">進入交接清冊設計</button>
+        <p><strong>經理版、秘書版各一份。</strong><br>題目、草稿與送出紀錄都分開；可以設定自動帶入、條件題與選項題。</p>
+        <button class="secondary" onclick="toggleDesigner('checklistDesigner','checklistBtn')" id="checklistBtn">${open==='checklistDesigner'?'收起交接清冊設計':'進入交接清冊設計'}</button>
       </div>
     </div>
 
@@ -165,8 +173,8 @@ function renderFormDesigner(){
       <div class="module-card-icon">📝</div>
       <div class="module-card-body">
         <div class="section-title">工作日誌</div>
-        <p><strong>社區經理日常工作回報。</strong><br>未來會像交接清冊一樣，由平台設定表單，經理登入後選擇社區並填寫、儲存草稿、送出回報。</p>
-        <button class="secondary" onclick="toggleDesigner('journalDesigner','journalBtn')" id="journalBtn">進入工作日誌設計</button>
+        <p><strong>平台預設範本。</strong><br>設定預設每日／每週、要記錄的區塊、電表項目、填寫人員與自訂項目；各社區可再自行調整。</p>
+        <button class="secondary" onclick="toggleDesigner('journalDesigner','journalBtn')" id="journalBtn">${open==='journalDesigner'?'收起工作日誌設計':'進入工作日誌設計'}</button>
       </div>
     </div>
 
@@ -180,19 +188,18 @@ function renderFormDesigner(){
     </div>
   </div>
 
-  <div id="journalDesigner" class="designer-collapsible" style="display:none">
-    <div class="panel">
-      <div class="section-title">⚙️ 工作日誌設計</div>
-      <p><strong>這裡先建立工作日誌的獨立入口。</strong> 下一階段會在此加入與交接清冊相同的表單設計功能，例如頁面、子標題、題目、回答格式、必填設定與排序。</p>
-      <div class="msg inline-msg">🚧 工作日誌填寫系統尚未啟用。現在先整理總後台架構，完成後再接上經理前台與公司後台。</div>
-    </div>
+  <div id="journalDesigner" class="designer-collapsible" style="display:${open==='journalDesigner'?'block':'none'}">
+    <div id="journalTemplateEditor"><div class="panel">讀取工作日誌範本中…</div></div>
   </div>
 
-  <div id="checklistDesigner" class="designer-collapsible" style="display:none">
+  <div id="checklistDesigner" class="designer-collapsible" style="display:${open==='checklistDesigner'?'block':'none'}">
     <div class="panel">
-      <div class="section-title">⚙️ 交接清冊雛型設定</div>
-      <p class="hint">以下就是目前已經確認 OK 的交接清冊設定。這裡的修改只會作用於交接清冊；工作日誌使用另一套獨立設定。</p>
+      <div class="section-title">⚙️ 交接清冊設計</div>
+      <p class="hint">請先選擇要編輯哪一份。兩份表單完全分開：經理在「經理交接清冊」填寫，秘書在「秘書交接清冊」填寫，草稿不會互相混在一起。</p>
+      <div class="ho-role-tabs" role="tablist">${Object.entries(HO_ROLES).map(([k,m])=>`<button type="button" role="tab" aria-selected="${k===role}" class="${k===role?'':'secondary'}" onclick="switchHandoverRole('${k}')">${m.icon} ${m.label}<small>${(state.handoverForms?.[k]?.pages||[]).length} 頁・${(state.handoverForms?.[k]?.questions||[]).length} 題</small></button>`).join('')}</div>
+      <div class="ho-smart-guide"><strong>💡 智慧題目怎麼用</strong><ul><li><b>自動帶入</b>：社區名稱、今天日期、填寫人姓名會自動填好；選「沿用上次交接的答案」的題目，會帶入這個社區上一份同類清冊的答案（例如鑰匙數量、聯絡窗口）。</li><li><b>條件題</b>：例如「是否有欠繳住戶？」選「是」，才出現「欠繳戶別與金額」。被隱藏的題目不會要求必填。</li><li><b>選項題</b>：是／否、單選、複選，讓現場人員用點的就能完成。</li></ul></div>
     </div>
+    ${role==='manager'?`
     <div class="panel">
       <div class="section-title">① 網站基本名稱</div>
       <div class="field"><label>網站標題</label><input id="siteTitle" value="${escapeAttr(c.title||'社區交接清冊')}"></div>
@@ -200,7 +207,7 @@ function renderFormDesigner(){
     </div>
     <div class="panel">
       <div class="section-title">② 公司管理後台／登入頁顯示文字</div>
-      <p class="hint">這些就是公司管理員畫面上看到的標題與說明文字。修改後按最下面的「儲存全部交接清冊設定」即可套用。</p>
+      <p class="hint">這些就是公司管理員畫面上看到的標題與說明文字。修改後按最下面的儲存即可套用。</p>
       <div class="editor-grid">
         <div><label>公司後台標題</label><input id="companyTitle" value="${escapeAttr(u.companyTitle||'公司管理後台')}"></div>
         <div><label>公司後台副標題</label><input id="companySubtitle" value="${escapeAttr(u.companySubtitle||'物業管理公司')}"></div>
@@ -210,44 +217,102 @@ function renderFormDesigner(){
         <div><label>一般人員登入標題</label><input id="staffLoginTitle" value="${escapeAttr(u.staffLoginTitle||'物業人員登入')}"></div>
         <div><label>一般人員登入說明</label><textarea id="staffLoginHint">${escapeHtml(u.staffLoginHint||'')}</textarea></div>
       </div>
-    </div>
+    </div>`:`
     <div class="panel">
-      <div class="section-title">③ 交接清冊頁面／母標題管理</div>
+      <div class="section-title">① 秘書版說明</div>
+      <div class="editor-grid">
+        <div><label>表單名稱</label><input id="hoFormTitle" value="${escapeAttr(f.title||'秘書交接清冊')}"></div>
+        <div><label>副標題</label><input id="hoFormSubtitle" value="${escapeAttr(f.subtitle||'')}"></div>
+      </div>
+      <p class="hint">秘書版有平台預設題目（行政文書、帳務收費、住戶資料、印鑑文件、櫃台收發、系統帳號）。改壞了可以按最下面「還原平台預設題目」。</p>
+    </div>`}
+    <div class="panel">
+      <div class="section-title">${role==='manager'?'③':'②'} ${HO_ROLES[role].label}｜頁面／母標題管理</div>
       <div id="pagesEditor"></div>
       <button class="secondary" onclick="addPage()">＋ 新增頁面</button>
     </div>
     <div class="panel">
-      <div class="section-title">④ 交接清冊題目／子標題管理</div>
-      <p class="hint">題目會依「所在頁面＋子標題」自動分組顯示。題目 ↑↓ 只調整同一子標題內的順序。</p>
+      <div class="section-title">${role==='manager'?'④':'③'} ${HO_ROLES[role].label}｜題目／子標題管理</div>
+      <p class="hint">題目會依「所在頁面＋子標題」自動分組顯示。題目 ↑↓ 只調整同一子標題內的順序。欄位代碼會用在 Word 範本的 {{欄位代碼}}。</p>
       <div id="questionsEditor"></div>
       <button class="secondary" onclick="addQuestion()">＋ 新增題目</button>
     </div>
-    <div class="save-bar"><button onclick="saveFormConfig()">💾 儲存全部交接清冊設定</button><span id="formSaveMsg"></span></div>
+    <div class="save-bar"><button onclick="saveFormConfig()">💾 儲存${HO_ROLES[role].label}</button>${role==='secretary'?'<button type="button" class="secondary" onclick="resetHandoverForm()">↺ 還原平台預設題目</button>':''}<span id="formSaveMsg"></span></div>
   </div>`;
   renderPagesEditor();renderQuestionsEditor();
+  if(open==='journalDesigner')renderJournalDesigner();
+}
+function renderJournalDesigner(){
+  const box=$('journalTemplateEditor');if(!box)return;
+  if(!window.JournalTemplateAdmin){box.innerHTML='<div class="panel msg error">工作日誌設計模組尚未載入，請重新整理頁面。</div>';return;}
+  window.JournalTemplateAdmin.render(box).catch(err=>{box.innerHTML=`<div class="panel msg error">${escapeHtml(err.message)}</div>`;});
+}
+function switchHandoverRole(role){
+  if(!HO_ROLES[role]||role===state.hoRole)return;
+  if(state.hoDirty&&!confirm('目前這份表單有尚未儲存的修改，確定要切換嗎？（未儲存的修改會保留在畫面上，切回來還在，但重新整理就會消失）'))return;
+  if((state.hoRole||'manager')==='manager')captureManagerTexts();
+  state.hoRole=role;renderFormDesigner();
 }
 function toggleDesigner(id,buttonId){
-  const box=$(id),btn=$(buttonId);if(!box)return;
+  const box=$(id);if(!box)return;
   const opening=box.style.display==='none'||!box.style.display;
-  document.querySelectorAll('.designer-collapsible').forEach(x=>{if(x!==box)x.style.display='none'});
-  document.querySelectorAll('.module-card button').forEach(x=>{if(x!==btn)x.textContent=x.id==='journalBtn'?'進入工作日誌設計':'進入交接清冊設計'});
-  box.style.display=opening?'block':'none';
-  if(btn)btn.textContent=opening?(id==='journalDesigner'?'收起工作日誌設計':'收起交接清冊設計'):(id==='journalDesigner'?'進入工作日誌設計':'進入交接清冊設計');
+  state.designerOpen=opening?id:'';
+  document.querySelectorAll('.designer-collapsible').forEach(x=>{x.style.display=x.id===state.designerOpen?'block':'none'});
+  $('checklistBtn').textContent=state.designerOpen==='checklistDesigner'?'收起交接清冊設計':'進入交接清冊設計';
+  $('journalBtn').textContent=state.designerOpen==='journalDesigner'?'收起工作日誌設計':'進入工作日誌設計';
+  if(opening&&id==='journalDesigner')renderJournalDesigner();
   if(opening)box.scrollIntoView({behavior:'smooth',block:'start'});
 }
-
-function renderPagesEditor(){const w=$('pagesEditor');w.innerHTML=state.config.pages.map((p,i)=>`<div class="page-card"><div class="move-buttons"><button class="icon-btn" onclick="movePage(${i},-1)" ${i===0?'disabled':''}>↑</button><button class="icon-btn" onclick="movePage(${i},1)" ${i===state.config.pages.length-1?'disabled':''}>↓</button></div><div class="page-number">第 ${i+1} 頁</div><div class="grow"><label>頁面／母標題</label><input value="${escapeAttr(p.title)}" oninput="state.config.pages[${i}].title=this.value"><label>頁面說明</label><input value="${escapeAttr(p.description||'')}" oninput="state.config.pages[${i}].description=this.value"></div><button class="danger" onclick="removePage(${i})">刪除頁面</button></div>`).join('')}
-function groupNamesForPage(pageId){const seen=[];for(const q of state.config.questions){if(q.pageId===pageId){const g=q.group||'填寫資料';if(!seen.includes(g))seen.push(g)}}return seen}
-function renderQuestionsEditor(){const w=$('questionsEditor');const pages=state.config.pages;w.innerHTML=pages.map((p,pi)=>{const groups=groupNamesForPage(p.id);const qs=groups.flatMap(g=>state.config.questions.map((q,i)=>({q,i})).filter(x=>x.q.pageId===p.id&&(x.q.group||'填寫資料')===g));return `<div class="designer-page-block"><h3>第 ${pi+1} 頁｜${escapeHtml(p.title)}</h3>${groups.map(g=>`<div class="group-block"><div class="group-heading"><strong>▰ ${escapeHtml(g)}</strong><span>${qs.filter(x=>(x.q.group||'填寫資料')===g).length} 題</span></div>${qs.filter(x=>(x.q.group||'填寫資料')===g).map(x=>questionCard(x.i,x.q,qs.filter(y=>(y.q.group||'填寫資料')===g).map(y=>y.i))).join('')}</div>`).join('')||'<div class="empty">這一頁目前沒有題目。</div>'}</div>`}).join('')}
-function questionCard(i,q,groupIndexes){const pos=groupIndexes.indexOf(i);return `<div class="question-card"><div class="move-buttons"><button class="icon-btn" onclick="moveQuestionWithinGroup(${i},-1)" ${pos<=0?'disabled':''}>↑</button><button class="icon-btn" onclick="moveQuestionWithinGroup(${i},1)" ${pos===groupIndexes.length-1?'disabled':''}>↓</button></div><div class="q-no">${pos+1}</div><div class="grow"><div class="editor-grid"><div><label>所在頁面</label><select onchange="changeQuestionPage(${i},this.value)">${state.config.pages.map(p=>`<option value="${escapeAttr(p.id)}" ${q.pageId===p.id?'selected':''}>${escapeHtml(p.title)}</option>`).join('')}</select></div><div><label>子標題／小分類</label><input value="${escapeAttr(q.group||'填寫資料')}" oninput="state.config.questions[${i}].group=this.value"></div><div class="wide"><label>題目文字</label><input value="${escapeAttr(q.label)}" oninput="state.config.questions[${i}].label=this.value"></div><div><label>回答格式</label><select onchange="state.config.questions[${i}].type=this.value"><option value="text" ${q.type==='text'?'selected':''}>單行文字</option><option value="textarea" ${q.type==='textarea'?'selected':''}>多行文字</option><option value="number" ${q.type==='number'?'selected':''}>數字</option><option value="date" ${q.type==='date'?'selected':''}>日期</option></select></div><div><label>是否必填</label><select onchange="state.config.questions[${i}].required=this.value==='true'"><option value="true" ${q.required?'selected':''}>必填</option><option value="false" ${!q.required?'selected':''}>非必填</option></select></div><div class="wide"><label>欄位代碼</label><input class="code-input" value="${escapeAttr(q.id)}" oninput="state.config.questions[${i}].id=this.value.replace(/[^A-Za-z0-9_]/g,'_')"></div></div></div><button class="danger" onclick="removeQuestion(${i})">刪除</button></div>`}
-function addPage(){state.config.pages.push({id:'page_'+Date.now(),title:'新頁面',description:''});renderFormDesigner()}
-function removePage(i){const p=state.config.pages[i];if(state.config.questions.some(q=>q.pageId===p.id)){alert('請先把這一頁的題目移到其他頁面。');return}if(state.config.pages.length<=1){alert('至少要保留一個頁面。');return}state.config.pages.splice(i,1);renderFormDesigner()}
-function movePage(i,d){const j=i+d;if(j<0||j>=state.config.pages.length)return;[state.config.pages[i],state.config.pages[j]]=[state.config.pages[j],state.config.pages[i]];renderPagesEditor();renderQuestionsEditor()}
-function addQuestion(){if(!state.config.pages.length)return;const p=state.config.pages[0];const groups=groupNamesForPage(p.id);state.config.questions.push({id:'new_field_'+Date.now(),label:'新題目',type:'text',required:false,pageId:p.id,group:groups[0]||'填寫資料'});renderQuestionsEditor()}
-function changeQuestionPage(i,pageId){state.config.questions[i].pageId=pageId;const groups=groupNamesForPage(pageId);if(!groups.includes(state.config.questions[i].group))state.config.questions[i].group=groups[0]||'填寫資料';renderQuestionsEditor()}
-function moveQuestionWithinGroup(i,d){const q=state.config.questions[i],same=state.config.questions.map((x,idx)=>({x,idx})).filter(o=>o.x.pageId===q.pageId&&(o.x.group||'填寫資料')===(q.group||'填寫資料')).map(o=>o.idx);const pos=same.indexOf(i),j=pos+d;if(j<0||j>=same.length)return;const target=same[j];[state.config.questions[i],state.config.questions[target]]=[state.config.questions[target],state.config.questions[i]];renderQuestionsEditor()}
-function removeQuestion(i){state.config.questions.splice(i,1);renderQuestionsEditor()}
-async function saveFormConfig(){const msg=$('formSaveMsg');state.config.title=$('siteTitle').value;state.config.subtitle=$('siteSubtitle').value;state.config.uiTexts={...(state.config.uiTexts||{}),companyTitle:$('companyTitle').value,companySubtitle:$('companySubtitle').value,companyIntro:$('companyIntro').value,companyLoginTitle:$('companyLoginTitle').value,companyLoginHint:$('companyLoginHint').value,staffLoginTitle:$('staffLoginTitle').value,staffLoginHint:$('staffLoginHint').value};const ids=state.config.questions.map(q=>q.id.trim());if(ids.some(x=>!x)||new Set(ids).size!==ids.length){msg.innerHTML='<span class="msg error inline-msg">欄位代碼不可空白或重複。</span>';return}try{await api('/api/admin/form-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(state.config)});msg.innerHTML='<span class="msg success inline-msg">✓ 已儲存！</span>';setTimeout(()=>msg.innerHTML='',4000)}catch(err){msg.innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}}
+function hoMark(){state.hoDirty=true}
+function renderPagesEditor(){const w=$('pagesEditor');const pages=dz().pages;w.innerHTML=pages.map((p,i)=>`<div class="page-card"><div class="move-buttons"><button class="icon-btn" onclick="movePage(${i},-1)" ${i===0?'disabled':''}>↑</button><button class="icon-btn" onclick="movePage(${i},1)" ${i===pages.length-1?'disabled':''}>↓</button></div><div class="page-number">第 ${i+1} 頁</div><div class="grow"><label>頁面／母標題</label><input value="${escapeAttr(p.title)}" oninput="dz().pages[${i}].title=this.value;hoMark()"><label>頁面說明</label><input value="${escapeAttr(p.description||'')}" oninput="dz().pages[${i}].description=this.value;hoMark()"></div><button class="danger" onclick="removePage(${i})">刪除頁面</button></div>`).join('')}
+function groupNamesForPage(pageId){const seen=[];for(const q of dz().questions){if(q.pageId===pageId){const g=q.group||'填寫資料';if(!seen.includes(g))seen.push(g)}}return seen}
+function renderQuestionsEditor(){const w=$('questionsEditor');const pages=dz().pages;w.innerHTML=pages.map((p,pi)=>{const groups=groupNamesForPage(p.id);const qs=groups.flatMap(g=>dz().questions.map((q,i)=>({q,i})).filter(x=>x.q.pageId===p.id&&(x.q.group||'填寫資料')===g));return `<div class="designer-page-block"><h3>第 ${pi+1} 頁｜${escapeHtml(p.title)}</h3>${groups.map(g=>`<div class="group-block"><div class="group-heading"><strong>▰ ${escapeHtml(g)}</strong><span>${qs.filter(x=>(x.q.group||'填寫資料')===g).length} 題</span></div>${qs.filter(x=>(x.q.group||'填寫資料')===g).map(x=>questionCard(x.i,x.q,qs.filter(y=>(y.q.group||'填寫資料')===g).map(y=>y.i))).join('')}</div>`).join('')||'<div class="empty">這一頁目前沒有題目。</div>'}</div>`}).join('')}
+function hoQuestionLabel(q){return `${q.label||q.id}（${q.id}）`}
+function questionCard(i,q,groupIndexes){
+  const f=dz(),pos=groupIndexes.indexOf(i),type=q.type||'text',hasOpts=HO_OPTION_TYPES.includes(type);
+  const cond=q.showIf&&q.showIf.q?q.showIf:null;const src=cond?f.questions.find(x=>x.id===cond.q):null;
+  const srcOpts=src?(src.type==='yesno'?['是','否']:(HO_OPTION_TYPES.includes(src.type)?(src.options||[]):null)):null;
+  const chips=[q.prefill?`<span class="ho-chip">⚡ ${escapeHtml((HO_PREFILL.find(x=>x[0]===q.prefill)||[])[1]||'')}</span>`:'',cond?`<span class="ho-chip cond">🔀 條件題</span>`:'',q.required?'<span class="ho-chip req">必填</span>':''].join('');
+  const valueInput=cond&&cond.op!=='filled'?(srcOpts&&srcOpts.length?`<select onchange="dz().questions[${i}].showIf.value=this.value;hoMark()">${srcOpts.map(o=>`<option value="${escapeAttr(o)}" ${String(cond.value)===String(o)?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>`:`<input value="${escapeAttr(cond.value||'')}" placeholder="答案等於…" oninput="dz().questions[${i}].showIf.value=this.value;hoMark()">`):'';
+  return `<div class="question-card"><div class="move-buttons"><button class="icon-btn" onclick="moveQuestionWithinGroup(${i},-1)" ${pos<=0?'disabled':''}>↑</button><button class="icon-btn" onclick="moveQuestionWithinGroup(${i},1)" ${pos===groupIndexes.length-1?'disabled':''}>↓</button></div><div class="q-no">${pos+1}</div><div class="grow">${chips?`<div class="ho-chips">${chips}</div>`:''}<div class="editor-grid">
+    <div><label>所在頁面</label><select onchange="changeQuestionPage(${i},this.value)">${f.pages.map(p=>`<option value="${escapeAttr(p.id)}" ${q.pageId===p.id?'selected':''}>${escapeHtml(p.title)}</option>`).join('')}</select></div>
+    <div><label>子標題／小分類</label><input value="${escapeAttr(q.group||'填寫資料')}" oninput="dz().questions[${i}].group=this.value;hoMark()" onchange="renderQuestionsEditor()"></div>
+    <div class="wide"><label>題目文字</label><input value="${escapeAttr(q.label)}" oninput="dz().questions[${i}].label=this.value;hoMark()"></div>
+    <div><label>回答格式</label><select onchange="setQuestionType(${i},this.value)">${HO_TYPES.map(([v,l])=>`<option value="${v}" ${type===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div><label>是否必填</label><select onchange="dz().questions[${i}].required=this.value==='true';hoMark();renderQuestionsEditor()"><option value="true" ${q.required?'selected':''}>必填</option><option value="false" ${!q.required?'selected':''}>非必填</option></select></div>
+    ${hasOpts?`<div class="wide"><label>選項（一行一個）</label><textarea rows="3" oninput="dz().questions[${i}].options=this.value.split(/\\n/).map(x=>x.trim()).filter(Boolean);hoMark()">${escapeHtml((q.options||[]).join('\n'))}</textarea></div>`:''}
+    <div class="wide"><label>填寫提示（顯示在題目下方，可留白）</label><input value="${escapeAttr(q.help||'')}" placeholder="例如：最後使用的號碼、剩餘本數" oninput="dz().questions[${i}].help=this.value;hoMark()"></div>
+    <div><label>⚡ 自動帶入</label><select onchange="dz().questions[${i}].prefill=this.value;hoMark();renderQuestionsEditor()">${HO_PREFILL.map(([v,l])=>`<option value="${v}" ${(q.prefill||'')===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div><label>🔀 只在這個條件成立時顯示</label><select onchange="setQuestionCondition(${i},this.value)"><option value="">一律顯示</option>${f.questions.filter(x=>x.id&&x.id!==q.id).map(x=>`<option value="${escapeAttr(x.id)}" ${cond&&cond.q===x.id?'selected':''}>${escapeHtml(hoQuestionLabel(x))}</option>`).join('')}</select></div>
+    ${cond?`<div class="wide ho-cond-row"><label>條件</label><div><select onchange="dz().questions[${i}].showIf.op=this.value;hoMark();renderQuestionsEditor()"><option value="eq" ${cond.op==='eq'||!cond.op?'selected':''}>答案等於</option><option value="neq" ${cond.op==='neq'?'selected':''}>答案不等於</option><option value="filled" ${cond.op==='filled'?'selected':''}>有填寫任何答案</option></select>${valueInput}</div></div>`:''}
+    <div class="wide"><label>欄位代碼（Word 範本使用）</label><input class="code-input" value="${escapeAttr(q.id)}" oninput="renameQuestionId(${i},this.value.replace(/[^A-Za-z0-9_]/g,'_'))" onchange="renderQuestionsEditor()"></div>
+  </div></div><button class="danger" onclick="removeQuestion(${i})">刪除</button></div>`;
+}
+function setQuestionType(i,type){const q=dz().questions[i];q.type=type;if(HO_OPTION_TYPES.includes(type)&&!(q.options||[]).length)q.options=['選項一','選項二'];if(!HO_OPTION_TYPES.includes(type))delete q.options;hoMark();renderQuestionsEditor()}
+function setQuestionCondition(i,srcId){const f=dz(),q=f.questions[i];if(!srcId){delete q.showIf;}else{const src=f.questions.find(x=>x.id===srcId);const first=src?.type==='yesno'?'是':(src?.options||[])[0]||'';q.showIf={q:srcId,op:'eq',value:first};}hoMark();renderQuestionsEditor()}
+function renameQuestionId(i,next){const f=dz(),prev=f.questions[i].id;f.questions[i].id=next;for(const x of f.questions){if(x.showIf&&x.showIf.q===prev)x.showIf.q=next;}hoMark()}
+function addPage(){captureManagerTexts();dz().pages.push({id:'page_'+Date.now(),title:'新頁面',description:''});hoMark();renderFormDesigner()}
+function removePage(i){const f=dz(),p=f.pages[i];if(f.questions.some(q=>q.pageId===p.id)){alert('請先把這一頁的題目移到其他頁面。');return}if(f.pages.length<=1){alert('至少要保留一個頁面。');return}captureManagerTexts();f.pages.splice(i,1);hoMark();renderFormDesigner()}
+function movePage(i,d){const f=dz(),j=i+d;if(j<0||j>=f.pages.length)return;[f.pages[i],f.pages[j]]=[f.pages[j],f.pages[i]];hoMark();renderPagesEditor();renderQuestionsEditor()}
+function addQuestion(){const f=dz();if(!f.pages.length)return;const p=f.pages[0];const groups=groupNamesForPage(p.id);f.questions.push({id:'new_field_'+Date.now(),label:'新題目',type:'text',required:false,pageId:p.id,group:groups[0]||'填寫資料'});hoMark();renderQuestionsEditor()}
+function changeQuestionPage(i,pageId){const f=dz();f.questions[i].pageId=pageId;const groups=groupNamesForPage(pageId);if(!groups.includes(f.questions[i].group))f.questions[i].group=groups[0]||'填寫資料';hoMark();renderQuestionsEditor()}
+function moveQuestionWithinGroup(i,d){const f=dz(),q=f.questions[i],same=f.questions.map((x,idx)=>({x,idx})).filter(o=>o.x.pageId===q.pageId&&(o.x.group||'填寫資料')===(q.group||'填寫資料')).map(o=>o.idx);const pos=same.indexOf(i),j=pos+d;if(j<0||j>=same.length)return;const target=same[j];[f.questions[i],f.questions[target]]=[f.questions[target],f.questions[i]];hoMark();renderQuestionsEditor()}
+function removeQuestion(i){const f=dz(),id=f.questions[i].id;const deps=f.questions.filter(x=>x.showIf&&x.showIf.q===id);if(deps.length&&!confirm(`有 ${deps.length} 題的顯示條件依賴這一題，刪除後那些題目會改成一律顯示。確定刪除嗎？`))return;for(const x of deps)delete x.showIf;f.questions.splice(i,1);hoMark();renderQuestionsEditor()}
+function captureManagerTexts(){if((state.hoRole||'manager')!=='manager'||!$('siteTitle'))return;state.config.title=$('siteTitle').value;state.config.subtitle=$('siteSubtitle').value;state.config.uiTexts={...(state.config.uiTexts||{}),companyTitle:$('companyTitle').value,companySubtitle:$('companySubtitle').value,companyIntro:$('companyIntro').value,companyLoginTitle:$('companyLoginTitle').value,companyLoginHint:$('companyLoginHint').value,staffLoginTitle:$('staffLoginTitle').value,staffLoginHint:$('staffLoginHint').value};}
+async function saveFormConfig(){
+  const msg=$('formSaveMsg'),role=state.hoRole||'manager',f=dz();
+  if(role==='manager')captureManagerTexts();else{f.title=$('hoFormTitle')?.value||f.title;f.subtitle=$('hoFormSubtitle')?.value??f.subtitle;}
+  const ids=f.questions.map(q=>String(q.id||'').trim());if(ids.some(x=>!x)||new Set(ids).size!==ids.length){msg.innerHTML='<span class="msg error inline-msg">欄位代碼不可空白或重複。</span>';return}
+  try{
+    if(role==='manager')await api('/api/admin/form-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(state.config)});
+    else{const r=await api('/api/admin/handover-forms/secretary',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)});state.handoverForms.secretary=r.form||f;}
+    state.hoDirty=false;msg.innerHTML=`<span class="msg success inline-msg">✓ ${HO_ROLES[role].label}已儲存！現場人員重新開啟就會套用。</span>`;setTimeout(()=>{if(msg)msg.innerHTML=''},5000)
+  }catch(err){msg.innerHTML=`<span class="msg error inline-msg">${escapeHtml(err.message)}</span>`}
+}
+async function resetHandoverForm(){
+  if(!confirm('確定要把秘書交接清冊還原成平台預設題目嗎？目前的秘書版題目設定會被覆蓋（已送出的紀錄不受影響）。'))return;
+  try{const r=await api('/api/admin/handover-forms/secretary/reset',{method:'POST'});state.handoverForms.secretary=r.form;state.hoDirty=false;renderFormDesigner();const msg=$('formSaveMsg');if(msg)msg.innerHTML='<span class="msg success inline-msg">✓ 已還原平台預設題目</span>';}catch(err){alert(err.message)}
+}
 
 async function loadCustomization(){
   if(!state.tenants.length) state.tenants=await api('/api/admin/tenants');
