@@ -943,7 +943,10 @@ app.get('/api/messages/recipients',requireMessageUser,(req,res)=>{
     ORDER BY CASE WHEN u.role='company_admin' THEN 0 ELSE 1 END, u.employee_id`).all(tenantId(req),u.id);
   const norm=v=>String(v||'').toLowerCase();
   const list=rows.map(r=>{
-    const communities=[...new Set(String(`${r.legacy_communities||''}、${r.assigned_communities||''}`).split('、').map(x=>x.trim()).filter(Boolean))];
+    // 公司管理員、純內勤不顯示社區；有新版案場指派時以指派為準，舊資料才退回舊表。
+    const isInternal=r.role==='company_admin'||r.work_type==='internal';
+    const source=isInternal?'':(String(r.assigned_communities||'').trim()||r.legacy_communities||'');
+    const communities=[...new Set(String(source).split('、').map(x=>x.trim()).filter(Boolean))];
     return {id:r.id,employee_id:r.employee_id,name:r.name,role:r.role,work_type:r.work_type||'site',position:r.position||'',job_category:r.job_category||'',job_level:r.job_level||'',communities,scope_label:r.role==='company_admin'?'公司管理員':(r.work_type==='hybrid'?'內勤＋駐點':r.work_type==='internal'?'公司內勤':'社區駐點')};
   }).filter(r=>{
     if(!q)return true; const hay=[r.name,r.employee_id,r.position,r.job_category,r.job_level,r.scope_label,...r.communities].map(norm).join(' '); return hay.includes(norm(q));

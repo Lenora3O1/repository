@@ -11,7 +11,9 @@
 /* 讓訊息區在固定高度內捲動，不把整個視窗撐開 */
 #messageCenterModal .chat-list-pane,#messageCenterModal .chat-pane{min-height:0;height:100%;overflow:hidden}
 #messageCenterModal .chat-messages,#messageCenterModal .conversation-list{min-height:0}
-#messageCenterModal .chat-close{position:absolute;right:14px;top:14px;z-index:6;width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:var(--chat-muted);font-size:1.45rem;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+#messageCenterModal .chat-close{position:absolute;right:14px;top:14px;z-index:6;width:36px;height:36px;padding:0;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:var(--chat-muted);font-size:1.45rem;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center}
+/* 同樣避免全站 button 的 padding 讓圖示偏移 */
+#messageCenterModal .chat-icon-btn,#messageCenterModal .chat-tool-btn,#messageCenterModal .chat-send{padding:0;line-height:1}
 #messageCenterModal .chat-close:hover{color:var(--chat-ink);background:#fff}
 #messageCenterModal button{font-family:inherit;min-height:0}
 

@@ -504,9 +504,25 @@ function ensureDefaultStaff() {
 }
 ensureDefaultStaff();
 // Existing V3 staff get the default community until the company manager customizes access.
-const unassignedStaff = db.prepare('SELECT u.id FROM staff_users u LEFT JOIN staff_communities sc ON sc.staff_id=u.id WHERE u.tenant_id=? GROUP BY u.id HAVING COUNT(sc.community_id)=0').all(defaultTenant.id);
+// 修正：舊版每次啟動都把「沒有綁社區的人」綁到預設公司的第一個社區（示範社區），
+// 連公司管理員、純內勤人員、已用新版設定指派案場的人員都會被綁上，移除後重啟又會被加回。
+// 現在只處理「完全沒有新版案場指派的舊版現場人員」。
+const unassignedStaff = db.prepare(`SELECT u.id FROM staff_users u
+  WHERE u.tenant_id=? AND u.role='staff' AND COALESCE(u.work_type,'site')<>'internal'
+    AND NOT EXISTS (SELECT 1 FROM staff_communities sc WHERE sc.staff_id=u.id)
+    AND NOT EXISTS (SELECT 1 FROM staff_work_assignments a WHERE a.staff_id=u.id)`).all(defaultTenant.id);
 const assignDefault = db.prepare('INSERT OR IGNORE INTO staff_communities (staff_id,community_id) VALUES (?,?)');
 for (const u of unassignedStaff) assignDefault.run(u.id, defaultCommunity.id);
+
+// 清理被誤綁的社區（可重複執行）：
+// 1) 公司管理員與純內勤人員不應有駐點社區。
+// 2) 已有新版案場指派的人員，以「人員設定」中的案場為準；舊表中不在指派內的社區（多半是被自動補上的示範社區）移除。
+try {
+  const r1 = db.prepare(`DELETE FROM staff_communities WHERE staff_id IN (SELECT id FROM staff_users WHERE role='company_admin' OR COALESCE(work_type,'site')='internal')`).run();
+  const r2 = db.prepare(`DELETE FROM staff_communities WHERE EXISTS (SELECT 1 FROM staff_work_assignments a WHERE a.staff_id=staff_communities.staff_id AND a.scope_type='site')
+      AND NOT EXISTS (SELECT 1 FROM staff_work_assignments a WHERE a.staff_id=staff_communities.staff_id AND a.scope_type='site' AND a.community_id=staff_communities.community_id)`).run();
+  if (r1.changes || r2.changes) console.log(`[社區綁定修復] 移除公司管理員／內勤的社區 ${r1.changes} 筆、與案場設定不符的舊綁定 ${r2.changes} 筆`);
+} catch (e) { console.error('[社區綁定修復] 失敗：', e.message); }
 
 // V5.6.2：更完整地修復同名公司被拆成多個 tenant 的問題。
 // 背景：若舊版部署／初始化曾建立第二個「同名公司」，公司管理員可能在 tenant A，

@@ -33,12 +33,12 @@ function ensureModal(){
     <div class="chat-layout">
       <aside class="chat-list-pane">
         <div class="chat-list-head"><div><div class="chat-eyebrow">內部溝通</div><h2>訊息</h2></div>
-          <div class="chat-list-actions"><button type="button" class="chat-icon-btn" id="chatNewBtn" title="找同事聊天" aria-label="找同事聊天">✎</button><button type="button" class="chat-icon-btn chat-close-mobile" id="chatCloseMobile" aria-label="關閉">×</button></div></div>
+          <div class="chat-list-actions"><button type="button" class="chat-icon-btn" id="chatNewBtn" title="找同事聊天" aria-label="找同事聊天">✎</button><button type="button" class="chat-icon-btn chat-close-mobile" id="chatCloseMobile" aria-label="關閉"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></button></div></div>
         <div class="chat-search"><span aria-hidden="true">🔍</span><input id="chatSearch" placeholder="搜尋聊天或同事…" autocomplete="off"></div>
         <div id="conversationList" class="conversation-list"></div>
       </aside>
       <section class="chat-pane" id="chatPane"></section>
-      <button type="button" class="chat-close" id="chatClose" aria-label="關閉訊息">×</button>
+      <button type="button" class="chat-close" id="chatClose" aria-label="關閉訊息"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></button>
     </div></div>`;
   document.body.appendChild(modal);document.body.classList.add('modal-open');
   $('chatClose').addEventListener('click',close);$('chatCloseMobile').addEventListener('click',close);
