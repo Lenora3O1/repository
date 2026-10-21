@@ -577,7 +577,7 @@ function menuPermissionKey(item,scope='staff'){
   // SOP 在公司後台與現場工作台是兩種不同權限；不能讓「案場 SOP」被誤判成公司 SOP 管理。
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
-  if(scope==='company' && /^equip-/.test(String(item?.action||''))) return 'company-general-affairs';
+  if(scope==='company' && (/^equip-(inventory|requests|sites)$/.test(String(item?.action||''))||/設備清冊|設備申請紀錄|進駐設備/.test(String(item?.label||'')))) return 'company-general-affairs';
   const rules=[
     // 只比對公司後台的人員管理項目；不可用 'staff' 子字串，否則 staff-schedule、staff-attendance 等現場目錄
     // 都會被判成「公司人員管理」而在現場工作台被整組隱藏。

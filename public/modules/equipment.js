@@ -206,11 +206,11 @@
   async function renderCompany(el,view,label){
     injectStyle();if(view)CS.view=view;
     const m=await api('/api/company/equip/meta');CS.m=m;
-    const subs=[['inventory','📋 設備清冊'],['requests','🗂 設備申請紀錄'],['sites','🏢 社區進駐設備'],['apply','🧰 我要借用']];
+    const subs=[['inventory','📋 設備清冊'],['apply','🧰 設備申請'],['requests','🗂 設備申請紀錄'],['sites','🏢 社區管理（進駐設備）']];
     const todo=m.counts.pending_ga+m.counts.approved+m.counts.returning;
-    el.innerHTML=`<div class="eyebrow">🧰 總務管理</div><h1>${esc(label||({inventory:'設備清冊',requests:'設備申請紀錄',sites:'社區進駐設備',apply:'設備申請'})[CS.view])}</h1>
+    el.innerHTML=`<div class="eyebrow">🧰 總務管理</div><h1>${esc(label||({inventory:'設備清冊',requests:'設備申請紀錄',sites:'社區管理（進駐設備）',apply:'設備申請'})[CS.view])}</h1>
       <div class="eq-sub">${subs.map(([k,l])=>`<button type="button" data-view="${k}" class="${CS.view===k?'':'secondary'}">${l}${k==='requests'&&todo?`<span class="badge" style="display:inline-block;background:${CS.view===k?'#fff':'#A44528'};color:${CS.view===k?'#A44528':'#fff'};border-radius:999px;font-size:.72rem;padding:0 7px;margin-left:5px">${todo}</span>`:''}</button>`).join('')}</div><div id="eqC"><div class="profile-loading">讀取中…</div></div>`;
-    el.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{CS.view=b.dataset.view;el.querySelector('h1').textContent=({inventory:'設備清冊',requests:'設備申請紀錄',sites:'社區進駐設備',apply:'設備申請'})[CS.view];renderCompany(el,CS.view,el.querySelector('h1').textContent).catch(e=>alert(e.message));}));
+    el.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{CS.view=b.dataset.view;el.querySelector('h1').textContent=({inventory:'設備清冊',requests:'設備申請紀錄',sites:'社區管理（進駐設備）',apply:'設備申請'})[CS.view];renderCompany(el,CS.view,el.querySelector('h1').textContent).catch(e=>alert(e.message));}));
     const box=el.querySelector('#eqC');const again=()=>renderCompany(el,CS.view,el.querySelector('h1').textContent);
     if(CS.view==='inventory')return inventory(box,m,again);
     if(CS.view==='requests')return records(box,m,again);
