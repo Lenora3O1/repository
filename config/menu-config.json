@@ -316,6 +316,30 @@
       "enabled": true
     },
     {
+      "id": "company-payroll-stats",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "人員薪資統計表",
+      "action": "payroll-stats",
+      "enabled": true
+    },
+    {
+      "id": "company-payroll-slips",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "人員薪資單",
+      "action": "payroll-slips",
+      "enabled": true
+    },
+    {
+      "id": "company-payroll-advances",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "借資",
+      "action": "payroll-advances",
+      "enabled": true
+    },
+    {
       "id": "company-general-affairs",
       "parentId": null,
       "icon": "🧰",
@@ -352,7 +376,7 @@
       "parentId": null,
       "icon": "🧑‍💼",
       "label": "人事管理",
-      "action": "manage-staff",
+      "action": "hr-records",
       "enabled": true
     },
     {
