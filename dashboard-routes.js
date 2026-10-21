@@ -3,7 +3,7 @@
 'use strict';
 
 module.exports = function registerDashboardRoutes(app, d) {
-  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll } = d;
+  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip } = d;
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const twNow = () => new Date(Date.now() + 8 * 3600e3);
   const todayTW = () => twNow().toISOString().slice(0, 10);
@@ -133,10 +133,18 @@ module.exports = function registerDashboardRoutes(app, d) {
     // ---------- 總務 ----------
     if (!boss && (has(u, 'company-general-affairs') || has(u, 'manage-templates')) && u.role !== 'company_admin') {
       cards.push({ id: 'ga', size: 'md', icon: '📦', title: '總務常用', items: [
-        { text: '公司資源', value: '開啟', action: { action: 'company-resources', label: '總務管理' } },
+        { text: '設備清冊', value: '開啟', action: { action: 'equip-inventory', label: '設備清冊' } },
+        { text: '社區進駐設備', value: '開啟', action: { action: 'equip-sites', label: '社區進駐設備' } },
         { text: '公司制式文件', value: '開啟', action: { action: 'manage-templates', label: '公司制式文件' } },
         { text: '禮品推放', value: '開啟', action: { action: 'gifts', label: '禮品推放' } },
       ] });
+    }
+
+    // ---------- 設備借用（總務）----------
+    if (equip && safe(() => equip.isGA(u), false)) {
+      const e = safe(() => equip.dashboard(tid), null);
+      const todo = e ? e.pending_ga + e.approved + e.returning : 0;
+      if (e && (todo || e.overdue || (!boss && u.role !== 'company_admin'))) cards.push({ id: 'equip', size: 'sm', icon: '🧰', title: '設備借用', value: todo, sub: `待處理｜出借中 ${e.lent}${e.overdue ? `・逾期 ${e.overdue}` : ''}${e.repair ? `・維修中 ${e.repair}` : ''}`, tone: e.overdue ? 'alert' : '', action: { action: 'equip-requests', label: '設備申請紀錄' } });
     }
 
     // ---------- 部門主管／部門經理：我的部門今天 ----------
