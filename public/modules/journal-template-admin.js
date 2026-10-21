@@ -18,26 +18,26 @@
 .jta-row input[type=text],.jta-row input:not([type]),.jta-row select{margin:0;flex:1;min-width:0}
 .jta-row .jta-switch{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-weight:700;font-size:.85rem}
 .jta-row .jta-switch input{width:auto;margin:0}
-.jta-row small{color:#6a7a73}
+.jta-row small{color:#7A6E6A}
 .jta-parts{display:flex;flex-wrap:wrap;gap:12px;margin:2px 0 0 38px;font-size:.84rem}
 .jta-parts label{display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:600}
 .jta-parts input{width:auto;margin:0}
 .jta-sec-block{display:flex;flex-direction:column;gap:2px}
-.jta-x{border:0;background:transparent;color:#a0aca7;font-size:1.1rem;padding:4px 8px;min-height:0;cursor:pointer;border-radius:6px}
+.jta-x{border:0;background:transparent;color:#ACA3A0;font-size:1.1rem;padding:4px 8px;min-height:0;cursor:pointer;border-radius:6px}
 .jta-x:hover{background:#fdecea;color:#c0392b}
-.jta-add{border:1px dashed #b9cfc4;background:#fff;color:var(--accent-dark,#1B4D37);padding:7px 12px;border-radius:9px;font-weight:700;min-height:0;cursor:pointer;font-size:.86rem;margin-top:8px}
+.jta-add{border:1px dashed #CFBEB9;background:#fff;color:var(--accent-dark,#422A26);padding:7px 12px;border-radius:9px;font-weight:700;min-height:0;cursor:pointer;font-size:.86rem;margin-top:8px}
 .jta-mode{display:flex;gap:18px;flex-wrap:wrap}
 .jta-mode label{display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:700}
 .jta-mode input{width:auto;margin:0}
 .jta-custom{border:1px solid var(--line,#ddd);border-radius:12px;padding:12px;background:#fff;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px 10px;align-items:end}
-.jta-custom label{display:block;font-size:.76rem;font-weight:700;color:#5f7068;margin:0 0 3px}
+.jta-custom label{display:block;font-size:.76rem;font-weight:700;color:#70635F;margin:0 0 3px}
 .jta-custom input,.jta-custom select,.jta-custom textarea{margin:0;width:100%;box-sizing:border-box}
 .jta-custom .wide{grid-column:1/-1}
 .jta-usage{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-.jta-usage span{background:#f4f9f6;border:1px solid #d6e8de;border-radius:999px;padding:3px 12px;font-size:.82rem}
-.jta-preview{position:fixed;inset:0;z-index:10040;background:rgba(18,32,26,.55);display:flex;align-items:center;justify-content:center;padding:20px}
+.jta-usage span{background:#F9F7F4;border:1px solid #E4DCDA;border-radius:999px;padding:3px 12px;font-size:.82rem}
+.jta-preview{position:fixed;inset:0;z-index:10040;background:rgba(30,21,20,.55);display:flex;align-items:center;justify-content:center;padding:20px}
 .jta-preview-box{background:#fff;border-radius:16px;width:min(980px,100%);height:min(92vh,1200px);display:flex;flex-direction:column;overflow:hidden}
-.jta-preview-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #e1e9e5}
+.jta-preview-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #E9E3E1}
 .jta-preview-bar strong{flex:1}.jta-preview-bar button{padding:8px 14px;min-height:0}
 .jta-preview iframe{flex:1;border:0;width:100%}
 @media(max-width:900px){.jta-grid{grid-template-columns:1fr}.jta-custom{grid-template-columns:1fr 1fr}}
@@ -49,7 +49,7 @@
 
   function sectionList(kind){
     const list=S.t[`${kind}_sections`];const meta=Object.fromEntries((S.builtins[`${kind}_sections`]||[]).map(x=>[x.key,x]));
-    return `<div class="jta-list">${list.map((s,i)=>{const m=meta[s.key]||{};return `<div class="jta-sec-block"><div class="jta-row ${s.on===false?'off':''}"><label class="jta-switch"><input type="checkbox" data-sec="${kind}" data-i="${i}" data-f="on" ${s.on!==false?'checked':''}> 記錄</label><input data-sec="${kind}" data-i="${i}" data-f="label" value="${esc(s.label)}" aria-label="區塊名稱" placeholder="${esc(m.label||'')}"><button type="button" class="icon-btn" data-mv="${kind}" data-i="${i}" data-d="-1" ${i===0?'disabled':''} title="往上">↑</button><button type="button" class="icon-btn" data-mv="${kind}" data-i="${i}" data-d="1" ${i===list.length-1?'disabled':''} title="往下">↓</button></div>${m.hint?`<small style="margin-left:38px;color:#6a7a73">${esc(m.hint)}</small>`:''}${m.parts?`<div class="jta-parts">${Object.entries(m.parts).map(([pk,pl])=>`<label><input type="checkbox" data-sec="${kind}" data-i="${i}" data-part="${pk}" ${s.parts?.[pk]!==false?'checked':''} ${s.on===false?'disabled':''}> ${esc(pl)}</label>`).join('')}</div>`:''}</div>`;}).join('')}</div>`;
+    return `<div class="jta-list">${list.map((s,i)=>{const m=meta[s.key]||{};return `<div class="jta-sec-block"><div class="jta-row ${s.on===false?'off':''}"><label class="jta-switch"><input type="checkbox" data-sec="${kind}" data-i="${i}" data-f="on" ${s.on!==false?'checked':''}> 記錄</label><input data-sec="${kind}" data-i="${i}" data-f="label" value="${esc(s.label)}" aria-label="區塊名稱" placeholder="${esc(m.label||'')}"><button type="button" class="icon-btn" data-mv="${kind}" data-i="${i}" data-d="-1" ${i===0?'disabled':''} title="往上">↑</button><button type="button" class="icon-btn" data-mv="${kind}" data-i="${i}" data-d="1" ${i===list.length-1?'disabled':''} title="往下">↓</button></div>${m.hint?`<small style="margin-left:38px;color:#7A6E6A">${esc(m.hint)}</small>`:''}${m.parts?`<div class="jta-parts">${Object.entries(m.parts).map(([pk,pl])=>`<label><input type="checkbox" data-sec="${kind}" data-i="${i}" data-part="${pk}" ${s.parts?.[pk]!==false?'checked':''} ${s.on===false?'disabled':''}> ${esc(pl)}</label>`).join('')}</div>`:''}</div>`;}).join('')}</div>`;
   }
   function simpleList(id,items,ph){return `<div class="jta-list" id="${id}">${items.map((v,i)=>`<div class="jta-row"><input value="${esc(v)}" data-list="${id}" data-i="${i}" placeholder="${esc(ph)}"><button type="button" class="icon-btn" data-lmv="${id}" data-i="${i}" data-d="-1" ${i===0?'disabled':''}>↑</button><button type="button" class="icon-btn" data-lmv="${id}" data-i="${i}" data-d="1" ${i===items.length-1?'disabled':''}>↓</button><button type="button" class="jta-x" data-lrm="${id}" data-i="${i}" aria-label="刪除">×</button></div>`).join('')}</div><button type="button" class="jta-add" data-ladd="${id}">＋ 新增</button>`;}
   const LISTS={jtaMeters:{get:()=>S.t.meters,label:x=>x.label,set:(x,v)=>{x.label=v;},make:()=>({key:'',label:''})},jtaRoles:{get:()=>S.t.roles,label:x=>x,set:null,make:()=>''},jtaCats:{get:()=>S.t.tracking_categories,label:x=>x.label,set:(x,v)=>{x.label=v;},make:()=>({key:'',label:''})}};

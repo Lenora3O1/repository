@@ -10,12 +10,12 @@
     s.textContent=`
 .la-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 16px}
 .la-grid label{display:flex;flex-direction:column;gap:5px;font-weight:700;font-size:.86rem;margin:0}
-.la-grid input,.la-grid select,.la-tbl input,.la-tbl select{margin:0;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #cbd8d2;border-radius:8px;background:#fff;font:inherit}
+.la-grid input,.la-grid select,.la-tbl input,.la-tbl select{margin:0;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #D8CECB;border-radius:8px;background:#fff;font:inherit}
 .la-grid .chk{flex-direction:row;align-items:center;gap:8px;font-weight:600}.la-grid .chk input{width:auto}
-.la-sec{margin:18px 0 8px;font-weight:800;color:#1f5c42;border-top:1px solid #e1e9e5;padding-top:12px;font-size:1rem}
-.la-tbl{border-collapse:collapse;width:100%;font-size:.86rem}.la-tbl th,.la-tbl td{padding:6px 8px;border-bottom:1px solid #eef2f0;text-align:left;vertical-align:middle}.la-tbl th{background:#f1f7f3;font-size:.78rem}
-.la-tbl td small{color:#7a8a83}.la-tbl label{white-space:nowrap}
-.la-wrap{overflow:auto;border:1px solid #e1e9e5;border-radius:12px}
+.la-sec{margin:18px 0 8px;font-weight:800;color:#4E312D;border-top:1px solid #E9E3E1;padding-top:12px;font-size:1rem}
+.la-tbl{border-collapse:collapse;width:100%;font-size:.86rem}.la-tbl th,.la-tbl td{padding:6px 8px;border-bottom:1px solid #F2EFEE;text-align:left;vertical-align:middle}.la-tbl th{background:#F6F4F2;font-size:.78rem}
+.la-tbl td small{color:#8A7E7A}.la-tbl label{white-space:nowrap}
+.la-wrap{overflow:auto;border:1px solid #E9E3E1;border-radius:12px}
 .la-note{background:#fff7e5;border:1px solid #efd99c;border-radius:10px;padding:9px 12px;margin:8px 0;color:#7a5200;font-size:.86rem}
 .la-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}.la-bar select{width:auto;margin:0}.la-bar button{padding:7px 14px;min-height:0;margin:0}
 `;
@@ -92,7 +92,7 @@
     el.querySelectorAll('[data-sdn]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.sdn);[P.flow[i+1],P.flow[i]]=[P.flow[i],P.flow[i+1]];redraw();}));
     el.querySelector('#laFlowAdd').addEventListener('click',()=>{if(P.flow.length>=8){alert('最多 8 關');return;}P.flow.push({id:'',name:'',by:'position',position:'',scope:'company',min_days:0});redraw();});
     el.querySelector('#laCusAdd').addEventListener('click',()=>{P.custom.push({name:'',pay:1,quota:1,per:'year',proof:'none',reason:false,att:'none',enabled:true});redraw();});
-    el.querySelector('#laSave').addEventListener('click',async()=>{try{const r=await api(`/api/admin/leave-policies/${S.tid}`,J('PUT',{policy:P}));S.list=await api('/api/admin/leave-policies');await draw(el);el.querySelector('#laNotes').innerHTML=`<div class="pr-ok" style="background:#e3f2e9;border:1px solid #bfe0cc;border-radius:10px;padding:9px 12px;color:#1f6b43">✓ 已儲存。</div>${(r.notes||[]).map(x=>`<div class="la-note">${esc(x)}</div>`).join('')}`;}catch(e){alert(e.message);}});
+    el.querySelector('#laSave').addEventListener('click',async()=>{try{const r=await api(`/api/admin/leave-policies/${S.tid}`,J('PUT',{policy:P}));S.list=await api('/api/admin/leave-policies');await draw(el);el.querySelector('#laNotes').innerHTML=`<div class="pr-ok" style="background:#E8EEDF;border:1px solid #C9D6B5;border-radius:10px;padding:9px 12px;color:#3E5328">✓ 已儲存。</div>${(r.notes||[]).map(x=>`<div class="la-note">${esc(x)}</div>`).join('')}`;}catch(e){alert(e.message);}});
     el.querySelector('#laReset')?.addEventListener('click',async()=>{if(!confirm('改回平台預設的請假規則？'))return;try{await api(`/api/admin/leave-policies/${S.tid}`,{method:'DELETE'});S.list=await api('/api/admin/leave-policies');await draw(el);}catch(e){alert(e.message);}});
   }
   window.LeaveAdminModule={load};

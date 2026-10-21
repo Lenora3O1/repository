@@ -2584,4 +2584,7 @@ require('./leave-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantI
 handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
 
+// ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
+require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll});
+
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));

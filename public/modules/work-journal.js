@@ -20,42 +20,42 @@
     if(document.getElementById('workJournalStyle'))return;
     const s=document.createElement('style');s.id='workJournalStyle';
     s.textContent=`
-.wj{--wj-line:#e1e9e5;--wj-soft:#f4f8f6;--wj-muted:#5f6f68}
+.wj{--wj-line:#E9E3E1;--wj-soft:#F8F6F4;--wj-muted:#6F635F}
 .wj-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
 .wj-head h1{margin:4px 0 4px}
 .wj-head p{margin:0;color:var(--wj-muted)}
 .wj-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:16px 0 4px}
 .wj-bar select{width:auto;min-width:160px;margin:0}
-.wj-datenav{display:inline-flex;align-items:center;border:1px solid #d6e2dc;border-radius:10px;overflow:hidden;background:#fff}
-.wj-datenav button{border:0;background:transparent;color:var(--accent-dark,#1B4D37);padding:8px 12px;min-height:0;font-size:1rem;border-radius:0}
+.wj-datenav{display:inline-flex;align-items:center;border:1px solid #E2D9D6;border-radius:10px;overflow:hidden;background:#fff}
+.wj-datenav button{border:0;background:transparent;color:var(--accent-dark,#422A26);padding:8px 12px;min-height:0;font-size:1rem;border-radius:0}
 .wj-datenav button:hover{background:var(--wj-soft)}
-.wj-datenav input{border:0;border-left:1px solid #e3ebe7;border-right:1px solid #e3ebe7;padding:8px 10px;margin:0;font:inherit;width:auto;border-radius:0}
-.wj-datenav .wj-week-label{padding:8px 12px;font-weight:700;white-space:nowrap;border-left:1px solid #e3ebe7;border-right:1px solid #e3ebe7}
+.wj-datenav input{border:0;border-left:1px solid #EBE5E3;border-right:1px solid #EBE5E3;padding:8px 10px;margin:0;font:inherit;width:auto;border-radius:0}
+.wj-datenav .wj-week-label{padding:8px 12px;font-weight:700;white-space:nowrap;border-left:1px solid #EBE5E3;border-right:1px solid #EBE5E3}
 .wj-actions{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
 .wj-actions button{padding:8px 14px;min-height:0}
 .wj-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 0;font-size:.86rem;color:var(--wj-muted)}
 .wj-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-weight:700;font-size:.82rem}
-.wj-pill.draft{background:#fff3e0;color:#a35a00}.wj-pill.submitted{background:#e3f2e9;color:#1f6b43}
+.wj-pill.draft{background:#fff3e0;color:#a35a00}.wj-pill.submitted{background:#E8EEDF;color:#3E5328}
 .wj-save{margin-left:auto}
 .wj-sec{margin-top:16px}
 .wj-sec>h2{display:flex;align-items:center;gap:10px;font-size:1.12rem;margin:0 0 4px}
-.wj-sec>h2 .wj-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent,#2E6B4F);color:#fff;font-size:.9rem;flex:0 0 28px}
+.wj-sec>h2 .wj-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent,#5D403C);color:#fff;font-size:.9rem;flex:0 0 28px}
 .wj-sec>.wj-hint{margin:0 0 12px;color:var(--wj-muted);font-size:.84rem}
-.wj-sub{font-weight:800;margin:14px 0 6px;color:var(--ink,#1d2a25)}
+.wj-sub{font-weight:800;margin:14px 0 6px;color:var(--ink,#2A201D)}
 .wj-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--wj-line);border-radius:12px;overflow:hidden;margin:0 0 6px;background:#fff}
-.wj-table th{background:var(--wj-soft);font-size:.8rem;color:#4c5d56;text-align:left;padding:8px 10px;border-bottom:1px solid var(--wj-line);white-space:nowrap}
-.wj-table td{padding:6px 8px;border-bottom:1px solid #eef2f0;vertical-align:top}
+.wj-table th{background:var(--wj-soft);font-size:.8rem;color:#5D504C;text-align:left;padding:8px 10px;border-bottom:1px solid var(--wj-line);white-space:nowrap}
+.wj-table td{padding:6px 8px;border-bottom:1px solid #F2EFEE;vertical-align:top}
 .wj-table tr:last-child td{border-bottom:0}
 .wj-table input,.wj-table textarea,.wj-table select{width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font:inherit;font-size:.92rem;border:1px solid transparent;border-radius:8px;background:transparent}
-.wj-table input:hover,.wj-table textarea:hover{border-color:#e3ebe7}
-.wj-table input:focus,.wj-table textarea:focus,.wj-table select:focus{border-color:var(--accent,#2E6B4F);background:#fff;outline:none}
+.wj-table input:hover,.wj-table textarea:hover{border-color:#EBE5E3}
+.wj-table input:focus,.wj-table textarea:focus,.wj-table select:focus{border-color:var(--accent,#5D403C);background:#fff;outline:none}
 .wj-table textarea{resize:vertical;min-height:38px}
 .wj-table .no{width:44px;text-align:center;color:var(--wj-muted);font-size:.85rem;padding-top:14px}
 .wj-table .num{width:80px}.wj-table .num input{text-align:right}
 .wj-table .act{width:40px;text-align:center}
-.wj-del{border:0;background:transparent;color:#a0aca7;font-size:1.1rem;padding:4px 8px;min-height:0;cursor:pointer;border-radius:6px}
+.wj-del{border:0;background:transparent;color:#ACA3A0;font-size:1.1rem;padding:4px 8px;min-height:0;cursor:pointer;border-radius:6px}
 .wj-del:hover{background:#fdecea;color:#c0392b}
-.wj-add{border:1px dashed #b9cfc4;background:#fff;color:var(--accent-dark,#1B4D37);padding:7px 12px;border-radius:9px;font-weight:700;min-height:0;cursor:pointer;font-size:.86rem}
+.wj-add{border:1px dashed #CFBEB9;background:#fff;color:var(--accent-dark,#422A26);padding:7px 12px;border-radius:9px;font-weight:700;min-height:0;cursor:pointer;font-size:.86rem}
 .wj-add:hover{background:var(--wj-soft)}
 .wj-total{font-size:.86rem;color:var(--wj-muted);margin:2px 0 10px}
 .wj-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
@@ -66,39 +66,39 @@
 .wj-meter{display:grid;grid-template-columns:160px 150px 110px minmax(0,1fr);gap:12px;align-items:center;border:1px solid var(--wj-line);border-radius:12px;padding:10px 14px;background:#fff}
 .wj-meter strong{font-size:.95rem}
 .wj-meter input{margin:0;text-align:right}
-.wj-meter .wj-usage{font-weight:800;color:var(--accent-dark,#1B4D37)}
+.wj-meter .wj-usage{font-weight:800;color:var(--accent-dark,#422A26)}
 .wj-meter .wj-usage small{display:block;font-weight:500;color:var(--wj-muted);font-size:.74rem}
 .wj-spark{display:flex;gap:6px;overflow-x:auto;font-size:.74rem;color:var(--wj-muted)}
 .wj-spark span{flex:0 0 auto;background:var(--wj-soft);border-radius:8px;padding:3px 8px;text-align:center;line-height:1.3}
-.wj-spark b{display:block;color:var(--ink,#1d2a25);font-size:.8rem}
+.wj-spark b{display:block;color:var(--ink,#2A201D);font-size:.8rem}
 .wj-overview{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:8px}
 .wj-overview label{display:flex;flex-direction:column;gap:4px;font-size:.76rem;color:var(--wj-muted);font-weight:700}
 .wj-overview input{margin:0;text-align:center;padding:7px 4px}
 .wj-cat{border:1px solid var(--wj-line);border-radius:14px;margin:0 0 12px;background:#fff;overflow:hidden}
 .wj-cat-head{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--wj-soft);font-weight:800}
 .wj-cat-head small{color:var(--wj-muted);font-weight:600}
-.wj-track{padding:12px 14px;border-top:1px solid #eef2f0;display:grid;grid-template-columns:60px minmax(0,1fr);gap:10px}
-.wj-track.closed{background:#fafbfa}
-.wj-track.closed .wj-track-content{color:#7a8a83;text-decoration:line-through}
+.wj-track{padding:12px 14px;border-top:1px solid #F2EFEE;display:grid;grid-template-columns:60px minmax(0,1fr);gap:10px}
+.wj-track.closed{background:#FBFAFA}
+.wj-track.closed .wj-track-content{color:#8A7E7A;text-decoration:line-through}
 .wj-track-date{font-size:.82rem;color:var(--wj-muted);font-weight:700;padding-top:2px}
 .wj-track-content{font-weight:600;white-space:pre-wrap}
 .wj-track-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
-.wj-ups{margin:8px 0 0;padding:0;list-style:none;border-left:2px solid #d6e5dd}
+.wj-ups{margin:8px 0 0;padding:0;list-style:none;border-left:2px solid #E2DBD9}
 .wj-ups li{padding:3px 0 3px 10px;font-size:.88rem;display:flex;gap:8px;align-items:flex-start}
-.wj-ups li b{color:var(--accent-dark,#1B4D37);flex:0 0 auto}
+.wj-ups li b{color:var(--accent-dark,#422A26);flex:0 0 auto}
 .wj-ups li span{flex:1;white-space:pre-wrap}
 .wj-upform{display:flex;gap:6px;margin-top:8px}
 .wj-upform input{margin:0;padding:7px 10px;font-size:.88rem}
 .wj-upform input[type=date]{width:150px;flex:0 0 150px}
 .wj-upform button{padding:7px 12px;min-height:0;white-space:nowrap}
-.wj-newtrack{display:flex;gap:6px;padding:10px 14px;border-top:1px dashed #d6e5dd}
+.wj-newtrack{display:flex;gap:6px;padding:10px 14px;border-top:1px dashed #E2DBD9}
 .wj-newtrack input{margin:0;padding:7px 10px}
 .wj-newtrack input[type=date]{width:150px;flex:0 0 150px}
 .wj-newtrack button{padding:7px 12px;min-height:0;white-space:nowrap}
 .wj-link{border:0;background:transparent;color:var(--wj-muted);font-size:.8rem;padding:2px 4px;min-height:0;cursor:pointer;text-decoration:underline}
-.wj-link:hover{color:var(--accent-dark,#1B4D37)}
+.wj-link:hover{color:var(--accent-dark,#422A26)}
 .wj-text{width:100%;box-sizing:border-box;min-height:110px;margin:0;font:inherit;line-height:1.6}
-.wj-auto{border:1px solid var(--wj-line);border-radius:12px;background:#fbfdfc;padding:12px 14px;margin-bottom:10px}
+.wj-auto{border:1px solid var(--wj-line);border-radius:12px;background:#FDFCFB;padding:12px 14px;margin-bottom:10px}
 .wj-auto-tag{display:inline-block;font-size:.72rem;font-weight:800;color:#2f5d8a;background:#e5eefb;border-radius:999px;padding:2px 8px;margin-left:6px;vertical-align:middle}
 .wj-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:10px}
 .wj-kpi{border:1px solid var(--wj-line);border-radius:12px;padding:10px 12px;background:#fff}
@@ -107,7 +107,7 @@
 .wj-warn{color:#b3261e;font-weight:800}
 .wj-ro input,.wj-ro textarea,.wj-ro select,.wj-ro .wj-add,.wj-ro .wj-del,.wj-ro .wj-upform,.wj-ro .wj-newtrack,.wj-ro .wj-link{pointer-events:none}
 .wj-ro .wj-add,.wj-ro .wj-del,.wj-ro .wj-upform,.wj-ro .wj-newtrack,.wj-ro .wj-link,.wj-ro .wj-only-edit{display:none!important}
-.wj-lock{margin-top:12px;padding:10px 14px;border-radius:10px;background:#e3f2e9;color:#1f6b43;font-weight:700}
+.wj-lock{margin-top:12px;padding:10px 14px;border-radius:10px;background:#E8EEDF;color:#3E5328;font-weight:700}
 .wj-settings label{display:block;font-weight:700;margin:12px 0 6px}
 .wj-settings .wj-radio{display:flex;gap:16px}
 .wj-settings .wj-radio label{display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:600}
@@ -122,7 +122,7 @@
 .wj-inherit{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:.72rem;font-weight:700;background:#e6f2fb;color:#1e5f8c}
 .wj-inherit.own{background:#fff3e0;color:#a35a00}
 @media(max-width:640px){.wj-custom-item{grid-template-columns:1fr}}
-.wj-hist button{display:flex;justify-content:space-between;width:100%;text-align:left;border:0;border-bottom:1px solid #eef2f0;background:#fff;color:inherit;padding:10px 6px;min-height:0;cursor:pointer;border-radius:0}
+.wj-hist button{display:flex;justify-content:space-between;width:100%;text-align:left;border:0;border-bottom:1px solid #F2EFEE;background:#fff;color:inherit;padding:10px 6px;min-height:0;cursor:pointer;border-radius:0}
 .wj-hist button:hover{background:var(--wj-soft)}
 @media(max-width:900px){.wj-two{grid-template-columns:1fr}.wj-overview{grid-template-columns:repeat(3,minmax(0,1fr))}.wj-meter{grid-template-columns:1fr 1fr}.wj-meter .wj-spark{grid-column:1/-1}}
 @media(max-width:640px){.wj-sec{overflow:hidden}.wj .wj-table{table-layout:fixed;width:100%;min-width:0}.wj .wj-reno-wrap .wj-table{min-width:560px}.wj-table th{white-space:normal}.wj-table input,.wj-table textarea,.wj-table select{min-width:0;padding:6px 6px}.wj-table td{padding:4px 4px}.wj-table .act{width:30px}.wj-table .num{width:56px}.wj-pk td:first-child{width:72px;font-size:.8rem}.wj-actions{margin-left:0;width:100%}.wj-actions button{flex:1}.wj-bar select{width:100%}.wj-datenav{width:100%}.wj-datenav input{flex:1}.wj-upform,.wj-newtrack{flex-wrap:wrap}.wj-upform input[type=date],.wj-newtrack input[type=date]{flex:1 1 140px}.wj-track{grid-template-columns:1fr}.wj-table .no{display:none}.wj-meter{grid-template-columns:1fr}}
@@ -186,7 +186,7 @@
     const box=document.createElement('div');sec.appendChild(box);
     const draw=()=>{
       const list=S.payload.renovations||[];
-      box.innerHTML=`<div class="wj-reno-wrap" style="overflow-x:auto"><table class="wj-table"><thead><tr><th>戶別</th><th>施工申請期限</th><th>保證金</th><th>清潔費</th><th>裝潢情形</th><th>消防探測器</th><th class="act"></th></tr></thead><tbody>${list.map(r=>`<tr data-id="${r.id}" class="${r.detector_reset?'':'wj-reno-off'}"><td><input data-k="unit" value="${esc(r.unit)}"></td><td><input data-k="permit_period" value="${esc(r.permit_period)}" placeholder="6/16-10/20"></td><td><select data-k="deposit"><option value="">—</option><option value="paid" ${r.deposit==='paid'?'selected':''}>已繳</option><option value="refunding" ${r.deposit==='refunding'?'selected':''}>退款中</option></select></td><td><select data-k="cleaning_fee"><option value="">—</option><option value="paid" ${r.cleaning_fee==='paid'?'selected':''}>已繳</option><option value="unpaid" ${r.cleaning_fee==='unpaid'?'selected':''}>未繳</option></select></td><td><select data-k="status"><option value="working" ${r.status!=='done'?'selected':''}>裝潢中</option><option value="done" ${r.status==='done'?'selected':''}>已完工</option></select></td><td><label class="wj-check"><input type="checkbox" data-k="detector_reset" ${r.detector_reset?'checked':''}> 已復歸</label></td><td class="act"><button type="button" class="wj-del" title="從清單移除" aria-label="從清單移除">×</button></td></tr>`).join('')||'<tr><td colspan="7" style="color:#7a8a83;padding:12px">目前沒有裝潢施工戶</td></tr>'}</tbody></table></div>
+      box.innerHTML=`<div class="wj-reno-wrap" style="overflow-x:auto"><table class="wj-table"><thead><tr><th>戶別</th><th>施工申請期限</th><th>保證金</th><th>清潔費</th><th>裝潢情形</th><th>消防探測器</th><th class="act"></th></tr></thead><tbody>${list.map(r=>`<tr data-id="${r.id}" class="${r.detector_reset?'':'wj-reno-off'}"><td><input data-k="unit" value="${esc(r.unit)}"></td><td><input data-k="permit_period" value="${esc(r.permit_period)}" placeholder="6/16-10/20"></td><td><select data-k="deposit"><option value="">—</option><option value="paid" ${r.deposit==='paid'?'selected':''}>已繳</option><option value="refunding" ${r.deposit==='refunding'?'selected':''}>退款中</option></select></td><td><select data-k="cleaning_fee"><option value="">—</option><option value="paid" ${r.cleaning_fee==='paid'?'selected':''}>已繳</option><option value="unpaid" ${r.cleaning_fee==='unpaid'?'selected':''}>未繳</option></select></td><td><select data-k="status"><option value="working" ${r.status!=='done'?'selected':''}>裝潢中</option><option value="done" ${r.status==='done'?'selected':''}>已完工</option></select></td><td><label class="wj-check"><input type="checkbox" data-k="detector_reset" ${r.detector_reset?'checked':''}> 已復歸</label></td><td class="act"><button type="button" class="wj-del" title="從清單移除" aria-label="從清單移除">×</button></td></tr>`).join('')||'<tr><td colspan="7" style="color:#8A7E7A;padding:12px">目前沒有裝潢施工戶</td></tr>'}</tbody></table></div>
         <div class="wj-newtrack wj-only-edit" style="border:0;padding:6px 0"><input id="wjRenoUnit" placeholder="新增戶別，例如 12A3" style="max-width:200px"><input id="wjRenoPeriod" placeholder="施工申請期限" style="max-width:200px"><button type="button" id="wjRenoAdd">＋ 新增裝潢戶</button></div>
         ${list.some(r=>!r.detector_reset)?`<div class="wj-total">⚠ 消防探測器尚未復歸：${esc(list.filter(r=>!r.detector_reset).map(r=>r.unit).join('、'))}</div>`:''}`;
       box.querySelectorAll('tr[data-id]').forEach(tr=>{const id=tr.dataset.id;
@@ -203,7 +203,7 @@
     const save=()=>queuePatch('staffing',{rows:st.rows.filter(r=>r.role||r.name),tomorrow_off:st.tomorrow_off||''});
     const box=document.createElement('div');sec.appendChild(box);
     const draw=()=>{
-      box.innerHTML=`<table class="wj-table"><thead><tr><th>職務名稱</th><th>姓名</th><th>出勤</th><th class="act"></th></tr></thead><tbody>${st.rows.map((r,i)=>`<tr data-i="${i}"><td><input data-k="role" value="${esc(r.role)}" placeholder="社區秘書"></td><td><input data-k="name" value="${esc(r.name)}"></td><td><select data-k="status"><option value="work" ${r.status!=='off'?'selected':''}>上班</option><option value="off" ${r.status==='off'?'selected':''}>休假</option></select></td><td class="act"><button type="button" class="wj-del" aria-label="刪除">×</button></td></tr>`).join('')||'<tr><td colspan="4" style="color:#7a8a83;padding:12px">班表尚未排定，請手動新增</td></tr>'}</tbody></table>
+      box.innerHTML=`<table class="wj-table"><thead><tr><th>職務名稱</th><th>姓名</th><th>出勤</th><th class="act"></th></tr></thead><tbody>${st.rows.map((r,i)=>`<tr data-i="${i}"><td><input data-k="role" value="${esc(r.role)}" placeholder="社區秘書"></td><td><input data-k="name" value="${esc(r.name)}"></td><td><select data-k="status"><option value="work" ${r.status!=='off'?'selected':''}>上班</option><option value="off" ${r.status==='off'?'selected':''}>休假</option></select></td><td class="act"><button type="button" class="wj-del" aria-label="刪除">×</button></td></tr>`).join('')||'<tr><td colspan="4" style="color:#8A7E7A;padding:12px">班表尚未排定，請手動新增</td></tr>'}</tbody></table>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="wj-add" id="wjStAdd">＋ 新增人員</button><button type="button" class="wj-add" id="wjStReload">↻ 從班表重新帶入</button></div>
         <div class="wj-sub">明日休假人員</div><input id="wjTomorrow" value="${esc(st.tomorrow_off||'')}" placeholder="例如：環保人員 楊〇〇" style="margin:0">`;
       box.querySelectorAll('tr[data-i]').forEach(tr=>{const i=Number(tr.dataset.i);tr.querySelectorAll('[data-k]').forEach(inp=>inp.addEventListener(inp.tagName==='SELECT'?'change':'input',()=>{st.rows[i][inp.dataset.k]=inp.value;save();}));tr.querySelector('.wj-del').addEventListener('click',()=>{st.rows.splice(i,1);draw();save();});});
