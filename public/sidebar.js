@@ -67,7 +67,8 @@
     function emit(item){
       nav.querySelectorAll('button:not(.menu-pin-btn)').forEach(x=>x.classList.remove('active'));
       if(mobile())document.body.classList.remove('sidebar-open');
-      document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:item.action,id:item.id,label:item.label}}));
+      const parent=item.parentId?items.find(x=>String(x.id)===String(item.parentId)):null;
+      document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:item.action,id:item.id,label:item.label,parentId:item.parentId||null,parentLabel:parent?.label||''}}));
     }
     function add(parent,depth){
       for(const item of (byParent[parent]||[])){
