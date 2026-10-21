@@ -1,7 +1,7 @@
 let formConfig=null, answers={}, currentPage=0, draftId=null, draftCommunityId=null, autosaveTimer=null, saving=false, dirty=false, communities=[];
 const $=id=>document.getElementById(id);
 async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok){if(d.must_change_password)window.PasswordModule?.force('/api/staff');throw new Error(d.error||'操作失敗');}return d;}
-async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);}catch(e){console.warn('Staff branding load skipped',e)}}
+async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;/* 平台統一配色：不再套用各公司自訂顏色（名稱、標題文字照常套用） */}catch(e){console.warn('Staff branding load skipped',e)}}
 async function boot(){
   // 平台名稱與「表單範本標題」分離，避免公司自訂的表單名稱跑到網站／瀏覽器標題。
   // 例如表單可以叫「社區行政事務回報」，但網站仍維持「社區管理工作平台」。
@@ -94,7 +94,7 @@ async function showStaffProfile(user){
         <div><span>職務</span><strong>${escapeHtml(d.position||'尚未設定')}</strong></div>
         <div><span>公司</span><strong>${escapeHtml(d.tenant_name||'—')}</strong></div>
         <div><span>服務案場</span><strong>${communityNames.length?escapeHtml(communityNames.join('、')):'目前無駐點案場'}</strong></div>
-        ${d.annual_leave?`<div><span>特休</span><strong>${d.annual_leave.days?`本期 ${d.annual_leave.days} 天，剩 ${Math.max(0,d.annual_leave.days-Number(d.annual_used||0))} 天<br><small style="font-weight:400;color:#6a7a73">${escapeHtml(d.annual_leave.start)}～${escapeHtml(d.annual_leave.end)}</small>`:`${escapeHtml(d.annual_leave.next_date)} 起 3 天`}</strong></div>`:''}
+        ${d.annual_leave?`<div><span>特休</span><strong>${d.annual_leave.days?`本期 ${d.annual_leave.days} 天，剩 ${Math.max(0,d.annual_leave.days-Number(d.annual_used||0))} 天<br><small style="font-weight:400;color:#7A6E6A">${escapeHtml(d.annual_leave.start)}～${escapeHtml(d.annual_leave.end)}</small>`:`${escapeHtml(d.annual_leave.next_date)} 起 3 天`}</strong></div>`:''}
       </div>
       <button type="button" class="monthly-payslip-card" id="salaryDetailsBtn">
         <span><strong>薪資相關</strong><small>試用期、正式薪資、投保等資料</small></span><b>›</b>
@@ -124,7 +124,7 @@ async function openPayslipCard(profile,id){
   const pick=id||list[0].id;
   const {payslip}=await api(`/api/staff/payslips/${pick}`);
   const others=list.filter(x=>String(x.id)!==String(pick));
-  const {modal,close}=payslipModal(`${window.PayslipView?window.PayslipView.html(payslip):''}<div class="modal-actions">${payslip.confirmed_at?'':'<button type="button" id="payslipConfirm">✓ 已確認，金額無誤</button>'}</div>${others.length?`<div class="payslip-history" style="margin-top:14px"><div style="font-weight:800;font-size:.9rem;margin-bottom:6px">歷史薪資單</div>${others.map(x=>`<button type="button" data-slip="${x.id}" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin:0 0 6px;padding:10px 14px;border:1px solid #e1e9e5;border-radius:10px;background:#fff;color:#1d2a25;min-height:0;font-weight:700;text-align:left"><span>${escapeHtml(x.month.slice(0,4)+' 年 '+Number(x.month.slice(5,7))+' 月')}<small style="display:block;font-weight:400;color:#6a7a73">實發 ${Number(x.net||0).toLocaleString('en-US')} 元${x.confirmed_at?'｜已確認':'｜待確認'}</small></span><span>›</span></button>`).join('')}</div>`:''}`);
+  const {modal,close}=payslipModal(`${window.PayslipView?window.PayslipView.html(payslip):''}<div class="modal-actions">${payslip.confirmed_at?'':'<button type="button" id="payslipConfirm">✓ 已確認，金額無誤</button>'}</div>${others.length?`<div class="payslip-history" style="margin-top:14px"><div style="font-weight:800;font-size:.9rem;margin-bottom:6px">歷史薪資單</div>${others.map(x=>`<button type="button" data-slip="${x.id}" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin:0 0 6px;padding:10px 14px;border:1px solid #E9E3E1;border-radius:10px;background:#fff;color:#2A201D;min-height:0;font-weight:700;text-align:left"><span>${escapeHtml(x.month.slice(0,4)+' 年 '+Number(x.month.slice(5,7))+' 月')}<small style="display:block;font-weight:400;color:#7A6E6A">實發 ${Number(x.net||0).toLocaleString('en-US')} 元${x.confirmed_at?'｜已確認':'｜待確認'}</small></span><span>›</span></button>`).join('')}</div>`:''}`);
   modal.querySelector('#payslipConfirm')?.addEventListener('click',async()=>{try{await api(`/api/staff/payslips/${pick}/confirm`,{method:'POST'});close();openPayslipCard(profile,pick);}catch(e){alert(e.message)}});
   modal.querySelectorAll('[data-slip]').forEach(b=>b.addEventListener('click',()=>{close();openPayslipCard(profile,b.dataset.slip);}));
 }
@@ -250,25 +250,25 @@ function injectHandoverStyle(){
   const s=document.createElement('style');s.id='handoverStyle';
   s.textContent=`
 .ho-hub{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:14px}
-.ho-hub-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;border:1px solid #dbe7e1;border-radius:16px;padding:18px;background:#fff;color:inherit;cursor:pointer;min-height:0;box-shadow:none}
-.ho-hub-card:hover{border-color:#8fbfa8;background:#f6fbf8}
+.ho-hub-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;border:1px solid #E5DFDD;border-radius:16px;padding:18px;background:#fff;color:inherit;cursor:pointer;min-height:0;box-shadow:none}
+.ho-hub-card:hover{border-color:#B59F99;background:#FBF9F6}
 .ho-hub-card .ho-hub-icon{font-size:1.8rem}
 .ho-hub-card strong{font-size:1.1rem}
-.ho-hub-card small{color:#5f7068;line-height:1.6;font-weight:400}
+.ho-hub-card small{color:#70635F;line-height:1.6;font-weight:400}
 .ho-badge{display:inline-block;padding:2px 10px;border-radius:999px;background:#fff3e0;color:#a35a00;font-weight:700;font-size:.78rem}
 .ho-switch{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
 .ho-switch button{padding:6px 12px;min-height:0;font-size:.85rem}
 .ho-recent{list-style:none;margin:0;padding:0}
-.ho-recent li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px dashed #e1e9e5}
+.ho-recent li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px dashed #E9E3E1}
 .ho-recent li:last-child{border-bottom:0}
-.field .field-help{display:block;margin:-2px 0 6px;color:#6a7a73;font-size:.85rem;line-height:1.5}
+.field .field-help{display:block;margin:-2px 0 6px;color:#7A6E6A;font-size:.85rem;line-height:1.5}
 .field .prefill-tag{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:#e6f2fb;color:#1e5f8c;font-size:.72rem;font-weight:700;vertical-align:middle}
-.field.is-conditional{border-left:3px solid #cfe3d8;padding-left:12px;margin-left:2px}
+.field.is-conditional{border-left:3px solid #DFD6D3;padding-left:12px;margin-left:2px}
 .choice-pills{display:flex;flex-wrap:wrap;gap:8px}
-.choice-pills label{display:inline-flex;align-items:center;gap:6px;margin:0;padding:8px 14px;border:1px solid #cbded7;border-radius:999px;background:#fff;cursor:pointer;font-weight:600;user-select:none}
-.choice-pills input{width:auto;margin:0;accent-color:#1f6b43}
-.choice-pills label:has(input:checked){background:#e3f2e9;border-color:#5fa883;color:#174f34}
-.money-wrap{display:flex;align-items:center;gap:8px}.money-wrap input{flex:1}.money-wrap span{color:#5f7068;font-weight:700}
+.choice-pills label{display:inline-flex;align-items:center;gap:6px;margin:0;padding:8px 14px;border:1px solid #DAD2CF;border-radius:999px;background:#fff;cursor:pointer;font-weight:600;user-select:none}
+.choice-pills input{width:auto;margin:0;accent-color:#3E5328}
+.choice-pills label:has(input:checked){background:#E8EEDF;border-color:#98776F;color:#422824}
+.money-wrap{display:flex;align-items:center;gap:8px}.money-wrap input{flex:1}.money-wrap span{color:#70635F;font-weight:700}
 `;
   document.head.appendChild(s);
 }
@@ -371,7 +371,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
   const selfHeader=mode==='self'&&selfAllowed?'<th>自選休假</th>':'';
   const used=selfDates.size, limit=Number(profile.self_select_days||0);
   const selfNote=mode==='self'?`<div class="staff-schedule-note">${selfAllowed?`本月已自選 <strong>${used}</strong>／${limit} 天。只有當天案場沒有其他人排休時才能選擇；若撞假，按鈕會停用，後端也會再次檢查。`:'目前職務不開放自選休假；仍可查看案場全班班表。'}</div>`:'';
-  el.innerHTML=`<style>.staff-schedule-page{padding:22px}.staff-schedule-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:16px 0}.staff-schedule-controls label{display:grid;gap:6px;color:#587066;font-size:13px}.staff-schedule-controls input,.staff-schedule-controls select{min-width:170px;padding:10px;border:1px solid #cbded7;border-radius:9px;background:white}.staff-schedule-page button{padding:9px 12px;border:1px solid #b7d3c7;border-radius:8px;background:#edf7f1;color:#155a42;font-weight:700}.staff-schedule-page button:disabled{background:#f2f3f2;border-color:#e0e4e1;color:#9b4d4d;cursor:not-allowed}.staff-schedule-note{margin:10px 0 16px;padding:12px;background:#fff7e5;border:1px solid #efd99c;border-radius:9px;line-height:1.7}.staff-schedule-table-wrap{overflow:auto;max-height:65vh;border:1px solid #e0e9e4;border-radius:10px}.staff-schedule-table{border-collapse:separate;border-spacing:0;min-width:100%;white-space:nowrap}.staff-schedule-table th,.staff-schedule-table td{padding:9px 10px;border-right:1px solid #e7ece9;border-bottom:1px solid #e7ece9;text-align:center}.staff-schedule-table thead th{position:sticky;top:0;background:#f1f7f3;z-index:3}.staff-schedule-table th small,.staff-schedule-table td small{display:block;font-size:11px;color:#718179;margin-top:3px}.staff-schedule-table .staff-schedule-date-col{position:sticky;left:0;z-index:2;background:#f8fbf9;text-align:left}.staff-schedule-table thead .staff-schedule-date-col{z-index:4}.staff-schedule-work{background:#eef8f2;color:#185b42}.staff-schedule-off{background:#fff0ef;color:#a33131;font-weight:800}.staff-schedule-empty{color:#b2bbb6}.staff-schedule-self-cell{min-width:100px}</style><div class="panel staff-schedule-page"><div class="eyebrow">📅 現場勤務</div><h1>${mode==='self'?'自選休假':'案場全班班表'}</h1><p class="hint">可查看您有權限的案場全體人員班表；休假安排會即時顯示，避免同一天多人撞假。</p>${controls}${selfNote}<div class="staff-schedule-table-wrap"><table class="staff-schedule-table"><thead>${rosterHead.replace('</tr>',`${selfHeader}</tr>`)}</thead><tbody>${rows||'<tr><td colspan="2">本月尚無班表資料。</td></tr>'}</tbody></table></div><p class="hint">「—」代表目前尚未建立該人員當日班別；班表由公司排定後會顯示在這裡。</p></div>`;
+  el.innerHTML=`<style>.staff-schedule-page{padding:22px}.staff-schedule-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:16px 0}.staff-schedule-controls label{display:grid;gap:6px;color:#705E58;font-size:13px}.staff-schedule-controls input,.staff-schedule-controls select{min-width:170px;padding:10px;border:1px solid #DAD2CF;border-radius:9px;background:white}.staff-schedule-page button{padding:9px 12px;border:1px solid #CDC1BD;border-radius:8px;background:#F6F3EE;color:#4A2A25;font-weight:700}.staff-schedule-page button:disabled{background:#F3F2F2;border-color:#E4E1E0;color:#9b4d4d;cursor:not-allowed}.staff-schedule-note{margin:10px 0 16px;padding:12px;background:#fff7e5;border:1px solid #efd99c;border-radius:9px;line-height:1.7}.staff-schedule-table-wrap{overflow:auto;max-height:65vh;border:1px solid #E9E2E0;border-radius:10px}.staff-schedule-table{border-collapse:separate;border-spacing:0;min-width:100%;white-space:nowrap}.staff-schedule-table th,.staff-schedule-table td{padding:9px 10px;border-right:1px solid #ECE8E7;border-bottom:1px solid #ECE8E7;text-align:center}.staff-schedule-table thead th{position:sticky;top:0;background:#F6F4F2;z-index:3}.staff-schedule-table th small,.staff-schedule-table td small{display:block;font-size:11px;color:#817571;margin-top:3px}.staff-schedule-table .staff-schedule-date-col{position:sticky;left:0;z-index:2;background:#FBFAF8;text-align:left}.staff-schedule-table thead .staff-schedule-date-col{z-index:4}.staff-schedule-work{background:#F7F4EF;color:#4C2C27}.staff-schedule-off{background:#fff0ef;color:#a33131;font-weight:800}.staff-schedule-empty{color:#BBB4B2}.staff-schedule-self-cell{min-width:100px}</style><div class="panel staff-schedule-page"><div class="eyebrow">📅 現場勤務</div><h1>${mode==='self'?'自選休假':'案場全班班表'}</h1><p class="hint">可查看您有權限的案場全體人員班表；休假安排會即時顯示，避免同一天多人撞假。</p>${controls}${selfNote}<div class="staff-schedule-table-wrap"><table class="staff-schedule-table"><thead>${rosterHead.replace('</tr>',`${selfHeader}</tr>`)}</thead><tbody>${rows||'<tr><td colspan="2">本月尚無班表資料。</td></tr>'}</tbody></table></div><p class="hint">「—」代表目前尚未建立該人員當日班別；班表由公司排定後會顯示在這裡。</p></div>`;
   const refresh=()=>loadStaffSchedulePage(mode,'班表',$('staffScheduleMonth')?.value||month,$('staffScheduleCommunity')?.value||selected).catch(err=>showWorkspaceError('班表',err));
   $('staffScheduleRefresh')?.addEventListener('click',refresh);
   $('staffScheduleMonth')?.addEventListener('change',refresh);

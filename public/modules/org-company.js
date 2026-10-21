@@ -11,22 +11,22 @@
     s.textContent=`
 .og-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px}
 .og-form label{display:flex;flex-direction:column;gap:5px;font-weight:700;font-size:.88rem;margin:0}
-.og-form input,.og-form select{margin:0;width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #cbd8d2;border-radius:8px;background:#fff;font:inherit}
+.og-form input,.og-form select{margin:0;width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #D8CECB;border-radius:8px;background:#fff;font:inherit}
 .og-form .wide{grid-column:1/-1}
-.og-info{background:#f4f8f6;border:1px solid #dbe8e2;border-radius:10px;padding:9px 12px;font-size:.85rem;line-height:1.7}
-.og-checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 12px;max-height:220px;overflow:auto;border:1px solid #e1e9e5;border-radius:10px;padding:8px 10px}
+.og-info{background:#F8F6F4;border:1px solid #E6E0DD;border-radius:10px;padding:9px 12px;font-size:.85rem;line-height:1.7}
+.og-checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 12px;max-height:220px;overflow:auto;border:1px solid #E9E3E1;border-radius:10px;padding:8px 10px}
 .og-checks label{flex-direction:row;align-items:center;gap:6px;font-weight:500}.og-checks input{width:auto}
 .og-radio{display:flex;gap:16px}.og-radio label{flex-direction:row;align-items:center;gap:6px;font-weight:600}.og-radio input{width:auto}
-.og-adv{grid-column:1/-1;border:1px solid #e1e9e5;border-radius:10px;padding:8px 12px}.og-adv summary{cursor:pointer;font-weight:800;color:#1f5c42}
-.og-dept{border:1px solid #e1e9e5;border-radius:14px;margin:10px 0;overflow:hidden;background:#fff}
-.og-dept>h4{margin:0;padding:9px 14px;background:#f1f7f3;font-size:.95rem}
-.og-pos{padding:8px 14px;border-top:1px solid #eef2f0;display:grid;grid-template-columns:180px 1fr;gap:10px}
-.og-pos>b{font-size:.88rem}.og-pos small{color:#7a8a83}
+.og-adv{grid-column:1/-1;border:1px solid #E9E3E1;border-radius:10px;padding:8px 12px}.og-adv summary{cursor:pointer;font-weight:800;color:#4E312D}
+.og-dept{border:1px solid #E9E3E1;border-radius:14px;margin:10px 0;overflow:hidden;background:#fff}
+.og-dept>h4{margin:0;padding:9px 14px;background:#F6F4F2;font-size:.95rem}
+.og-pos{padding:8px 14px;border-top:1px solid #F2EFEE;display:grid;grid-template-columns:180px 1fr;gap:10px}
+.og-pos>b{font-size:.88rem}.og-pos small{color:#8A7E7A}
 .og-people{display:flex;flex-wrap:wrap;gap:6px}
-.og-person{border:1px solid #dbe8e2;border-radius:10px;padding:5px 10px;font-size:.84rem;background:#fbfdfc;cursor:pointer}
-.og-person:hover{border-color:#1f5c42}.og-person small{display:block;color:#6a7a73;font-size:.74rem}
+.og-person{border:1px solid #E6E0DD;border-radius:10px;padding:5px 10px;font-size:.84rem;background:#FDFCFB;cursor:pointer}
+.og-person:hover{border-color:#4E312D}.og-person small{display:block;color:#7A6E6A;font-size:.74rem}
 .og-warn{background:#fff7e5;border:1px solid #efd99c;border-radius:10px;padding:10px 14px;margin:8px 0;color:#7a5200}
-.og-table{border-collapse:collapse;width:100%;font-size:.86rem}.og-table th,.og-table td{padding:7px 9px;border-bottom:1px solid #eef2f0;text-align:left;vertical-align:middle}.og-table th{background:#f1f7f3;font-size:.78rem}
+.og-table{border-collapse:collapse;width:100%;font-size:.86rem}.og-table th,.og-table td{padding:7px 9px;border-bottom:1px solid #F2EFEE;text-align:left;vertical-align:middle}.og-table th{background:#F6F4F2;font-size:.78rem}
 .og-table select,.og-table input{margin:0;padding:6px 8px;width:auto;max-width:100%}
 @media(max-width:700px){.og-form{grid-template-columns:1fr}.og-pos{grid-template-columns:1fr}}
 `;
@@ -99,7 +99,7 @@
   async function resetPassword(staffId,name){
     if(!confirm(`要重設「${name||''}」的密碼嗎？\n系統會產生一組臨時密碼，對方下次登入時必須改成自己的密碼。`))return;
     const r=await api(`/api/company/staff/${staffId}/reset-password`,{method:'POST'});
-    const {box}=modal('🔑 臨時密碼',`<p>請把這組臨時密碼交給 <b>${esc(r.name)}</b>（員編 ${esc(r.employee_id)}）。這個畫面關閉後就看不到了。</p><div style="font-size:1.6rem;font-weight:800;letter-spacing:.12em;background:#f4f8f6;border-radius:12px;padding:14px;text-align:center;margin:10px 0" id="tmpPw">${esc(r.temp_password)}</div><div class="modal-actions"><button type="button" id="cpPw">📋 複製</button></div>`,false);
+    const {box}=modal('🔑 臨時密碼',`<p>請把這組臨時密碼交給 <b>${esc(r.name)}</b>（員編 ${esc(r.employee_id)}）。這個畫面關閉後就看不到了。</p><div style="font-size:1.6rem;font-weight:800;letter-spacing:.12em;background:#F8F6F4;border-radius:12px;padding:14px;text-align:center;margin:10px 0" id="tmpPw">${esc(r.temp_password)}</div><div class="modal-actions"><button type="button" id="cpPw">📋 複製</button></div>`,false);
     box.querySelector('#cpPw').onclick=async()=>{try{await navigator.clipboard.writeText(r.temp_password);box.querySelector('#cpPw').textContent='✓ 已複製';}catch{}};
   }
 
@@ -116,7 +116,7 @@
     el.innerHTML=`<div class="panel"><div class="section-title">🏢 組織圖</div><p class="hint">依職位自動形成上下級：現場人員歸社區主管、社區主管歸該區督導，同時也歸所屬部門（例如保全歸日／夜班勤務經理、秘書歸秘書部）。職位名稱由平台依貴公司習慣設定。點人員可以修改職位。</p>
       ${unmapped.length?`<div class="og-warn">⚠ 有 ${unmapped.length} 位人員還沒有設定職位（舊資料）。<button type="button" id="ogMap" style="margin-left:8px;padding:5px 12px;min-height:0">🪄 一鍵對應職位</button></div>`:''}
       ${top.length?`<div class="og-dept"><h4>公司</h4>${top.map(posBlock).join('')}</div>`:''}
-      ${o.config.departments.map(d=>{const list=o.config.positions.filter(p=>p.dept===d.id);return list.length?`<details class="og-dept" ${list.some(p=>byPos.get(p.id)?.length)?'open':''}><summary style="list-style:none"><h4 style="margin:0;padding:9px 14px;background:#f1f7f3;font-size:.95rem;cursor:pointer">${esc(d.name)} <small class="muted">${list.reduce((a,p)=>a+(byPos.get(p.id)?.length||0),0)} 人</small></h4></summary>${list.map(posBlock).join('')}</details>`:'';}).join('')}</div>`;
+      ${o.config.departments.map(d=>{const list=o.config.positions.filter(p=>p.dept===d.id);return list.length?`<details class="og-dept" ${list.some(p=>byPos.get(p.id)?.length)?'open':''}><summary style="list-style:none"><h4 style="margin:0;padding:9px 14px;background:#F6F4F2;font-size:.95rem;cursor:pointer">${esc(d.name)} <small class="muted">${list.reduce((a,p)=>a+(byPos.get(p.id)?.length||0),0)} 人</small></h4></summary>${list.map(posBlock).join('')}</details>`:'';}).join('')}</div>`;
     el.querySelectorAll('[data-og-edit]').forEach(b=>b.addEventListener('click',()=>openStaffForm(Number(b.dataset.ogEdit),{onDone:onChange}).catch(e=>alert(e.message))));
     el.querySelector('#ogMap')?.addEventListener('click',()=>openMapping(o,onChange));
   }

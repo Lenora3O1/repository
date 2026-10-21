@@ -1,0 +1,32 @@
+/* 平台配色（大地色系）— 最後載入，統一三個入口的頂部列、側邊欄與按鈕 */
+:root{
+  --t-cream:#FCFAF1;--t-sand:#C9B0A8;--t-rust:#A44528;--t-rust-dark:#7E331D;--t-brown:#5F403B;--t-ink:#1D0D0C;--t-rose:#A38485;--t-clay:#9A6654;
+  --t-side:#F4ECE6;--t-soft:#F6ECE6;--t-line:#E2D3CC;
+  --t-ok-bg:#E8EEDF;--t-ok:#3E5328;--t-bad-bg:#F6E3DC;--t-bad:#7A2E1A;
+  --topbar-bg:var(--t-ink);
+}
+html[data-portal="staff"]{--topbar-bg:var(--t-brown)}
+body{background:var(--t-cream)!important;color:var(--t-ink)}
+.topbar,body.is-authenticated .topbar,body:not(.is-authenticated) .topbar{background:var(--topbar-bg)!important;color:var(--t-cream)!important}
+.topbar .sub{color:#E7D9D2!important}
+.sidebar-toggle{background:var(--topbar-bg)!important;color:var(--t-cream)!important}
+.app-sidebar{background:var(--t-side)!important;border-right:1px solid var(--t-line)!important}
+.app-sidebar .nav-tabs button{color:var(--t-ink)!important}
+.app-sidebar .nav-tabs button:hover{background:#EBDDD5!important}
+.app-sidebar .nav-tabs button.active,body.is-authenticated .app-sidebar .nav-tabs button.active{background:var(--t-brown)!important;color:var(--t-cream)!important;border-left-color:var(--t-rust)!important}
+button,.btn{background:var(--t-rust);color:#fff}
+button:hover,.btn:hover{background:var(--t-rust-dark)}
+button.secondary{background:transparent;color:var(--t-brown);border-color:var(--t-brown)}
+button.secondary:hover{background:var(--t-soft);color:var(--t-ink)}
+button.danger{color:#9B2226;border-color:#9B2226}
+button.danger:hover{background:#F6E3DC}
+.panel{border-color:var(--t-line)}
+.eyebrow{color:var(--t-clay)}
+.hint,.muted{color:#7A5F58}
+a{color:var(--t-rust)}
+.tag{background:var(--t-soft);color:var(--t-brown)}
+.tag.success{background:var(--t-ok-bg)!important;color:var(--t-ok)!important}
+.tag.gold{background:#F3E6D8!important;color:#7A4F25!important}
+.msg.success{background:var(--t-ok-bg);color:var(--t-ok);border-color:#C9D6B5}
+input:focus,select:focus,textarea:focus{border-color:var(--t-clay)!important;outline-color:var(--t-clay)}
+.shell,body.is-authenticated .shell,#mainView{background:transparent!important}
