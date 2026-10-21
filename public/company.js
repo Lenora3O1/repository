@@ -256,6 +256,7 @@ async function openScheduleModule(action,label){
     else if(action==='schedule-swap') await renderScheduleSwaps(box);
     else if(action==='schedule-leave'){const body=box.querySelector('#scheduleModuleBody');if(window.LeaveModule&&window.CoverModule)await window.LeaveModule.render(body,{base:'/api/company/my',side:'company',label:'請假／代班',tab:'cover',withCover:true,embedded:true});else await renderScheduleRequests(box);}
     else if(action==='schedule-overtime'){const body=box.querySelector('#scheduleModuleBody');if(window.CoverModule)await window.CoverModule.renderOvertime(body,{base:'/api/company/my',side:'company',label:'加班',tab:'all'});else await renderScheduleOvertime(box);}
+    else if(window.SmartSchedule) await window.SmartSchedule.render(box.querySelector('#scheduleModuleBody'));
     else await renderScheduleMonth(box);
   }catch(e){const box=document.getElementById('companyWorkspace');if(box){box.style.display='block';box.innerHTML=`<div class="msg error">${escapeHtml(e.message||'班表模組載入失敗')}</div>`;}else alert(e.message||'班表模組載入失敗');}
 }

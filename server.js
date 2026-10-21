@@ -45,7 +45,8 @@ try {
 const PORT = process.env.PORT || 3000;
 // 組織架構模組（org-routes.js）註冊後提供職位與上下級關係
 let orgApi=null;
-let coverApi=null; // 代班／加班模組（休假制度說明）
+let coverApi=null;
+let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
 const DATA_DIR = process.env.DATA_DIR || __dirname;
@@ -2541,7 +2542,8 @@ app.get('/api/staff/schedule/community-view',requireStaffFiller,(req,res)=>{
   const selfOffDates=db.prepare("SELECT work_date FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").all(tenantId(req),month,u.id).map(x=>x.work_date);
   const conflicts=db.prepare("SELECT work_date,COUNT(DISTINCT staff_id) count,GROUP_CONCAT(DISTINCT staff_id) staff_ids FROM schedule_entries WHERE tenant_id=? AND month=? AND community_id=? AND shift_code='off' AND staff_id<>? GROUP BY work_date").all(tenantId(req),month,selected,u.id);
   const rule=(()=>{try{return coverApi?coverApi.myRule(getUser(req),month):null;}catch{return null;}})();
-  res.json({month,communities,selected_community_id:selected,staff,entries,profile,self_off_dates:selfOffDates,off_conflicts:conflicts,rule,self_allowed:scheduleSelfAllowed(getUser(req),profile,rule)});
+  const draft=(()=>{try{return !!smartApi?.isDraft(tenantId(req),month);}catch{return false;}})();
+  res.json({month,communities,selected_community_id:selected,staff,entries:draft?entries.filter(e=>e.source==='self-select'):entries,draft,profile,self_off_dates:selfOffDates,off_conflicts:conflicts,rule,self_allowed:scheduleSelfAllowed(getUser(req),profile,rule)});
 });
 
 // 現場人員：機動／保全的自選休假與自己的班表資料，後端先備妥；前台介面可獨立接上，不會看到行政資料。
@@ -2600,6 +2602,8 @@ require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteMa
 
 // ===== 代班／調假／加班（依組織架構調度，連動班表與薪資）=====
 coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,leave:leaveApi,sched:{redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));return c||scheduleFallbackRedDates(y);},platformRules:schedulePlatformRules,effectiveRule:scheduleEffectiveRule,getProfile:scheduleGetProfile,defaultRole:scheduleDefaultRole}});
+// ===== 智慧月班表 =====
+smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,getSiteAssignments,org:orgApi,S:{getProfile:scheduleGetProfile,effectiveRule:scheduleEffectiveRule,platformRules:schedulePlatformRules,holidays:y=>scheduleTaiwanHolidayDates(y),redDatesSync:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),leavePolicy:tid=>leaveApi.policyFor(tid)}});
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll});
 
