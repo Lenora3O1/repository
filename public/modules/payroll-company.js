@@ -48,6 +48,9 @@ button.lnk{border:0!important;background:transparent!important;color:#1f5c42!imp
 .pr-form .chk input{width:auto}
 .pr-sec{grid-column:1/-1;font-weight:800;color:#1f5c42;border-top:1px solid #e1e9e5;padding-top:10px;margin-top:4px}
 .pr-allow{display:flex;gap:6px;margin-bottom:6px}.pr-allow input{flex:1}
+.pr-ded{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.2fr) minmax(0,.9fr) auto;gap:6px;margin-bottom:6px;align-items:center}.pr-ded input{margin:0;width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd8d2;border-radius:8px}
+.pr-ded-head span{font-size:.74rem;color:#6a7a73;font-weight:700}
+@media(max-width:700px){.pr-ded{grid-template-columns:1fr 1fr}.pr-ded-head{display:none}}
 .pr-preview{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .pr-preview div{border-radius:10px;padding:10px 12px;font-size:.86rem;line-height:1.7}
 .pr-preview .ee{background:#fffaf5;border:1px solid #f3dfc8}.pr-preview .er{background:#f5f9ff;border:1px solid #d5e3f5}
@@ -75,59 +78,107 @@ button.lnk{border:0!important;background:transparent!important;color:#1f5c42!imp
   }
   const sum=o=>Object.values(o||{}).reduce((a,v)=>a+n(v),0);
 
-  // ================= 人事管理 =================
+  // ================= 人事管理（人事／總務）：基本資料 =================
   async function renderHR(el,label){
-    const d=await api('/api/company/hr/profiles');const T=d.table;
+    const d=await api('/api/company/hr/profiles');
     const today=new Date().toISOString().slice(0,10);const soon=new Date(Date.now()+14*864e5).toISOString().slice(0,10);
-    const unset=d.profiles.filter(p=>p.payroll_enabled&&!p.configured);const trial=d.profiles.filter(p=>p.trial_end_date&&p.trial_end_date>=today&&p.trial_end_date<=soon);
-    el.innerHTML=`<div class="eyebrow">👥 人事管理</div><h1>${esc(label||'人事管理')}</h1><p class="hint">每位人員的到職、試用期、薪資與勞健保資料。這裡的資料會帶入「人員薪資統計表」自動計算勞健保與勞退，也會顯示在人員自己的「職員資料」。目前使用 ${T.year} 年投保級距表${T.exact?'':'（尚未建立今年度的表，暫用此年度）'}。</p>
-      ${unset.length?`<div class="pr-warn">⚠ ${unset.length} 位人員尚未設定薪資：${esc(unset.map(p=>p.name).join('、'))}</div>`:''}
+    const trial=d.profiles.filter(p=>p.trial_end_date&&p.trial_end_date>=today&&p.trial_end_date<=soon);
+    const missing=d.profiles.filter(p=>p.role!=='company_admin'&&!p.hire_date);
+    el.innerHTML=`<div class="eyebrow">👥 人事管理</div><h1>${esc(label||'人事管理')}</h1><p class="hint">人員的基本資料、到職與試用期、勞健保加保狀態與眷屬，由人事或總務登記。薪資金額由會計在「人員薪資單 → 薪資設定」處理，這裡看不到薪資。</p>
+      ${missing.length?`<div class="pr-warn">⚠ ${missing.length} 位人員尚未登記到職日：${esc(missing.map(p=>p.name).join('、'))}</div>`:''}
       ${trial.length?`<div class="pr-warn">⏰ 試用期 14 天內到期：${esc(trial.map(p=>`${p.name}（${p.trial_end_date}）`).join('、'))}</div>`:''}
-      <div class="pr-wrap"><table class="pr-table"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">職務</th><th class="l">到職日</th><th class="l">試用期至</th><th>月薪</th><th class="l">投保</th><th>勞保級距</th><th>健保級距</th><th>眷屬</th><th>員工自付／月</th><th>公司負擔／月</th><th></th></tr></thead><tbody>${d.profiles.map(p=>`<tr${p.payroll_enabled?'':' style="opacity:.55"'}><td class="sticky"><b>${esc(p.name)}</b><br><small class="muted">${esc(p.employee_id)}</small></td><td class="l">${esc(p.position||'')}</td><td class="l">${esc(p.hire_date||'—')}</td><td class="l">${esc(p.trial_end_date||'—')}</td><td>${p.configured?money(p.monthly_salary):'<span class="muted">未設定</span>'}</td><td class="l pr-badges"><span class="${p.labor_insured?'':'off'}">勞</span><span class="${p.labor_insured&&p.employment_insured?'':'off'}">就</span><span class="${p.health_insured?'':'off'}">健</span><span class="${p.pension_enabled?'':'off'}">退</span></td><td>${p.labor_insured?money(p.labor_grade):'—'}</td><td>${p.health_insured?money(p.health_grade):'—'}</td><td>${p.health_dependents||0}</td><td>${p.configured?money(sum(p.insurance.employee)):'—'}</td><td>${p.configured?money(sum(p.insurance.employer)):'—'}</td><td><button type="button" class="secondary" data-edit="${p.staff_id}" style="padding:5px 12px;min-height:0">編輯</button></td></tr>`).join('')}</tbody></table></div>
-      <p class="hint" style="margin-top:8px">「月薪」＝底薪＋固定加給；投保級距預設依月薪自動對應，也可以在編輯時改成手動。${d.profiles.some(p=>!p.payroll_enabled)?'淡色的人員不納入薪資計算（例如公司負責人）。':''}</p>`;
-    el.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editProfile(d.profiles.find(p=>p.staff_id===Number(b.dataset.edit)),T,()=>renderHR(el,label))));
+      <div class="pr-wrap"><table class="pr-table"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">職務</th><th class="l">到職日</th><th class="l">試用期至</th><th class="l">手機</th><th class="l">加保</th><th class="l">加保日</th><th>健保眷屬</th><th class="l">緊急聯絡人</th><th></th></tr></thead><tbody>${d.profiles.map(p=>`<tr><td class="sticky"><b>${esc(p.name)}</b><br><small class="muted">${esc(p.employee_id)}</small></td><td class="l">${esc(p.position||'')}</td><td class="l">${esc(p.hire_date||'—')}</td><td class="l">${p.trial_end_date?`${esc(p.trial_end_date)}${p.trial_end_date<today?' <small class="muted">已轉正</small>':''}`:'—'}</td><td class="l">${esc(p.mobile||'—')}</td><td class="l pr-badges"><span class="${p.labor_insured?'':'off'}">勞</span><span class="${p.labor_insured&&p.employment_insured?'':'off'}">就</span><span class="${p.health_insured?'':'off'}">健</span><span class="${p.pension_enabled?'':'off'}">退</span></td><td class="l">${esc(p.insured_date||'—')}</td><td>${p.health_dependents||0}</td><td class="l">${p.emergency_name?`${esc(p.emergency_name)}${p.emergency_relation?`（${esc(p.emergency_relation)}）`:''}<br><small class="muted">${esc(p.emergency_phone)}</small>`:'—'}</td><td><button type="button" class="secondary" data-edit="${p.staff_id}" style="padding:5px 12px;min-height:0">編輯</button></td></tr>`).join('')}</tbody></table></div>`;
+    el.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editHR(d.profiles.find(p=>p.staff_id===Number(b.dataset.edit)),()=>renderHR(el,label))));
   }
-  function editProfile(p,T,done){
-    const st={...p,allowances:(p.allowances||[]).map(x=>({...x}))};
-    const opts=(list,v)=>list.map(g=>`<option value="${g}" ${Number(v)===g?'selected':''}>${money(g)}</option>`).join('');
-    const {box,close}=modal(`👤 ${esc(p.name)}｜人事與薪資資料`,`<form class="pr-form" id="hrForm">
-      <label class="chk wide"><input type="checkbox" name="payroll_enabled" ${st.payroll_enabled?'checked':''}> 納入每月薪資計算</label>
+  function editHR(p,done){
+    const {box,close}=modal(`👤 ${esc(p.name)}｜人事基本資料`,`<form class="pr-form" id="hrForm">
       <div class="pr-sec">到職與試用</div>
-      <label>到職日<input type="date" name="hire_date" value="${esc(st.hire_date)}"></label>
-      <label>試用期到期日<input type="date" name="trial_end_date" value="${esc(st.trial_end_date)}"></label>
-      <div class="pr-sec">薪資</div>
-      <label>底薪（元／月）<input name="base_salary" inputmode="numeric" value="${st.base_salary||''}" placeholder="例如 32000"></label>
-      <label>銀行帳號（選填）<input name="bank_account" value="${esc(st.bank_account)}"></label>
-      <div class="wide"><div style="font-weight:700;font-size:.86rem;margin-bottom:5px">固定加給（每月固定發放，例如職務加給、交通津貼）</div><div id="hrAllow"></div><button type="button" class="secondary" id="hrAllowAdd" style="padding:6px 12px;min-height:0">＋ 新增加給</button></div>
-      <div class="pr-sec">勞健保與勞退</div>
-      <label class="chk"><input type="checkbox" name="labor_insured" ${st.labor_insured?'checked':''}> 加保勞保（含職災）</label>
-      <label class="chk"><input type="checkbox" name="employment_insured" ${st.employment_insured?'checked':''}> 加保就業保險</label>
-      <label class="chk"><input type="checkbox" name="health_insured" ${st.health_insured?'checked':''}> 加保健保</label>
-      <label class="chk"><input type="checkbox" name="pension_enabled" ${st.pension_enabled?'checked':''}> 提繳勞退 6%</label>
-      <label class="chk wide"><input type="checkbox" name="auto_grade" ${st.auto_grade?'checked':''}> 投保級距依月薪自動對應（建議）</label>
-      <label>勞保投保薪資<select name="labor_grade">${opts(T.labor,st.labor_grade)}</select></label>
-      <label>健保投保金額<select name="health_grade">${opts(T.health,st.health_grade)}</select></label>
-      <label>勞退提繳工資<select name="pension_grade">${opts(T.pension,st.pension_grade)}</select></label>
-      <label>健保眷屬人數<input type="number" min="0" max="10" name="health_dependents" value="${st.health_dependents||0}"></label>
-      <label>勞退自提（%）<input type="number" min="0" max="6" step="1" name="pension_self_rate" value="${st.pension_self_rate||0}"></label>
-      <label class="wide">備註<textarea name="note" rows="2">${esc(st.note)}</textarea></label>
-      <div class="pr-preview" id="hrPreview"></div>
+      <label>到職日<input type="date" name="hire_date" value="${esc(p.hire_date)}"></label>
+      <label>試用期到期日<input type="date" name="trial_end_date" value="${esc(p.trial_end_date)}"></label>
+      <div class="pr-sec">個人資料</div>
+      <label>生日<input type="date" name="birthday" value="${esc(p.birthday)}"></label>
+      <label>手機<input name="mobile" inputmode="tel" value="${esc(p.mobile)}"></label>
+      <label class="wide">通訊地址<input name="address" value="${esc(p.address)}"></label>
+      <label>緊急聯絡人<input name="emergency_name" value="${esc(p.emergency_name)}"></label>
+      <label>關係<input name="emergency_relation" value="${esc(p.emergency_relation)}" placeholder="例如：配偶"></label>
+      <label>緊急聯絡電話<input name="emergency_phone" inputmode="tel" value="${esc(p.emergency_phone)}"></label>
+      <div class="pr-sec">勞健保加保</div>
+      <label class="chk"><input type="checkbox" name="labor_insured" ${p.labor_insured?'checked':''}> 加保勞保（含職災）</label>
+      <label class="chk"><input type="checkbox" name="employment_insured" ${p.employment_insured?'checked':''}> 加保就業保險</label>
+      <label class="chk"><input type="checkbox" name="health_insured" ${p.health_insured?'checked':''}> 加保健保</label>
+      <label class="chk"><input type="checkbox" name="pension_enabled" ${p.pension_enabled?'checked':''}> 提繳勞退 6%</label>
+      <label>加保日期<input type="date" name="insured_date" value="${esc(p.insured_date)}"></label>
+      <label>健保眷屬人數<input type="number" min="0" max="10" name="health_dependents" value="${p.health_dependents||0}"></label>
+      <label class="wide">人事備註<textarea name="note" rows="2">${esc(p.note)}</textarea></label>
+      <p class="hint wide">投保級距與保費金額由會計依薪資設定；這裡只登記是否加保。</p>
       <div class="wide modal-actions"><button type="button" class="secondary" data-cancel>取消</button><button type="submit">💾 儲存</button></div></form>`,{wide:true});
-    const f=box.querySelector('#hrForm');
-    const drawAllow=()=>{box.querySelector('#hrAllow').innerHTML=st.allowances.map((a,i)=>`<div class="pr-allow"><input placeholder="名稱" value="${esc(a.name)}" data-an="${i}"><input placeholder="金額" inputmode="numeric" value="${a.amount||''}" data-aa="${i}" style="max-width:140px"><button type="button" class="danger" data-ar="${i}" style="padding:4px 10px;min-height:0">×</button></div>`).join('');
+    const f=box.querySelector('#hrForm');box.querySelector('[data-cancel]').onclick=close;
+    f.addEventListener('submit',async e=>{e.preventDefault();const v=k=>f.elements[k];const body={hire_date:v('hire_date').value,trial_end_date:v('trial_end_date').value,birthday:v('birthday').value,mobile:v('mobile').value,address:v('address').value,emergency_name:v('emergency_name').value,emergency_relation:v('emergency_relation').value,emergency_phone:v('emergency_phone').value,labor_insured:v('labor_insured').checked,employment_insured:v('employment_insured').checked,health_insured:v('health_insured').checked,pension_enabled:v('pension_enabled').checked,insured_date:v('insured_date').value,health_dependents:n(v('health_dependents').value),note:v('note').value};try{await api(`/api/company/hr/profiles/${p.staff_id}`,J('PUT',body));close();done();}catch(err){alert(err.message);}});
+  }
+
+  // ================= 人員薪資設定（會計） =================
+  const thisM=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;};
+  async function renderSalaries(box){
+    const d=await api('/api/company/payroll/salaries');const T=d.table;
+    const unset=d.salaries.filter(p=>p.payroll_enabled&&!p.configured);
+    box.innerHTML=`<p class="hint">每位人員的薪資由會計設定：正式薪資、試用期薪資、固定加給、每月定期代扣款（制服費等）、投保級距與勞退自提。人事資料（到職日、試用期、加保狀態、眷屬）由人事在「人事管理」登記，這裡只顯示。目前使用 ${T.year} 年投保級距表。</p>
+      ${unset.length?`<div class="pr-warn">⚠ ${unset.length} 位人員尚未設定薪資：${esc(unset.map(p=>p.name).join('、'))}</div>`:''}
+      <div class="pr-wrap"><table class="pr-table"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">試用期至</th><th>試用期薪資</th><th>正式薪資</th><th>固定加給</th><th class="l">定期代扣</th><th>勞保級距</th><th>健保級距</th><th>員工自付／月</th><th>公司負擔／月</th><th></th></tr></thead><tbody>${d.salaries.map(p=>`<tr${p.payroll_enabled?'':' style="opacity:.55"'}><td class="sticky"><b>${esc(p.name)}</b>${p.in_trial?' <span class="pr-pill draft" style="font-size:.7rem">試用中</span>':''}<br><small class="muted">${esc(p.employee_id)}</small></td><td class="l">${esc(p.trial_end_date||'—')}</td><td>${p.trial_salary?money(p.trial_salary):'—'}</td><td>${p.configured?money(p.base_salary):'<span class="muted">未設定</span>'}</td><td>${money((p.allowances||[]).reduce((a,x)=>a+n(x.amount),0))}</td><td class="l" style="white-space:normal;min-width:120px">${(p.deductions_now||[]).map(x=>`${esc(x.name)} ${money(x.amount)}`).join('<br>')||'—'}</td><td>${p.labor_insured?money(p.labor_grade):'未加保'}</td><td>${p.health_insured?money(p.health_grade):'未加保'}</td><td>${p.configured?money(sum(p.insurance.employee)):'—'}</td><td>${p.configured?money(sum(p.insurance.employer)):'—'}</td><td><button type="button" class="secondary" data-edit="${p.staff_id}" style="padding:5px 12px;min-height:0">設定</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="hint" style="margin-top:8px">試用期中的人員，級距與保費以試用期薪資計算。淡色的人員不納入薪資計算。</p>`;
+    box.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editSalary(d.salaries.find(p=>p.staff_id===Number(b.dataset.edit)),T,()=>renderSalaries(box))));
+  }
+  function deductionRows(list,id){return `<div id="${id}">${list.map((x,i)=>`<div class="pr-ded"><input placeholder="項目（例如制服費）" value="${esc(x.name)}" data-dn="${i}"><input placeholder="每月金額" inputmode="numeric" value="${x.amount||''}" data-da="${i}"><input type="month" value="${esc(x.start_month||thisM())}" data-ds="${i}" title="從哪個月開始扣"><input type="number" min="0" placeholder="期數" value="${x.months||''}" data-dm="${i}" title="扣幾個月，0 或空白＝每月持續"><button type="button" class="danger" data-dr="${i}" style="padding:4px 10px;min-height:0">×</button></div>`).join('')}</div>`;}
+  function bindDeductions(box,list,id,onChange){
+    const wrap=box.querySelector('#'+id);
+    wrap.querySelectorAll('[data-dn]').forEach(i=>i.addEventListener('input',()=>{list[i.dataset.dn].name=i.value;onChange&&onChange();}));
+    wrap.querySelectorAll('[data-da]').forEach(i=>i.addEventListener('input',()=>{list[i.dataset.da].amount=n(i.value);onChange&&onChange();}));
+    wrap.querySelectorAll('[data-ds]').forEach(i=>i.addEventListener('change',()=>{list[i.dataset.ds].start_month=i.value;}));
+    wrap.querySelectorAll('[data-dm]').forEach(i=>i.addEventListener('input',()=>{list[i.dataset.dm].months=n(i.value);}));
+    wrap.querySelectorAll('[data-dr]').forEach(b=>b.addEventListener('click',()=>{list.splice(Number(b.dataset.dr),1);wrap.outerHTML=deductionRows(list,id);bindDeductions(box,list,id,onChange);onChange&&onChange();}));
+  }
+  function editSalary(p,T,done){
+    const st={...p,allowances:(p.allowances||[]).map(x=>({...x})),deductions:(p.deductions||[]).map(x=>({...x}))};
+    const opts=(list,v)=>list.map(g=>`<option value="${g}" ${Number(v)===g?'selected':''}>${money(g)}</option>`).join('');
+    const {box,close}=modal(`💰 ${esc(p.name)}｜薪資設定`,`<form class="pr-form" id="salForm">
+      <label class="chk wide"><input type="checkbox" name="payroll_enabled" ${st.payroll_enabled?'checked':''}> 納入每月薪資計算</label>
+      <div class="wide hint" style="margin:0">人事資料：到職 ${esc(p.hire_date||'未登記')}｜試用期至 ${esc(p.trial_end_date||'未登記')}｜加保：${[p.labor_insured?'勞保':'',p.labor_insured&&p.employment_insured?'就保':'',p.health_insured?'健保':'',p.pension_enabled?'勞退':''].filter(Boolean).join('、')||'無'}｜健保眷屬 ${p.health_dependents||0} 人</div>
+      <div class="pr-sec">薪資</div>
+      <label>試用期薪資（元／月）<input name="trial_salary" inputmode="numeric" value="${st.trial_salary||''}" placeholder="${p.trial_end_date?'試用期間適用':'沒有試用期可留白'}"></label>
+      <label>正式薪資（元／月）<input name="base_salary" inputmode="numeric" value="${st.base_salary||''}" placeholder="例如 32000"></label>
+      <p class="hint wide" style="margin:-4px 0 0">試用期到期日在月中時，當月底薪依日數比例計算（試用期薪資＋正式薪資）。</p>
+      <div class="wide"><div style="font-weight:700;font-size:.86rem;margin-bottom:5px">固定加給（每月固定發放）</div><div id="salAllow"></div><button type="button" class="secondary" id="salAllowAdd" style="padding:6px 12px;min-height:0">＋ 新增加給</button></div>
+      <div class="wide"><div style="font-weight:700;font-size:.86rem;margin-bottom:5px">每月定期代扣款（制服費、宿舍費等；設定後每月自動扣，期數到了自動停止）</div><div class="pr-ded pr-ded-head"><span>項目</span><span>每月金額</span><span>開始月份</span><span>期數（空白＝持續）</span><span></span></div>${deductionRows(st.deductions,'salDed')}<button type="button" class="secondary" id="salDedAdd" style="padding:6px 12px;min-height:0">＋ 新增代扣款</button></div>
+      <div class="pr-sec">投保級距與勞退</div>
+      <label class="chk wide"><input type="checkbox" name="auto_grade" ${st.auto_grade?'checked':''}> 投保級距依薪資自動對應（建議；試用期用試用期薪資）</label>
+      <label>勞保投保薪資<select name="labor_grade" ${p.labor_insured?'':'disabled'}>${opts(T.labor,st.labor_grade)}</select></label>
+      <label>健保投保金額<select name="health_grade" ${p.health_insured?'':'disabled'}>${opts(T.health,st.health_grade)}</select></label>
+      <label>勞退提繳工資<select name="pension_grade" ${p.pension_enabled?'':'disabled'}>${opts(T.pension,st.pension_grade)}</select></label>
+      <label>勞退自提（%）<input type="number" min="0" max="6" step="1" name="pension_self_rate" value="${st.pension_self_rate||0}"></label>
+      <label class="wide">薪轉銀行帳號（選填）<input name="bank_account" value="${esc(st.bank_account)}"></label>
+      <label class="wide">薪資備註<textarea name="salary_note" rows="2">${esc(st.salary_note)}</textarea></label>
+      <div class="pr-preview" id="salPreview"></div>
+      <div class="wide modal-actions"><button type="button" class="secondary" data-cancel>取消</button><button type="submit">💾 儲存</button></div></form>`,{wide:true});
+    const f=box.querySelector('#salForm');
+    const drawAllow=()=>{box.querySelector('#salAllow').innerHTML=st.allowances.map((a,i)=>`<div class="pr-allow"><input placeholder="名稱" value="${esc(a.name)}" data-an="${i}"><input placeholder="金額" inputmode="numeric" value="${a.amount||''}" data-aa="${i}" style="max-width:140px"><button type="button" class="danger" data-ar="${i}" style="padding:4px 10px;min-height:0">×</button></div>`).join('');
       box.querySelectorAll('[data-an]').forEach(i=>i.addEventListener('input',()=>{st.allowances[i.dataset.an].name=i.value;}));box.querySelectorAll('[data-aa]').forEach(i=>i.addEventListener('input',()=>{st.allowances[i.dataset.aa].amount=n(i.value);update();}));box.querySelectorAll('[data-ar]').forEach(b=>b.addEventListener('click',()=>{st.allowances.splice(Number(b.dataset.ar),1);drawAllow();update();}));};
-    box.querySelector('#hrAllowAdd').onclick=()=>{st.allowances.push({name:'',amount:0});drawAllow();};
-    const read=()=>{const v=k=>f.elements[k];return {payroll_enabled:v('payroll_enabled').checked,hire_date:v('hire_date').value,trial_end_date:v('trial_end_date').value,base_salary:n(v('base_salary').value),bank_account:v('bank_account').value,allowances:st.allowances.filter(a=>a.name.trim()&&n(a.amount)),labor_insured:v('labor_insured').checked,employment_insured:v('employment_insured').checked,occupational_insured:true,health_insured:v('health_insured').checked,pension_enabled:v('pension_enabled').checked,auto_grade:v('auto_grade').checked,labor_grade:n(v('labor_grade').value),health_grade:n(v('health_grade').value),pension_grade:n(v('pension_grade').value),health_dependents:n(v('health_dependents').value),pension_self_rate:Number(v('pension_self_rate').value)||0,note:v('note').value};};
+    box.querySelector('#salAllowAdd').onclick=()=>{st.allowances.push({name:'',amount:0});drawAllow();};
+    box.querySelector('#salDedAdd').onclick=()=>{st.deductions.push({name:'',amount:0,start_month:thisM(),months:0});const w=box.querySelector('#salDed');w.outerHTML=deductionRows(st.deductions,'salDed');bindDeductions(box,st.deductions,'salDed',update);box.querySelector('#salDed .pr-ded:last-child input')?.focus();};
+    bindDeductions(box,st.deductions,'salDed',update);
+    const read=()=>{const v=k=>f.elements[k];return {payroll_enabled:v('payroll_enabled').checked,trial_salary:n(v('trial_salary').value),base_salary:n(v('base_salary').value),allowances:st.allowances.filter(a=>a.name.trim()&&n(a.amount)),deductions:st.deductions.filter(x=>x.name.trim()&&n(x.amount)),auto_grade:v('auto_grade').checked,labor_grade:n(v('labor_grade').value),health_grade:n(v('health_grade').value),pension_grade:n(v('pension_grade').value),pension_self_rate:Number(v('pension_self_rate').value)||0,bank_account:v('bank_account').value,salary_note:v('salary_note').value};};
     function update(){
-      const v=read();const monthly=v.base_salary+v.allowances.reduce((a,x)=>a+n(x.amount),0);
+      const v=read();const allow=v.allowances.reduce((a,x)=>a+n(x.amount),0);
+      const inTrial=v.trial_salary&&p.trial_end_date&&p.trial_end_date>=`${thisM()}-01`;
+      const monthly=(inTrial?v.trial_salary:v.base_salary)+allow;
       if(v.auto_grade){f.elements.labor_grade.value=gradeFor(T.labor,monthly);f.elements.health_grade.value=gradeFor(T.health,monthly);f.elements.pension_grade.value=gradeFor(T.pension,monthly);}
-      for(const k of ['labor_grade','health_grade','pension_grade'])f.elements[k].disabled=v.auto_grade;
-      const p2={...read(),monthly};const ins=calcIns(p2,T);
-      box.querySelector('#hrPreview').innerHTML=`<div class="ee"><b>員工每月自付</b><br>勞保（含就保）${money(ins.employee.labor)}　健保 ${money(ins.employee.health)}${ins.employee.pension_self?`　勞退自提 ${money(ins.employee.pension_self)}`:''}<br><b>合計 ${money(sum(ins.employee))} 元</b>　｜　月薪 ${money(monthly)}</div><div class="er"><b>公司每月負擔</b><br>勞保 ${money(ins.employer.labor)}　職災 ${money(ins.employer.occupational)}　健保 ${money(ins.employer.health)}　勞退 ${money(ins.employer.pension)}<br><b>合計 ${money(sum(ins.employer))} 元</b></div>`;
+      for(const k of ['labor_grade','health_grade','pension_grade'])f.elements[k].disabled=v.auto_grade||(k==='labor_grade'&&!p.labor_insured)||(k==='health_grade'&&!p.health_insured)||(k==='pension_grade'&&!p.pension_enabled);
+      const ins=calcIns({...v,monthly,labor_insured:p.labor_insured,employment_insured:p.employment_insured,occupational_insured:true,health_insured:p.health_insured,pension_enabled:p.pension_enabled,health_dependents:p.health_dependents,labor_grade:n(f.elements.labor_grade.value),health_grade:n(f.elements.health_grade.value),pension_grade:n(f.elements.pension_grade.value)},T);
+      const ded=v.deductions.filter(x=>x.start_month<=thisM()).reduce((a,x)=>a+n(x.amount),0);
+      const net=monthly-sum(ins.employee)-ded;
+      box.querySelector('#salPreview').innerHTML=`<div class="ee"><b>${inTrial?'試用期中，':''}本月試算（員工）</b><br>月薪 ${money(monthly)} − 勞保 ${money(ins.employee.labor)} − 健保 ${money(ins.employee.health)}${ins.employee.pension_self?` − 勞退自提 ${money(ins.employee.pension_self)}`:''}${ded?` − 代扣 ${money(ded)}`:''}<br><b>約實發 ${money(net)} 元</b>（未含加班、請假、借資）</div><div class="er"><b>公司每月負擔</b><br>勞保 ${money(ins.employer.labor)}　職災 ${money(ins.employer.occupational)}　健保 ${money(ins.employer.health)}　勞退 ${money(ins.employer.pension)}<br><b>合計 ${money(sum(ins.employer))} 元</b></div>`;
     }
     drawAllow();update();f.addEventListener('input',update);f.addEventListener('change',update);
     box.querySelector('[data-cancel]').onclick=close;
-    f.addEventListener('submit',async e=>{e.preventDefault();try{await api(`/api/company/hr/profiles/${p.staff_id}`,J('PUT',read()));close();done();}catch(err){alert(err.message);}});
+    f.addEventListener('submit',async e=>{e.preventDefault();const v=read();if(v.trial_salary&&!p.trial_end_date&&!confirm('這位人員在人事管理還沒有登記試用期到期日，試用期薪資不會生效。仍要儲存嗎？'))return;try{await api(`/api/company/payroll/salaries/${p.staff_id}`,J('PUT',v));close();done();}catch(err){alert(err.message);}});
   }
 
   // ================= 人員薪資統計表 =================
@@ -145,10 +196,10 @@ button.lnk{border:0!important;background:transparent!important;color:#1f5c42!imp
       ${run.items.some(x=>!x.configured)?`<div class="pr-warn">⚠ ${esc(run.items.filter(x=>!x.configured).map(x=>x.name).join('、'))} 尚未在人事管理設定薪資，金額為 0。</div>`:''}
       ${pub?`<div class="pr-ok">✓ 已發布給 ${run.items.length} 位人員：已讀 ${run.viewed} 人、已確認 ${run.confirmed} 人。如需修改請先「撤回發布」。</div>`:''}
       <div class="pr-kpis"><div class="pr-kpi"><span>人數</span><b>${run.items.length}</b></div><div class="pr-kpi"><span>應發合計</span><b>${money(T.gross)}</b></div><div class="pr-kpi"><span>實發合計</span><b>${money(T.net)}</b></div><div class="pr-kpi"><span>公司負擔勞健保／勞退</span><b>${money(T.employer_total)}</b></div><div class="pr-kpi"><span>人事成本合計</span><b>${money(T.employer_cost)}</b></div></div>
-      <div class="pr-wrap" id="prTableWrap"><table class="pr-table"><thead><tr class="grp"><th class="sticky"></th><th colspan="5">應發</th><th colspan="7">應扣</th><th></th><th colspan="5">公司負擔</th></tr><tr class="cols"><th class="sticky">人員</th><th>底薪</th><th>固定加給</th><th>加班費</th><th>其他加項</th><th>應發合計</th><th>勞保</th><th>健保</th><th>勞退自提</th><th>請假扣款</th><th>借資扣回</th><th>其他扣項</th><th>應扣合計</th><th>實發金額</th><th>勞保</th><th>職災</th><th>健保</th><th>勞退6%</th><th>人事成本</th></tr></thead><tbody>
-      ${run.items.map(x=>{const ed=k=>pub?money(x[k]):`<input data-item="${x.id}" data-k="${k}" value="${n(x[k])||''}" inputmode="numeric" placeholder="0">`;const ee=x.ins?.employee||{},er=x.ins?.employer||{};return `<tr><td class="sticky"><button type="button" class="lnk" data-detail="${x.id}">${esc(x.name)}</button><br><small class="muted">${esc(x.employee_id)}</small></td><td>${money(x.base)}${x.base_manual?' ✎':''}</td><td>${money((x.allowances||[]).reduce((a,y)=>a+n(y.amount),0))}</td><td>${ed('overtime')}</td><td>${ed('other_add')}</td><td><b>${money(x.gross)}</b></td><td class="ee">${money(ee.labor)}</td><td class="ee">${money(ee.health)}</td><td class="ee">${money(ee.pension_self)}</td><td>${ed('leave_deduct')}</td><td>${ed('advance_deduct')}</td><td>${ed('other_deduct')}</td><td><b>${money(x.deduct_total)}</b></td><td class="net">${money(x.net)}</td><td class="er">${money(er.labor)}</td><td class="er">${money(er.occupational)}</td><td class="er">${money(er.health)}</td><td class="er">${money(er.pension)}</td><td><b>${money(x.employer_cost)}</b></td></tr>`;}).join('')}
-      <tr class="tot"><td class="sticky">合計</td><td>${money(T.base)}</td><td>${money(T.allowances)}</td><td>${money(T.overtime)}</td><td>${money(T.other_add)}</td><td>${money(T.gross)}</td><td>${money(T.labor_ee)}</td><td>${money(T.health_ee)}</td><td>${money(T.pension_self)}</td><td>${money(T.leave_deduct)}</td><td>${money(T.advance_deduct)}</td><td>${money(T.other_deduct)}</td><td>${money(T.deduct_total)}</td><td>${money(T.net)}</td><td>${money(T.labor_er)}</td><td>${money(T.occupational_er)}</td><td>${money(T.health_er)}</td><td>${money(T.pension_er)}</td><td>${money(T.employer_cost)}</td></tr></tbody></table></div>
-      <p class="hint" style="margin-top:8px">使用 ${run.table_year} 年投保級距表；職災費率 ${(Number(run.rates?.occupational||0)*100).toFixed(2)}%（<button type="button" class="lnk" id="prOcc">修改本公司職災費率</button>）。點人員姓名可以填寫備註、調整底薪。</p>`}`;
+      <div class="pr-wrap" id="prTableWrap"><table class="pr-table"><thead><tr class="grp"><th class="sticky"></th><th colspan="5">應發</th><th colspan="8">應扣</th><th></th><th colspan="5">公司負擔</th></tr><tr class="cols"><th class="sticky">人員</th><th>底薪</th><th>固定加給</th><th>加班費</th><th>其他加項</th><th>應發合計</th><th>勞保</th><th>健保</th><th>勞退自提</th><th>請假扣款</th><th>借資扣回</th><th>代扣款</th><th>其他扣項</th><th>應扣合計</th><th>實發金額</th><th>勞保</th><th>職災</th><th>健保</th><th>勞退6%</th><th>人事成本</th></tr></thead><tbody>
+      ${run.items.map(x=>{const ed=k=>pub?money(x[k]):`<input data-item="${x.id}" data-k="${k}" value="${n(x[k])||''}" inputmode="numeric" placeholder="0">`;const ee=x.ins?.employee||{},er=x.ins?.employer||{};return `<tr><td class="sticky"><button type="button" class="lnk" data-detail="${x.id}">${esc(x.name)}</button><br><small class="muted">${esc(x.employee_id)}</small></td><td title="${esc(x.base_note||'')}">${money(x.base)}${x.base_manual?' ✎':x.base_note?' <small class="muted">試</small>':''}</td><td>${money((x.allowances||[]).reduce((a,y)=>a+n(y.amount),0))}</td><td>${ed('overtime')}</td><td>${ed('other_add')}</td><td><b>${money(x.gross)}</b></td><td class="ee">${money(ee.labor)}</td><td class="ee">${money(ee.health)}</td><td class="ee">${money(ee.pension_self)}</td><td>${ed('leave_deduct')}</td><td>${ed('advance_deduct')}</td><td title="${esc((x.deductions||[]).map(d=>`${d.name} ${d.amount}（${d.period}）`).join('、'))}">${money(x.deductions_total)}</td><td>${ed('other_deduct')}</td><td><b>${money(x.deduct_total)}</b></td><td class="net">${money(x.net)}</td><td class="er">${money(er.labor)}</td><td class="er">${money(er.occupational)}</td><td class="er">${money(er.health)}</td><td class="er">${money(er.pension)}</td><td><b>${money(x.employer_cost)}</b></td></tr>`;}).join('')}
+      <tr class="tot"><td class="sticky">合計</td><td>${money(T.base)}</td><td>${money(T.allowances)}</td><td>${money(T.overtime)}</td><td>${money(T.other_add)}</td><td>${money(T.gross)}</td><td>${money(T.labor_ee)}</td><td>${money(T.health_ee)}</td><td>${money(T.pension_self)}</td><td>${money(T.leave_deduct)}</td><td>${money(T.advance_deduct)}</td><td>${money(T.deductions)}</td><td>${money(T.other_deduct)}</td><td>${money(T.deduct_total)}</td><td>${money(T.net)}</td><td>${money(T.labor_er)}</td><td>${money(T.occupational_er)}</td><td>${money(T.health_er)}</td><td>${money(T.pension_er)}</td><td>${money(T.employer_cost)}</td></tr></tbody></table></div>
+      <p class="hint" style="margin-top:8px">「試」表示當月含試用期薪資；代扣款來自「薪資設定」的定期代扣（滑鼠移上去看明細）。使用 ${run.table_year} 年投保級距表；職災費率 ${(Number(run.rates?.occupational||0)*100).toFixed(2)}%（<button type="button" class="lnk" id="prOcc">修改本公司職災費率</button>）。點人員姓名可以填寫備註、調整底薪。</p>`}`;
     el.querySelector('#prMonth').addEventListener('change',e=>{if(e.target.value)renderStats(el,label,e.target.value).catch(err=>alert(err.message));});
     el.querySelectorAll('[data-month]').forEach(b=>b.addEventListener('click',()=>renderStats(el,label,b.dataset.month).catch(err=>alert(err.message))));
     el.querySelector('#prGen')?.addEventListener('click',async e=>{e.target.disabled=true;try{await api(`/api/company/payroll/runs/${month}/generate`,{method:'POST'});await renderStats(el,label,month);}catch(err){alert(err.message);e.target.disabled=false;}});
@@ -169,14 +220,22 @@ button.lnk{border:0!important;background:transparent!important;color:#1f5c42!imp
   }
 
   // ================= 人員薪資單（會計檢視已發布） =================
-  async function renderSlips(el,label,month){
+  async function renderSlips(el,label,month,tab){
+    tab=tab||S.slipTab||'settings';S.slipTab=tab;
+    if(tab==='settings'){
+      el.innerHTML=`<div class="eyebrow">📄 會計</div><h1>${esc(label||'人員薪資')}</h1><div class="pr-tabs"><button type="button" data-tab="settings">💰 薪資設定</button><button type="button" class="secondary" data-tab="published">📄 已發布薪資單</button><button type="button" class="secondary" id="psMine" style="margin-left:auto">我的薪資單</button></div><div id="salBox"><div class="profile-loading">讀取中…</div></div>`;
+      el.querySelector('[data-tab=published]').addEventListener('click',()=>renderSlips(el,label,null,'published').catch(err=>alert(err.message)));
+      el.querySelector('#psMine').addEventListener('click',()=>openMine().catch(err=>alert(err.message)));
+      return renderSalaries(el.querySelector('#salBox'));
+    }
     const meta=await api('/api/company/payroll/runs');const pubs=(meta.runs||[]).filter(r=>r.status==='published');
     month=month||pubs[0]?.month;
     const run=month?(await api(`/api/company/payroll/runs/${month}`)).run:null;
-    el.innerHTML=`<div class="eyebrow">📄 會計</div><h1>${esc(label||'人員薪資單')}</h1><p class="hint">在「人員薪資統計表」按「發布薪資單」後，會自動為每位人員產生薪資單並以訊息通知。這裡可以看到每個人是否已讀、已確認。</p>
+    el.innerHTML=`<div class="eyebrow">📄 會計</div><h1>${esc(label||'人員薪資')}</h1><div class="pr-tabs"><button type="button" class="secondary" data-tab="settings">💰 薪資設定</button><button type="button" data-tab="published">📄 已發布薪資單</button></div><p class="hint">在「人員薪資統計表」按「發布薪資單」後，會自動為每位人員產生薪資單並以訊息通知。這裡可以看到每個人是否已讀、已確認。</p>
       <div class="pr-bar">${pubs.map(r=>`<button type="button" class="${r.month===month?'':'secondary'}" data-month="${r.month}" style="padding:5px 12px;min-height:0">${monthLabel(r.month)}</button>`).join('')||'<span class="muted">還沒有發布過薪資單。</span>'}<button type="button" class="secondary" id="psMine" style="margin-left:auto">📄 我的薪資單</button></div>
       ${run&&run.status==='published'?`<div class="pr-ok">${monthLabel(month)}：發布 ${run.items.length} 份，已讀 ${run.viewed}、已確認 ${run.confirmed}。發布者 ${esc(run.published_by||'')}。</div><div class="pr-wrap"><table class="pr-table"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">職務</th><th>應發</th><th>應扣</th><th>實發</th><th class="l">已讀</th><th class="l">已確認</th><th></th></tr></thead><tbody>${run.items.map(x=>`<tr><td class="sticky"><b>${esc(x.name)}</b><br><small class="muted">${esc(x.employee_id)}</small></td><td class="l">${esc(x.position||'')}</td><td>${money(x.gross)}</td><td>${money(x.deduct_total)}</td><td class="net">${money(x.net)}</td><td class="l">${x.viewed_at?'✓':'—'}</td><td class="l">${x.confirmed_at?'<span class="pr-pill published">已確認</span>':'<span class="muted">未確認</span>'}</td><td><button type="button" class="secondary" data-view="${x.id}" style="padding:5px 12px;min-height:0">查看</button></td></tr>`).join('')}</tbody></table></div>`:''}`;
-    el.querySelectorAll('[data-month]').forEach(b=>b.addEventListener('click',()=>renderSlips(el,label,b.dataset.month).catch(err=>alert(err.message))));
+    el.querySelectorAll('[data-month]').forEach(b=>b.addEventListener('click',()=>renderSlips(el,label,b.dataset.month,'published').catch(err=>alert(err.message))));
+    el.querySelector('[data-tab=settings]').addEventListener('click',()=>renderSlips(el,label,null,'settings').catch(err=>alert(err.message)));
     el.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{const x=run.items.find(i=>String(i.id)===b.dataset.view);modal('',window.PayslipView.html({...x,month}),{wide:true});}));
     el.querySelector('#psMine').addEventListener('click',()=>openMine().catch(err=>alert(err.message)));
   }
@@ -198,11 +257,24 @@ button.lnk{border:0!important;background:transparent!important;color:#1f5c42!imp
     const d=await api('/api/company/payroll/advances');S.adFilter=S.adFilter||'active';
     const list=d.advances.filter(a=>S.adFilter==='all'||a.status===S.adFilter);
     const active=d.advances.filter(a=>a.status==='active');
+    const dl=d.deductions||[];const dAct=dl.filter(x=>!x.ended);
     el.innerHTML=`<div class="eyebrow">💰 會計</div><h1>${esc(label||'借資')}</h1><p class="hint">登記人員借資（預支薪資）。產生每月薪資時，系統會依「每月扣回金額」自動帶入「借資扣回」；發布薪資單後才正式扣回，還完會自動結清。</p>
       <div class="pr-kpis"><div class="pr-kpi"><span>進行中借資</span><b>${active.length} 筆</b></div><div class="pr-kpi"><span>尚未還款餘額</span><b>${money(active.reduce((a,x)=>a+n(x.balance),0))}</b></div><div class="pr-kpi"><span>每月預計扣回</span><b>${money(active.reduce((a,x)=>a+Math.min(n(x.monthly_deduct),n(x.balance)),0))}</b></div></div>
       <div class="pr-bar"><button type="button" id="adAdd">＋ 登記借資</button><div class="pr-tabs" style="margin:0">${[['active','進行中'],['closed','已結清'],['all','全部']].map(([k,t])=>`<button type="button" class="${S.adFilter===k?'':'secondary'}" data-f="${k}">${t}</button>`).join('')}</div></div>
-      ${list.length?`<div class="pr-wrap"><table class="pr-table" style="width:100%"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">借資日期</th><th>借資金額</th><th>每月扣回</th><th class="l">開始扣回</th><th>已還</th><th>剩餘</th><th class="l">事由</th><th class="l">狀態</th><th></th></tr></thead><tbody>${list.map(a=>`<tr><td class="sticky"><b>${esc(a.name)}</b><br><small class="muted">${esc(a.employee_id)}</small></td><td class="l">${esc(a.advance_date)}</td><td>${money(a.amount)}</td><td>${money(a.monthly_deduct)}</td><td class="l">${monthLabel(a.start_month)}</td><td>${money(n(a.amount)-n(a.balance))}</td><td class="net">${money(a.balance)}</td><td class="l" style="white-space:normal;min-width:120px">${esc(a.reason||'')}</td><td class="l">${a.status==='active'?'<span class="pr-pill draft">扣回中</span>':'<span class="pr-pill published">已結清</span>'}</td><td style="white-space:nowrap"><button type="button" class="secondary" data-hist="${a.id}" style="padding:4px 10px;min-height:0">紀錄</button> ${a.status==='active'?`<button type="button" class="secondary" data-edit="${a.id}" style="padding:4px 10px;min-height:0">編輯</button> <button type="button" class="secondary" data-close="${a.id}" style="padding:4px 10px;min-height:0">結清</button>`:''} ${a.repayments.length?'':`<button type="button" class="danger" data-del="${a.id}" style="padding:4px 10px;min-height:0">刪除</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有資料。</div>'}`;
+      ${list.length?`<div class="pr-wrap"><table class="pr-table" style="width:100%"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">借資日期</th><th>借資金額</th><th>每月扣回</th><th class="l">開始扣回</th><th>已還</th><th>剩餘</th><th class="l">事由</th><th class="l">狀態</th><th></th></tr></thead><tbody>${list.map(a=>`<tr><td class="sticky"><b>${esc(a.name)}</b><br><small class="muted">${esc(a.employee_id)}</small></td><td class="l">${esc(a.advance_date)}</td><td>${money(a.amount)}</td><td>${money(a.monthly_deduct)}</td><td class="l">${monthLabel(a.start_month)}</td><td>${money(n(a.amount)-n(a.balance))}</td><td class="net">${money(a.balance)}</td><td class="l" style="white-space:normal;min-width:120px">${esc(a.reason||'')}</td><td class="l">${a.status==='active'?'<span class="pr-pill draft">扣回中</span>':'<span class="pr-pill published">已結清</span>'}</td><td style="white-space:nowrap"><button type="button" class="secondary" data-hist="${a.id}" style="padding:4px 10px;min-height:0">紀錄</button> ${a.status==='active'?`<button type="button" class="secondary" data-edit="${a.id}" style="padding:4px 10px;min-height:0">編輯</button> <button type="button" class="secondary" data-close="${a.id}" style="padding:4px 10px;min-height:0">結清</button>`:''} ${a.repayments.length?'':`<button type="button" class="danger" data-del="${a.id}" style="padding:4px 10px;min-height:0">刪除</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有資料。</div>'}
+      <div class="section-title" style="margin-top:22px">🧾 每月定期代扣款（制服費、宿舍費等）</div><p class="hint">設定後每個月產生薪資時自動扣除，期數到了自動停止，會出現在「人員薪資統計表」的「代扣款」欄。也可以在「人員薪資 → 薪資設定」裡設定。</p>
+      <div class="pr-bar"><button type="button" class="secondary" id="dedAdd">＋ 新增代扣款</button><span class="muted">目前每月代扣合計 ${money(dl.filter(x=>x.active_now).reduce((a,x)=>a+n(x.amount),0))} 元</span></div>
+      ${dAct.length?`<div class="pr-wrap"><table class="pr-table" style="width:100%"><thead><tr class="cols"><th class="sticky">人員</th><th class="l">項目</th><th>每月金額</th><th class="l">開始月份</th><th class="l">期數</th><th class="l">狀態</th><th></th></tr></thead><tbody>${dAct.map(x=>`<tr><td class="sticky"><b>${esc(x.name_staff)}</b><br><small class="muted">${esc(x.employee_id)}</small></td><td class="l">${esc(x.name)}</td><td>${money(x.amount)}</td><td class="l">${monthLabel(x.start_month)}</td><td class="l">${x.months?`${x.months} 期`:'每月持續'}</td><td class="l">${x.active_now?'<span class="pr-pill draft">扣款中</span>':'<span class="muted">尚未開始</span>'}</td><td><button type="button" class="secondary" data-ded="${x.staff_id}" style="padding:4px 10px;min-height:0">編輯</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">目前沒有定期代扣款。</div>'}`;
     const reload=()=>renderAdvances(el,label);
+    const editDed=(staffId)=>{const items=dl.filter(x=>x.staff_id===staffId).map(x=>({...x}));const who=d.staff.find(s=>s.id===staffId);
+      const {box,close}=modal(`🧾 ${esc(who?.name||'')}｜定期代扣款`,`<div class="pr-ded pr-ded-head"><span>項目</span><span>每月金額</span><span>開始月份</span><span>期數（空白＝持續）</span><span></span></div>${deductionRows(items,'dedList')}<button type="button" class="secondary" id="dedRow" style="padding:6px 12px;min-height:0">＋ 新增一項</button><div class="modal-actions"><button type="button" class="secondary" data-cancel>取消</button><button type="button" id="dedSave">💾 儲存</button></div>`,{wide:true});
+      bindDeductions(box,items,'dedList');
+      box.querySelector('#dedRow').onclick=()=>{items.push({name:'',amount:0,start_month:thisM(),months:0});box.querySelector('#dedList').outerHTML=deductionRows(items,'dedList');bindDeductions(box,items,'dedList');};
+      box.querySelector('[data-cancel]').onclick=close;
+      box.querySelector('#dedSave').onclick=async()=>{try{await api(`/api/company/payroll/salaries/${staffId}/deductions`,J('PUT',{deductions:items.filter(x=>x.name.trim()&&n(x.amount))}));close();reload();}catch(err){alert(err.message);}};
+    };
+    el.querySelectorAll('[data-ded]').forEach(b=>b.addEventListener('click',()=>editDed(Number(b.dataset.ded))));
+    el.querySelector('#dedAdd').addEventListener('click',()=>{const {box,close}=modal('🧾 新增代扣款',`<form class="pr-form"><label class="wide">人員<select id="dedWho">${d.staff.map(s=>`<option value="${s.id}">${esc(s.name)}（${esc(s.employee_id)}）</option>`).join('')}</select></label><div class="wide modal-actions"><button type="button" class="secondary" data-cancel>取消</button><button type="button" id="dedNext">下一步</button></div></form>`);box.querySelector('[data-cancel]').onclick=close;box.querySelector('#dedNext').onclick=()=>{const id=Number(box.querySelector('#dedWho').value);close();if(!dl.some(x=>x.staff_id===id))dl.push({staff_id:id,name:'',amount:0,start_month:thisM(),months:0,_new:true});editDed(id);};});
     el.querySelectorAll('[data-f]').forEach(b=>b.addEventListener('click',()=>{S.adFilter=b.dataset.f;reload();}));
     el.querySelector('#adAdd').addEventListener('click',()=>advanceForm(null,d.staff,reload));
     el.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>advanceForm(d.advances.find(a=>String(a.id)===b.dataset.edit),d.staff,reload)));

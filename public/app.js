@@ -131,6 +131,7 @@ function openSalaryDetailsCard(salary,advances){
   payslipModal(`<div class="eyebrow">薪資相關</div><h2>人事與投保資料</h2><div class="staff-profile-basic salary-details-body">
     <div><span>到職日</span><strong>${salary.hire_date?escapeHtml(salary.hire_date):'尚未設定'}</strong></div>
     <div><span>試用期</span><strong>${salary.trial_end_date?`至 ${escapeHtml(salary.trial_end_date)}`:'尚未設定'}</strong></div>
+    ${salary.trial_salary?`<div><span>試用期薪資</span><strong>${money(salary.trial_salary)} 元</strong></div>`:''}
     <div><span>正式薪資（底薪）</span><strong>${salary.formal_salary?`${money(salary.formal_salary)} 元`:'尚未設定'}</strong></div>
     ${allow?`<div><span>固定加給</span><strong>${allow}</strong></div>`:''}
     <div><span>勞保投保薪資</span><strong>${yes(salary.labor_insured,salary.insurance_level?`${money(salary.insurance_level)} 元${salary.employment_insured?'（含就保）':''}`:'尚未設定')}</strong></div>
@@ -138,6 +139,7 @@ function openSalaryDetailsCard(salary,advances){
     <div><span>健保眷屬</span><strong>${Number(salary.health_dependents||0)} 人</strong></div>
     <div><span>勞退</span><strong>${salary.pension_enabled?`公司提繳 6%${salary.pension_self_rate?`，自提 ${salary.pension_self_rate}%`:''}`:'未提繳'}</strong></div>
     ${salary.configured?`<div><span>每月保費自付</span><strong>${money(eeSum)} 元</strong></div>`:''}
+    ${(salary.deductions||[]).map(x=>`<div><span>每月代扣：${escapeHtml(x.name)}</span><strong>${money(x.amount)} 元（${escapeHtml(x.period)}）</strong></div>`).join('')}
     ${advances.map(a=>`<div><span>借資餘額</span><strong>${money(a.balance)} 元（每月扣回 ${money(a.monthly_deduct)}）</strong></div>`).join('')}
   </div><p class="hint" style="margin-top:10px">資料由公司人事維護，如有錯誤請洽人事或會計。</p>`);
 }
