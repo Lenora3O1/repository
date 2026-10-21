@@ -59,7 +59,7 @@
     return {box,close};
   }
   const pill=r=>`<span class="lv-pill ${STATUS_CLS[r.status]||''}">${esc(r.status_label)}${r.status==='pending'&&r.current_step?`・${esc(r.current_step)}`:''}</span>${r.absent?'<span class="lv-pill bad">曠職</span>':r.proof_label?`<span class="lv-pill proof">${esc(r.proof_label)}</span>`:''}`;
-  const steps=r=>`<div class="lv-steps">${r.steps.map((s,i)=>`${i?'→':''}<span class="${s.skipped?'skip':s.state}" title="${esc(s.approvers.join('、')||'未指定審核人員')}">${esc(s.name)}</span>`).join('')}</div>`;
+  const steps=r=>`<div class="lv-steps">${r.steps.map((s,i)=>`${i?'→':''}<span class="${s.skipped?'skip':s.state}" title="${esc(s.skipped?(s.note||'略過'):(s.approvers.join('、')+((s.proxies||[]).length?`（代理：${s.proxies.join('、')}）`:'')))}">${esc(s.name)}${!s.skipped&&s.approvers.length&&s.approvers.length<=2?`<small>・${esc(s.approvers.join('、'))}</small>`:''}</span>`).join('')}</div>`;
 
   // ================= 主畫面 =================
   async function render(el,opts={}){
@@ -70,7 +70,7 @@
     const tabs=[['apply','📝 申請請假'],['mine','📋 我的假單']];
     if(m.is_approver||m.pending_for_me)tabs.push(['approve','✅ 待我審核']);
     if(S.side==='company'&&m.can_manage)tabs.push(['all','🗂 全部假單'],['balance','📊 假別額度']);
-    if(S.side==='company')tabs.push(['setup',m.is_admin?'⚙ 審核人員設定':'📖 請假規則']);
+    if(S.side==='company')tabs.push(['setup',m.is_admin?'⚙ 審核設定':'📖 請假規則']);
     if(!tabs.some(t=>t[0]===S.tab))S.tab='apply';
     el.innerHTML=`<div class="panel"><div class="eyebrow">📝 請假</div><h1>${esc(S.label)}</h1>
       <div class="lv-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${S.tab===k?'':'secondary'}">${l}${k==='approve'&&m.pending_for_me?`<span class="badge">${m.pending_for_me}</span>`:''}</button>`).join('')}</div>
@@ -237,14 +237,20 @@
   // ---------- 審核人員設定（公司管理員） ----------
   async function renderSetup(box){
     const d=await api('/api/company/leave/approvers');const P=d.policy;const sel={};for(const s of d.flow)sel[s.id]=new Set(d.approvers[s.id]||[]);
-    const rules=`<div class="lv-type-info" style="margin-bottom:12px"><b>本公司請假規則</b>（由平台總後台依公司需求設定）<br>請假單位：${P.unit==='hour'?'1 小時':P.unit==='half'?'半天':'1 天'}，每天 ${P.hours_per_day} 小時｜證明補交：${P.proof_days} 日內，逾期${P.overdue_action==='absent'?'視為曠職':'只提醒'}｜日薪：${P.daily_wage_mode==='workdays'?'月薪 ÷ 當月應出勤日':'月薪 ÷ 30'}${P.wage_includes_allowances?'（含固定加給）':''}，時薪＝日薪 ÷ ${P.hours_per_day}｜加班：${P.overtime_mode==='comp'?'換補休':'給加班費'+(P.overtime_auto?'（依加班紀錄自動計算）':'')}｜全勤獎金：${P.attendance.enabled?`「${esc(P.attendance.name)}」，事假${P.attendance.personal==='all'?'整筆不發':'按比例扣'}`:'未設定'}<br>${d.types.map(t=>`${esc(t.name)} ${payText(t.pay)}${t.quota?` ${t.quota} 天`:''}`).join('、')}</div>`;
-    if(!d.can_edit){box.innerHTML=rules+`<div class="lv-type-info">審核流程：${esc(d.flow.map(s=>s.name).join(' → '))}。審核人員由公司管理員設定。</div>`;return;}
-    box.innerHTML=`${rules}<p class="hint">每一關指定哪些人可以審核。「同社區」的關卡只有和申請人在同一個社區的審核人員看得到（例如現場主管）；「全公司」的關卡所有指定人員都能審核。「全公司」關卡沒有指定人員時由公司管理員審核；「同社區」關卡找不到同社區的審核人員時自動跳過（例如內勤人員請假）。公司管理員隨時可以直接核准（略過後續關卡）。</p>
-      <div class="lv-bar"><input id="stQ" placeholder="搜尋姓名、員編、社區" style="min-width:220px"></div>
-      ${d.flow.map((s,i)=>`<div class="lv-step"><h4>第 ${i+1} 關：${esc(s.name)} <small class="muted">${s.scope==='community'?'同社區':'全公司'}${s.min_days?`・請假 ${s.min_days} 天以上才需要`:''}</small></h4><div class="lv-people">${d.staff.map(p=>`<label data-q="${esc(`${p.name} ${p.employee_id} ${p.position} ${p.communities.join(' ')}`.toLowerCase())}"><input type="checkbox" data-step="${esc(s.id)}" value="${p.id}" ${sel[s.id].has(p.id)?'checked':''}><span>${esc(p.name)} <small class="muted">${esc(p.employee_id)} ${esc(p.position)}${p.role==='company_admin'?' 管理員':''}${p.communities.length?`<br>${esc(p.communities.slice(0,3).join('、'))}`:''}</small></span></label>`).join('')}</div></div>`).join('')}
-      <div class="modal-actions" style="justify-content:flex-start"><button type="button" id="stSave">💾 儲存審核人員</button></div>`;
-    box.querySelector('#stQ').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();box.querySelectorAll('.lv-people label').forEach(l=>{l.style.display=!q||l.dataset.q.includes(q)?'':'none';});});
-    box.querySelector('#stSave').addEventListener('click',async()=>{const approvers={};for(const s of d.flow)approvers[s.id]=[...box.querySelectorAll(`[data-step="${CSS.escape(s.id)}"]:checked`)].map(x=>Number(x.value));try{await api('/api/company/leave/approvers',J('PUT',{approvers}));alert('已儲存。之後送出的假單會依新的審核人員流轉。');}catch(e){alert(e.message);}});
+    const rules=`<div class="lv-type-info" style="margin-bottom:12px"><b>本公司請假規則</b>（由平台總後台依公司需求設定）<br>請假單位：${P.unit==='hour'?'1 小時':P.unit==='half'?'半天':'1 天'}，每天 ${P.hours_per_day} 小時｜證明補交：${P.proof_days} 日內，逾期${P.overdue_action==='absent'?'視為曠職':'只提醒'}｜日薪：${P.daily_wage_mode==='workdays'?'月薪 ÷ 當月應出勤日':'月薪 ÷ 30'}${P.wage_includes_allowances?'（含固定加給）':''}，時薪＝日薪 ÷ ${P.hours_per_day}｜加班：${P.overtime_mode==='comp'?'換補休':P.overtime_mode==='allowance'?`${esc(P.overtime_allowance?.name||'支援費')} ${P.overtime_allowance?.amount||0} 元／${P.overtime_allowance?.unit==='hour'?'小時':'次'}`:'時數加班費'+(P.overtime_auto?'（依加班紀錄自動計算）':'')}｜全勤獎金：${P.attendance.enabled?`「${esc(P.attendance.name)}」，事假${P.attendance.personal==='all'?'整筆不發':'按比例扣'}`:'未設定'}<br>${d.types.map(t=>`${esc(t.name)} ${payText(t.pay)}${t.quota?` ${t.quota} 天`:''}`).join('、')}</div>`;
+    const BY={site:'申請人所屬社區的社區主管；沒有現場主管（例如社區主管本人、內勤、機動人員）時改由直屬主管審核',dept:'申請人所屬部門的主管（保全 → 同班別勤務經理；秘書 → 秘書部）',region:'申請人社區所在區域的督導',direct:'依組織架構往上一層',position:'指定職位'};
+    const posName=id=>(d.positions||[]).find(p=>p.id===id)?.name||'（未選擇職位）';
+    const desc=s=>(s.by||'people')==='position'?`由擔任「${esc(posName(s.position))}」的人審核；沒有人擔任時由公司管理員審核`:esc(BY[s.by]||'');
+    const flowText=`<div class="lv-type-info" style="margin-bottom:12px"><b>審核流程</b>（依組織架構自動找審核人，人事異動不用重設）<ol style="margin:6px 0 0;padding-left:20px">${d.flow.map(s=>`<li><b>${esc(s.name)}</b>${s.min_days?`（請假 ${s.min_days} 天以上才需要）`:''}：${(s.by||'people')==='people'?'公司指定的人員（下方勾選）':desc(s)}</li>`).join('')}</ol><small class="muted">同一個人連續兩關只審一次；公司管理員隨時可以直接核准。</small></div>`;
+    if(!d.can_edit){box.innerHTML=rules+flowText;return;}
+    const DP=[['none','不代理：社區主管請假時一樣收到通知，遠端審核'],['absent','社區主管當天請假時，由同社區副主管（副理／主秘）代理審核'],['always','同社區副主管隨時都可以審核第一關'],['dept_notify','第一關不由現場審核：直接由部門審核，並知會社區主管']];
+    const people=d.flow.filter(s=>(s.by||'people')==='people');
+    box.innerHTML=`${rules}${flowText}
+      <div class="lv-step"><h4>副主管代理審核</h4><div style="display:grid;gap:6px">${DP.map(([v,l])=>`<label style="display:flex;gap:8px;align-items:flex-start;font-weight:500;margin:0"><input type="radio" name="dp" value="${v}" style="width:auto;margin-top:4px" ${(d.prefs?.deputy_proxy||'none')===v?'checked':''}> ${esc(l)}</label>`).join('')}</div></div>
+      ${people.length?`<p class="hint">以下關卡由公司指定審核人員：</p><div class="lv-bar"><input id="stQ" placeholder="搜尋姓名、員編、社區" style="min-width:220px"></div>${people.map(s=>`<div class="lv-step"><h4>${esc(s.name)} <small class="muted">${s.scope==='community'?'只限同社區':'全公司'}${s.min_days?`・請假 ${s.min_days} 天以上才需要`:''}</small></h4><div class="lv-people">${d.staff.map(p=>`<label data-q="${esc(`${p.name} ${p.employee_id} ${p.position} ${p.communities.join(' ')}`.toLowerCase())}"><input type="checkbox" data-step="${esc(s.id)}" value="${p.id}" ${sel[s.id].has(p.id)?'checked':''}><span>${esc(p.name)} <small class="muted">${esc(p.employee_id)} ${esc(p.position)}${p.role==='company_admin'?' 管理員':''}${p.communities.length?`<br>${esc(p.communities.slice(0,3).join('、'))}`:''}</small></span></label>`).join('')}</div></div>`).join('')}`:''}
+      <div class="modal-actions" style="justify-content:flex-start"><button type="button" id="stSave">💾 儲存</button></div>`;
+    box.querySelector('#stQ')?.addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();box.querySelectorAll('.lv-people label').forEach(l=>{l.style.display=!q||l.dataset.q.includes(q)?'':'none';});});
+    box.querySelector('#stSave').addEventListener('click',async()=>{try{await api('/api/company/org/prefs',J('PUT',{deputy_proxy:box.querySelector('[name=dp]:checked')?.value||'none'}));if(people.length){const approvers={};for(const s of people)approvers[s.id]=[...box.querySelectorAll(`[data-step="${CSS.escape(s.id)}"]:checked`)].map(x=>Number(x.value));await api('/api/company/leave/approvers',J('PUT',{approvers}));}alert('已儲存。之後送出的假單會依新的設定流轉。');}catch(e){alert(e.message);}});
   }
 
   window.LeaveModule={render};

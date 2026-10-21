@@ -42,14 +42,18 @@ function defaults() {
     overdue_action: 'absent',  // 逾期未補：absent 視為曠職、remind 只提醒
     daily_wage_mode: 'month30', // month30 月薪÷30；workdays 月薪÷當月應出勤日（扣除例假、國定假日）
     wage_includes_allowances: true, // 日薪是否含固定加給（經常性給與）
-    overtime_mode: 'pay',      // pay 加班費、comp 加班換補休
+    overtime_mode: 'pay',      // pay 時數加班費、allowance 車馬費／支援費、comp 加班換補休
+    overtime_allowance: { name: '支援費', unit: 'time', amount: 0 }, // allowance：每次或每小時固定金額
     overtime_auto: true,       // 依加班紀錄自動計算加班費（平日費率）
     attendance: { enabled: false, name: '全勤獎金', personal: 'prorate' },
     types: {},                 // 各法定假別的優於法定設定
     custom: [],                // 公司自訂假別（例如生日假）
+    // by：site 現場主管（沒有則直屬主管）、dept 職務主管、region 區域督導、direct 直屬主管、position 指定職位、people 指定人員
     flow: [
-      { id: 'site', name: '直屬主管', scope: 'community', min_days: 0 },
-      { id: 'hr', name: '人事', scope: 'company', min_days: 0 },
+      { id: 'site', name: '現場主管', by: 'site', min_days: 0 },
+      { id: 'dept', name: '職務主管', by: 'dept', min_days: 0 },
+      { id: 'acct', name: '會計', by: 'position', position: 'accountant', min_days: 0 },
+      { id: 'gm', name: '總經理', by: 'position', position: 'gm', min_days: 0 },
     ],
   };
 }
@@ -69,7 +73,8 @@ function normalize(input) {
     overdue_action: b.overdue_action === 'remind' ? 'remind' : 'absent',
     daily_wage_mode: b.daily_wage_mode === 'workdays' ? 'workdays' : 'month30',
     wage_includes_allowances: b.wage_includes_allowances !== false,
-    overtime_mode: b.overtime_mode === 'comp' ? 'comp' : 'pay',
+    overtime_mode: ['comp', 'allowance'].includes(b.overtime_mode) ? b.overtime_mode : 'pay',
+    overtime_allowance: { name: str(b.overtime_allowance?.name, 12) || '支援費', unit: b.overtime_allowance?.unit === 'hour' ? 'hour' : 'time', amount: Math.max(0, Math.min(100000, Math.round(num(b.overtime_allowance?.amount)))) },
     overtime_auto: b.overtime_auto !== false,
     attendance: { enabled: !!b.attendance?.enabled, name: str(b.attendance?.name, 20) || '全勤獎金', personal: b.attendance?.personal === 'all' ? 'all' : 'prorate' },
     types: {}, custom: [], flow: [],
@@ -91,7 +96,8 @@ function normalize(input) {
   for (const s of (Array.isArray(b.flow) ? b.flow : d.flow).slice(0, 8)) {
     const name = str(s?.name, 12); if (!name) continue;
     let sid = /^[a-z0-9_]{2,16}$/.test(s?.id) ? s.id : `s_${id()}`; while (seen.has(sid)) sid = `s_${id()}`; seen.add(sid);
-    p.flow.push({ id: sid, name, scope: s?.scope === 'community' ? 'community' : 'company', min_days: Math.max(0, Math.min(60, Math.round(num(s?.min_days) * 2) / 2)) });
+    const by = ['site', 'dept', 'region', 'direct', 'position', 'people'].includes(s?.by) ? s.by : 'people'; // 舊設定（只有 scope）視為指定人員
+    p.flow.push({ id: sid, name, by, position: by === 'position' ? str(s?.position, 24) : '', scope: s?.scope === 'community' ? 'community' : 'company', min_days: Math.max(0, Math.min(60, Math.round(num(s?.min_days) * 2) / 2)) });
   }
   return { policy: p, notes };
 }

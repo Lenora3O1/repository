@@ -4,7 +4,7 @@
 const LP = require('./leave-policy');
 
 module.exports = function registerLeaveRoutes(app, d) {
-  const { db, fs, path, crypto, multer, DATA_DIR, getUser, tenantId, now, requireStaff, requireCompanyAdmin, requireSuperAdmin, getSiteAssignments, payroll, redDates } = d;
+  const { db, fs, path, crypto, multer, DATA_DIR, getUser, tenantId, now, requireStaff, requireCompanyAdmin, requireSuperAdmin, getSiteAssignments, payroll, redDates, org } = d;
   const DIR = path.join(DATA_DIR, 'uploads', 'leave');
   fs.mkdirSync(DIR, { recursive: true });
 
@@ -167,20 +167,36 @@ module.exports = function registerLeaveRoutes(app, d) {
   const staffRow = (tid, id) => db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(id, tid);
   const adminIds = tid => db.prepare("SELECT id FROM staff_users WHERE tenant_id=? AND role='company_admin' AND is_active=1 ORDER BY id").all(tid).map(x => x.id);
   function resolveSteps(tid, applicant, days, policy) {
-    const mine = communitiesOf(applicant);
+    const mine = communitiesOf(applicant); const prefs = org?.prefsFor ? org.prefsFor(tid) : null;
     const steps = policy.flow.filter(s => !s.min_days || days >= s.min_days).map(s => {
+      const base = { id: s.id, name: s.name, by: s.by || 'people', scope: s.scope };
+      if (base.by !== 'people') {
+        // 依組織架構自動找審核人（現場主管、職務主管、區域督導、直屬主管、指定職位）
+        const r = (org?.resolveLeaveStep && org.resolveLeaveStep(tid, applicant, s, prefs)) || { approvers: [] };
+        let ids = (r.approvers || []).filter(x => x !== applicant.id); let note = r.note || '';
+        if (!ids.length && base.by === 'position') { ids = adminIds(tid).filter(x => x !== applicant.id); note = '沒有人擔任這個職位，由公司管理員審核'; }
+        return { ...base, approvers: ids, proxies: (r.proxies || []).filter(x => x !== applicant.id), notify: r.notify || [], note, skipped: !ids.length };
+      }
       let ids = db.prepare('SELECT a.staff_id FROM leave_approvers a JOIN staff_users u ON u.id=a.staff_id WHERE a.tenant_id=? AND a.step_id=? AND u.is_active=1').all(tid, s.id).map(x => x.staff_id).filter(x => x !== applicant.id);
-      if (s.scope === 'community') { ids = ids.filter(x => { const u = staffRow(tid, x); return u && [...communitiesOf(u)].some(c => mine.has(c)); }); return { id: s.id, name: s.name, scope: s.scope, approvers: ids, skipped: !ids.length }; }
+      if (s.scope === 'community') { ids = ids.filter(x => { const u = staffRow(tid, x); return u && [...communitiesOf(u)].some(c => mine.has(c)); }); return { ...base, approvers: ids, skipped: !ids.length }; }
       // 全公司關卡沒有指定人員時，由公司管理員審核（不會被略過）
-      if (!ids.length) { ids = adminIds(tid).filter(x => x !== applicant.id); return { id: s.id, name: s.name, scope: s.scope, approvers: ids, skipped: !ids.length, by_admin: true }; }
-      return { id: s.id, name: s.name, scope: s.scope, approvers: ids, skipped: false };
+      if (!ids.length) { ids = adminIds(tid).filter(x => x !== applicant.id); return { ...base, approvers: ids, skipped: !ids.length, by_admin: true }; }
+      return { ...base, approvers: ids, skipped: false };
     });
+    // 同一批人連續兩關：只審一次
+    let last = '';
+    for (const st of steps) { if (st.skipped) continue; const key = [...st.approvers].sort().join(','); if (key === last) { st.skipped = true; st.note = '與上一關審核人相同'; } else last = key; }
     if (!steps.some(s => !s.skipped)) { const ids = adminIds(tid).filter(x => x !== applicant.id); steps.push({ id: 'admin', name: '公司管理員', scope: 'company', approvers: ids, skipped: !ids.length }); }
     return steps;
   }
+  // 審核人今天整天請假（已核准）：副主管可以代理
+  function allAbsentToday(tid, ids) {
+    if (!ids.length) return false; const t = todayTW(); const hpd = policyFor(tid).hours_per_day;
+    return ids.every(id => db.prepare("SELECT entries_json FROM leave_requests WHERE tenant_id=? AND staff_id=? AND status='approved' AND start_date<=? AND end_date>=?").all(tid, id, t, t).some(r => parse(r.entries_json, []).some(e => e.d === t && Number(e.h) >= hpd)));
+  }
   const nextStep = (steps, from) => { for (let i = from; i < steps.length; i++) if (!steps[i].skipped) return i; return -1; };
-  const canDecide = (r, u) => { if (r.status !== 'pending' || !u || r.staff_id === u.id) return false; if (u.role === 'company_admin') return true; const s = parse(r.steps_json, [])[r.step_index]; return !!s && s.approvers.includes(u.id); };
-  const isApproverOf = (r, u) => parse(r.steps_json, []).some(s => s.approvers.includes(u.id));
+  const canDecide = (r, u) => { if (r.status !== 'pending' || !u || r.staff_id === u.id) return false; if (u.role === 'company_admin') return true; const s = parse(r.steps_json, [])[r.step_index]; if (!s) return false; if (s.approvers.includes(u.id)) return true; return (s.proxies || []).includes(u.id) && allAbsentToday(r.tenant_id, s.approvers); };
+  const isApproverOf = (r, u) => parse(r.steps_json, []).some(s => s.approvers.includes(u.id) || (s.proxies || []).includes(u.id) || (s.notify || []).includes(u.id));
   const canView = (r, u) => u && (r.staff_id === u.id || u.role === 'company_admin' || canHR(u) || isApproverOf(r, u));
 
   // ---------- 通知（內部訊息） ----------
@@ -259,7 +275,7 @@ module.exports = function registerLeaveRoutes(app, d) {
       type: r.leave_type, type_name: r.type_name || T?.name || r.leave_type, sub: r.sub, sub_label: sub, event_date: r.event_date,
       start_date: r.start_date, end_date: r.end_date, hours: r.hours, days: r.days, length: fmt(r.hours, p.hours_per_day), entries: parse(r.entries_json, []), reason: r.reason,
       status: r.status, status_label: STATUS[r.status] || r.status, pay_ratio: r.pay_ratio,
-      steps: steps.map((s, i) => ({ name: s.name, skipped: s.skipped, approvers: s.approvers.map(name).filter(Boolean), state: r.status === 'pending' ? (i < r.step_index ? 'done' : i === r.step_index ? 'current' : 'waiting') : r.status === 'approved' ? 'done' : 'waiting' })),
+      steps: steps.map((s, i) => ({ name: s.name, skipped: s.skipped, note: s.note || '', approvers: s.approvers.map(name).filter(Boolean), proxies: (s.proxies || []).map(name).filter(Boolean), state: r.status === 'pending' ? (i < r.step_index ? 'done' : i === r.step_index ? 'current' : 'waiting') : r.status === 'approved' ? 'done' : 'waiting' })),
       current_step: r.status === 'pending' ? steps[r.step_index]?.name || '' : '',
       proof_req: r.proof_req, proof_due: r.proof_due, proof_status: r.proof_status, proof_label: PROOF[r.proof_status] || '', absent: !!r.absent,
       files: db.prepare('SELECT id,original,mime,size,uploaded_by,created_at FROM leave_files WHERE request_id=? ORDER BY id').all(r.id),
@@ -329,7 +345,9 @@ module.exports = function registerLeaveRoutes(app, d) {
       const r = reload(id); log(r, u, 'submit', '', '');
       const steps = parse(r.steps_json, []); const first = nextStep(steps, 0);
       if (first < 0) { log(r, null, 'approve', '沒有可審核的人員，系統自動核准'); finalize(r, u); }
-      else notify(tid, u, steps[first].approvers, `📝 ${u.name} 申請${r.type_name}：${when(r)}（${fmt(r.hours, p.hours_per_day)}），等待您審核（${steps[first].name}）。\n請到「請假」→「待我審核」處理。`);
+      else { notify(tid, u, steps[first].approvers, `📝 ${u.name} 申請${r.type_name}：${when(r)}（${fmt(r.hours, p.hours_per_day)}），等待您審核（${steps[first].name}）。\n請到「請假」→「待我審核」處理。`);
+        if ((steps[first].proxies || []).length && allAbsentToday(tid, steps[first].approvers)) notify(tid, u, steps[first].proxies, `📝 ${u.name} 申請${r.type_name}：${when(r)}。${steps[first].name}今天請假，由您代理審核。`); }
+      const fyi = [...new Set(steps.flatMap(s => s.notify || []))]; if (fyi.length) notify(tid, u, fyi, `📣 知會：${u.name} 申請${r.type_name}（${when(r)}，${fmt(r.hours, p.hours_per_day)}），依公司設定由部門直接審核。`);
       res.json({ success: true, request: out(reload(id), u) });
     }));
     app.get(`${base}/leave/requests/:id`, mw, wrap((req, res) => {
@@ -440,7 +458,7 @@ module.exports = function registerLeaveRoutes(app, d) {
     const rows = db.prepare('SELECT step_id,staff_id FROM leave_approvers WHERE tenant_id=?').all(tid);
     const staff = db.prepare("SELECT * FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY role='company_admin' DESC,employee_id").all(tid)
       .map(s => ({ id: s.id, name: s.name, employee_id: s.employee_id, role: s.role, position: s.position || s.job_level || '', work_type: s.work_type || '', communities: getSiteAssignments(s).map(a => a.community_name).filter(Boolean) }));
-    res.json({ flow: p.flow, approvers: Object.fromEntries(p.flow.map(s => [s.id, rows.filter(x => x.step_id === s.id).map(x => x.staff_id)])), staff, can_edit: getUser(req).role === 'company_admin', policy: { unit: p.unit, hours_per_day: p.hours_per_day, proof_days: p.proof_days, overdue_action: p.overdue_action, daily_wage_mode: p.daily_wage_mode, wage_includes_allowances: p.wage_includes_allowances, overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, attendance: p.attendance }, types: typesFor(p) });
+    res.json({ flow: p.flow, approvers: Object.fromEntries(p.flow.map(s => [s.id, rows.filter(x => x.step_id === s.id).map(x => x.staff_id)])), staff, can_edit: getUser(req).role === 'company_admin', policy: { unit: p.unit, hours_per_day: p.hours_per_day, proof_days: p.proof_days, overdue_action: p.overdue_action, daily_wage_mode: p.daily_wage_mode, wage_includes_allowances: p.wage_includes_allowances, overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, overtime_allowance: p.overtime_allowance, attendance: p.attendance }, types: typesFor(p), prefs: org?.prefsFor ? org.prefsFor(tid) : null, positions: org?.configFor ? org.configFor(tid).positions.map(x => ({ id: x.id, name: x.name })) : [] });
   }));
   app.put('/api/company/leave/approvers', requireCompanyAdmin, needAdmin, wrap((req, res) => {
     const tid = tenantId(req); const p = policyFor(tid); const body = req.body?.approvers || {};
@@ -517,7 +535,8 @@ module.exports = function registerLeaveRoutes(app, d) {
     if (p.attendance.enabled) { const A = (allowances || []).find(a => String(a.name || '').includes(p.attendance.name)); const amt = Number(A?.amount) || 0; if (amt) attendance = attAll ? amt : Math.min(amt, Math.round(amt * attHours / (denom * hpd))); }
     let overtime = 0, otHours = 0;
     try {
-      for (const o of db.prepare("SELECT hours FROM schedule_overtime WHERE tenant_id=? AND staff_id=? AND status<>'rejected' AND work_date BETWEEN ? AND ?").all(tid, u.id, first, last)) { const h = Number(o.hours) || 0; otHours += h; overtime += hourly * (Math.min(h, 2) * 4 / 3 + Math.max(0, h - 2) * 5 / 3); }
+      const OA = p.overtime_allowance || {};
+      for (const o of db.prepare("SELECT hours FROM schedule_overtime WHERE tenant_id=? AND staff_id=? AND status<>'rejected' AND work_date BETWEEN ? AND ?").all(tid, u.id, first, last)) { const h = Number(o.hours) || 0; otHours += h; overtime += p.overtime_mode === 'allowance' ? (OA.unit === 'hour' ? h * (Number(OA.amount) || 0) : (Number(OA.amount) || 0)) : hourly * (Math.min(h, 2) * 4 / 3 + Math.max(0, h - 2) * 5 / 3); }
     } catch {}
     const yearSick = reqs.filter(r => r.leave_type === 'sick' || r.leave_type === 'menstrual').flatMap(r => parse(r.entries_json, []).map(e => ({ ...e, type: r.leave_type, id: r.id }))).filter(e => e.d.startsWith(month.slice(0, 4)) && e.d <= last);
     const sickH = sumH(yearSick.filter(e => e.type === 'sick')) + menstrualMerged(yearSick.filter(e => e.type === 'menstrual'), hpd);
@@ -525,7 +544,7 @@ module.exports = function registerLeaveRoutes(app, d) {
       leave_deduct: Math.round(leave), attendance_deduct: attendance,
       lines: [...lines.values()].map(l => ({ label: l.label, type: l.type, hours: r2(l.hours), length: fmt(l.hours, hpd), amount: Math.round(l.amount) })),
       wage: { monthly: Math.round(W), daily: r2(daily), hourly: r2(hourly), denom, workdays, mode: p.daily_wage_mode, hours_per_day: hpd },
-      overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, overtime: p.overtime_mode === 'pay' ? Math.round(overtime) : 0, overtime_hours: r2(otHours),
+      overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, overtime: p.overtime_mode !== 'comp' ? Math.round(overtime) : 0, overtime_label: p.overtime_mode === 'allowance' ? (p.overtime_allowance?.name || '支援費') : '加班費', overtime_hours: r2(otHours),
       sick_days_year: r2(sickH / hpd), attendance_enabled: p.attendance.enabled, attendance_name: p.attendance.name,
     };
   }
