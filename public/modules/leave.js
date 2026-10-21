@@ -64,23 +64,25 @@
   // ================= 主畫面 =================
   async function render(el,opts={}){
     injectStyle();
-    S.el=el;S.base=opts.base||S.base;S.side=opts.side||(S.base.startsWith('/api/company')?'company':'staff');S.label=opts.label||S.label;if(opts.tab)S.tab=opts.tab;
+    S.el=el;S.base=opts.base||S.base;S.side=opts.side||(S.base.startsWith('/api/company')?'company':'staff');S.label=opts.label||S.label;if(opts.tab)S.tab=opts.tab;if(opts.withCover!==undefined)S.withCover=!!opts.withCover;
     S.meta=await api(`${S.base}/leave/meta`);
     const m=S.meta;
     const tabs=[['apply','📝 申請請假'],['mine','📋 我的假單']];
+    if(S.withCover!==false&&window.CoverModule){tabs.push(['cover','🤝 代班']);if(S.side==='staff')tabs.push(['swap','🔄 調假']);}
     if(m.is_approver||m.pending_for_me)tabs.push(['approve','✅ 待我審核']);
     if(S.side==='company'&&m.can_manage)tabs.push(['all','🗂 全部假單'],['balance','📊 假別額度']);
     if(S.side==='company')tabs.push(['setup',m.is_admin?'⚙ 審核設定':'📖 請假規則']);
     if(!tabs.some(t=>t[0]===S.tab))S.tab='apply';
-    el.innerHTML=`<div class="panel"><div class="eyebrow">📝 請假</div><h1>${esc(S.label)}</h1>
+    const emb=!!opts.embedded;S.emb=emb;
+    el.innerHTML=`<div class="${emb?'':'panel'}">${emb?'':`<div class="eyebrow">📝 請假</div><h1>${esc(S.label)}</h1>`}
       <div class="lv-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${S.tab===k?'':'secondary'}">${l}${k==='approve'&&m.pending_for_me?`<span class="badge">${m.pending_for_me}</span>`:''}</button>`).join('')}</div>
       <div id="lvBody"><div class="profile-loading">讀取中…</div></div></div>`;
-    el.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{S.tab=b.dataset.tab;render(el).catch(e=>alert(e.message));}));
+    el.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{S.tab=b.dataset.tab;render(el,{embedded:emb}).catch(e=>alert(e.message));}));
     const body=el.querySelector('#lvBody');
-    const fn={apply:renderApply,mine:renderMine,approve:renderApprove,all:renderAll,balance:renderBalance,setup:renderSetup}[S.tab];
+    const fn={apply:renderApply,mine:renderMine,approve:renderApprove,all:renderAll,balance:renderBalance,setup:renderSetup,cover:b=>window.CoverModule.renderCover(b,{base:S.base,refresh}),swap:b=>window.CoverModule.renderSwap(b,{base:S.base,refresh})}[S.tab];
     try{await fn(body);}catch(e){body.innerHTML=`<div class="msg error">${esc(e.message)}</div>`;}
   }
-  const refresh=()=>render(S.el).catch(e=>alert(e.message));
+  const refresh=()=>render(S.el,{embedded:S.emb}).catch(e=>alert(e.message));
 
   function balanceCards(b,hpd){
     const out=[];const D=v=>Number.isInteger(v*2)?v:`${v}<small>（${Math.round(v*hpd*10)/10} 小時）</small>`;
@@ -106,6 +108,8 @@
         <label class="req"><span class="lt">開始日期</span><input type="date" name="start_date" value="${esc(m.today)}"></label>
         <label class="req"><span class="lt">結束日期</span><input type="date" name="end_date" value="${esc(m.today)}"></label>
         <div class="wide" id="lvHoursWrap"></div>
+        ${m.cover_question?'<label class="wide" style="flex-direction:row;gap:14px;align-items:center;flex-wrap:wrap"><span class="lt">請假期間需要安排代班嗎？</span><label style="flex-direction:row;gap:6px;font-weight:600"><input type="radio" name="need_cover" value="1" style="width:auto"> 需要</label><label style="flex-direction:row;gap:6px;font-weight:600"><input type="radio" name="need_cover" value="0" checked style="width:auto"> 不需要</label></label>':''}
+        ${S.side==='staff'&&window.CoverModule?'<div class="wide lv-type-info" style="background:#FCFAF1">💡 排休制的人員可以先試試「🔄 調假」：把這天和自己的休假日對調，不用請假、不扣薪。</div>':''}
         <label class="wide" id="lvReasonWrap"><span class="lt">原因說明</span><textarea name="reason" rows="2" maxlength="500" placeholder="例如：家中有事、看診"></textarea></label>
         <label class="wide" id="lvFileWrap">證明文件（照片或 PDF，可稍後再補）<input type="file" name="files" accept="image/*,application/pdf" multiple></label>
         <div class="wide" id="lvPrev"></div>
@@ -133,7 +137,7 @@
         if(unit==='half'){const hid=hw.querySelector('[name=hours]');const upd=()=>{hid.value=hw.querySelector('[name=hmode]:checked').value;};hw.querySelectorAll('[name=hmode]').forEach(r=>{if(prev&&r.value===prev)r.checked=true;r.addEventListener('change',()=>{upd();preview();});});upd();}
       }else hw.innerHTML='';
     }
-    const read=()=>({type:E('type').value,sub:E('sub').value,event_date:E('event_date').value,start_date:E('start_date').value,end_date:E('end_date').value,hours:f.querySelector('[name=hours]')?.value||'',reason:E('reason').value});
+    const read=()=>({type:E('type').value,sub:E('sub').value,event_date:E('event_date').value,start_date:E('start_date').value,end_date:E('end_date').value,hours:f.querySelector('[name=hours]')?.value||'',reason:E('reason').value,need_cover:f.querySelector('[name=need_cover]:checked')?Number(f.querySelector('[name=need_cover]:checked').value):undefined});
     let timer,seq=0;
     async function preview(){
       clearTimeout(timer);timer=setTimeout(async()=>{const my=++seq;const pv=box.querySelector('#lvPrev');
@@ -156,7 +160,7 @@
   // ---------- 我的假單 ----------
   function card(r,{who=false,actions=''}={}){
     return `<div class="lv-card"><div style="flex:1;min-width:220px"><h4>${who?`${esc(r.name)} <small class="muted">${esc(r.employee_id)}</small>｜`:''}${esc(r.type_name)}${r.sub_label?` <small class="muted">${esc(r.sub_label)}</small>`:''}${pill(r)}</h4>
-      <div class="meta">📅 ${esc(when(r))}　⏱ ${esc(r.length)}${r.reason?`<br>📝 ${esc(r.reason)}`:''}${r.proof_status==='pending'?`<br>📎 證明請在 <b>${esc(r.proof_due)}</b> 前上傳`:''}</div>${steps(r)}</div>
+      <div class="meta">📅 ${esc(when(r))}　⏱ ${esc(r.length)}${r.reason?`<br>📝 ${esc(r.reason)}`:''}${r.proof_status==='pending'?`<br>📎 證明請在 <b>${esc(r.proof_due)}</b> 前上傳`:''}${r.cover?`<br>🤝 ${r.cover.filled?`已找到代班：<b>${esc(r.cover.names.join('、'))}</b>${r.cover.open?`（還有 ${r.cover.open} 個班待安排）`:''}`:r.cover.open?`代班安排中（${r.cover.open} 個班）`:'不需代班'}`:''}</div>${steps(r)}</div>
       <div class="acts"><button type="button" class="secondary" data-open="${r.id}">詳細</button>${actions}</div></div>`;
   }
   async function renderMine(box){

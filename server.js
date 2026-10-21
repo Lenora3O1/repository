@@ -45,6 +45,7 @@ try {
 const PORT = process.env.PORT || 3000;
 // 組織架構模組（org-routes.js）註冊後提供職位與上下級關係
 let orgApi=null;
+let coverApi=null; // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
 const DATA_DIR = process.env.DATA_DIR || __dirname;
@@ -346,7 +347,7 @@ const PLATFORM_STAFF_SCHEDULE_MENU = [
   {id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true},
   {id:'staff-schedule-community',parentId:'staff-schedule',icon:'↳',label:'案場全班班表',action:'staff-schedule-community',enabled:true},
   {id:'staff-schedule-self-select',parentId:'staff-schedule',icon:'↳',label:'自選休假',action:'staff-schedule-self-select',enabled:true},
-  {id:'staff-schedule-rules',parentId:'staff-schedule',icon:'↳',label:'排班規則',action:'staff-schedule-rules',enabled:true},
+  {id:'staff-schedule-rules',parentId:'staff-schedule',icon:'↳',label:'我的休假制度',action:'staff-schedule-rules',enabled:true},
   {id:'staff-schedule-leave',parentId:'staff-schedule',icon:'↳',label:'請假／代班',action:'staff-schedule-leave',enabled:true},
   {id:'staff-schedule-overtime',parentId:'staff-schedule',icon:'↳',label:'加班',action:'staff-schedule-overtime',enabled:true}
 ];
@@ -445,6 +446,15 @@ function readMenuConfig(){
       after(c.company,{id:'company-leave',parentId:null,icon:'📝',label:'請假管理',action:'leave',enabled:true},x=>String(x.id)==='company-hr');
       c._leaveMenuAdded=1;writeMenuConfig(c);
     }catch(e){console.error('leave menu migration error',e);}
+  }
+  // 一次性升級：現場「請假」併入班表 → 請假／代班；「排班規則」改為「我的休假制度」（所有排班人員可看）。
+  if(!c._coverMenuV1){
+    try{
+      const fix=list=>{if(!Array.isArray(list))return list;const out=list.filter(x=>String(x.id)!=='staff-leave');for(const x of out){if(String(x.id)==='staff-schedule-rules'&&['排班規則','排班表'].includes(String(x.label||'').trim()))x.label='我的休假制度';if(String(x.id)==='staff-schedule-leave'&&String(x.label||'').trim()==='請假／代班')x.label='請假／代班';}return out;};
+      c.staff=fix(c.staff);
+      for(const k of Object.keys(c.tenants||{})){const t=c.tenants[k];if(!t||typeof t!=='object')continue;if(Array.isArray(t.staff))t.staff=fix(t.staff);if(t._base&&Array.isArray(t._base.staff))t._base.staff=fix(t._base.staff);}
+      c._coverMenuV1=1;writeMenuConfig(c);
+    }catch(e){console.error('cover menu migration error',e);}
   }
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
@@ -692,7 +702,7 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
     });
     if(scope==='staff'){
       const role=scheduleDefaultRole(staffUser);
-      if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
+      // 請假／代班、加班、我的休假制度：所有排班人員都可以使用（舊版只開放給經理／秘書）
     }
   }
   return items;
@@ -774,7 +784,7 @@ app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   const u=getUser(req);
   let items=resolveMenu('staff',tenantId(req),u);
   const role=scheduleGetProfile(tenantId(req),u.id)?.schedule_role||scheduleDefaultRole(u);
-  if(role!=='admin') items=items.filter(x=>!['staff-schedule-rules','staff-schedule-leave','staff-schedule-overtime'].includes(String(x.id)));
+  void role;
   res.json({scope:'staff',items});
 });
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))});});
@@ -2354,8 +2364,9 @@ function scheduleSetRule(tenantIdValue,communityId,category,config){
   return scheduleGetRule(tenantIdValue,communityId??null,category);
 }
 function scheduleListStaff(tenantIdValue){
-  const rows=db.prepare("SELECT id,employee_id,name,is_active,work_type,job_category,job_level,job_categories_json,position FROM staff_users WHERE tenant_id=? AND role='staff' AND is_active=1 ORDER BY employee_id").all(tenantIdValue);
-  return rows.map(u=>{const p=scheduleGetProfile(tenantIdValue,u.id);return {...u,job_categories:getJobCategories(u),schedule_profile:p,site_assignments:getSiteAssignments(u)};});
+  const rows=db.prepare("SELECT id,tenant_id,employee_id,name,is_active,work_type,job_category,job_level,job_categories_json,position,role,admin_level FROM staff_users WHERE tenant_id=? AND role='staff' AND is_active=1 ORDER BY employee_id").all(tenantIdValue);
+  const cfg=(()=>{try{return orgApi?.configFor(tenantIdValue)||null;}catch{return null;}})();const month=new Date(Date.now()+8*3600e3).toISOString().slice(0,7);
+  return rows.map(u=>{const p=scheduleGetProfile(tenantIdValue,u.id);let org=null,rule=null;try{const m=orgApi?.memberInfo(u);if(m)org={position:m.position.name,kind:m.kind,dept:m.dept,dept_name:cfg?.departments.find(x=>x.id===m.dept)?.name||'',shift:m.shift};}catch{}try{rule=coverApi?coverApi.myRule(u,month):null;}catch{}return {...u,job_categories:getJobCategories(u),schedule_profile:p,site_assignments:getSiteAssignments(u),org,rule};});
 }
 function scheduleValidateEntries(tenantIdValue,month){
   const m=scheduleMonth(month); const rows=db.prepare('SELECT * FROM schedule_entries WHERE tenant_id=? AND month=? ORDER BY work_date,staff_id').all(tenantIdValue,m);
@@ -2461,7 +2472,7 @@ async function scheduleGenerate(tenantIdValue,month,category,communityId,created
 const _scheduleOriginalCompanyMenuConfig = app._scheduleOriginalCompanyMenuConfig;
 app.get('/api/company/schedule/menu-state',requireCompanyAdmin,(req,res)=>res.json({enabled:true,items:SCHEDULE_MENU_ITEMS}));
 
-app.get('/api/company/schedule/staff',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>res.json({staff:scheduleListStaff(tenantId(req)),communities:db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY status DESC,name").all(tenantId(req))}));
+app.get('/api/company/schedule/staff',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>res.json({staff:scheduleListStaff(tenantId(req)),communities:db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY status DESC,name").all(tenantId(req)),departments:(()=>{try{return orgApi?.configFor(tenantId(req)).departments||[];}catch{return [];}})()}));
 app.put('/api/company/schedule/staff/:id',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const p=scheduleUpsertProfile(tenantId(req),Number(req.params.id),req.body||{});if(!p)return res.status(404).json({error:'找不到人員'});res.json({success:true,profile:p});}catch(e){res.status(400).json({error:e.message||'班表人員設定失敗'});}});
 app.get('/api/company/schedule/rules',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{const cid=req.query?.community_id?Number(req.query.community_id):null;const category=String(req.query?.category||'security');res.json(scheduleGetRule(tenantId(req),cid,category));});
 app.put('/api/company/schedule/rules',requireCompanyAdmin,requireCompanyPermission('schedule'),(req,res)=>{try{const cid=req.body?.community_id?Number(req.body.community_id):null;const category=String(req.body?.category||'');res.json({success:true,rule:scheduleSetRule(tenantId(req),cid,category,req.body?.config||{})});}catch(e){res.status(400).json({error:e.message||'班表規則儲存失敗'});}});
@@ -2529,14 +2540,17 @@ app.get('/api/staff/schedule/community-view',requireStaffFiller,(req,res)=>{
   const profile=scheduleGetProfile(tenantId(req),u.id);
   const selfOffDates=db.prepare("SELECT work_date FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").all(tenantId(req),month,u.id).map(x=>x.work_date);
   const conflicts=db.prepare("SELECT work_date,COUNT(DISTINCT staff_id) count,GROUP_CONCAT(DISTINCT staff_id) staff_ids FROM schedule_entries WHERE tenant_id=? AND month=? AND community_id=? AND shift_code='off' AND staff_id<>? GROUP BY work_date").all(tenantId(req),month,selected,u.id);
-  res.json({month,communities,selected_community_id:selected,staff,entries,profile,self_off_dates:selfOffDates,off_conflicts:conflicts});
+  const rule=(()=>{try{return coverApi?coverApi.myRule(getUser(req),month):null;}catch{return null;}})();
+  res.json({month,communities,selected_community_id:selected,staff,entries,profile,self_off_dates:selfOffDates,off_conflicts:conflicts,rule,self_allowed:scheduleSelfAllowed(getUser(req),profile,rule)});
 });
 
 // 現場人員：機動／保全的自選休假與自己的班表資料，後端先備妥；前台介面可獨立接上，不會看到行政資料。
 app.get('/api/staff/schedule/month',requireStaffFiller,(req,res)=>{const month=scheduleMonth(req.query?.month);const u=getUser(req);const p=scheduleGetProfile(tenantId(req),u.id);if(!p)return res.status(404).json({error:'尚未設定班表身分'});const category=p.schedule_role;const rows=db.prepare('SELECT e.*,c.name community_name FROM schedule_entries e LEFT JOIN communities c ON c.id=e.community_id WHERE e.tenant_id=? AND e.month=? AND e.staff_id=? ORDER BY e.work_date').all(tenantId(req),month,u.id);res.json({month,category,profile:p,entries:rows,problems:scheduleValidateEntries(tenantId(req),month).filter(x=>x.staff_id===u.id)});});
+// 自選休假：保全、機動，以及「固定月休」的行政人員（社區主管、秘書）
+function scheduleSelfAllowed(u,p,rule){if(!p)return false;if(['security','mobile'].includes(p.schedule_role))return true;return p.schedule_role==='admin'&&rule?.mode==='fixed_monthly'&&Number(rule.self_select_days||0)>0;}
 app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
   const u=getUser(req),p=scheduleGetProfile(tenantId(req),u.id);
-  if(!p||!['security','mobile'].includes(p.schedule_role))return res.status(403).json({error:'目前只有保全／機動可使用自選休假'});
+  if(!scheduleSelfAllowed(u,p,(()=>{try{return coverApi?coverApi.myRule(u,scheduleMonth(req.body?.month)):null;}catch{return null;}})()))return res.status(403).json({error:'您的休假制度不需要自選休假（見紅休或輪排休由行事曆與主管安排）'});
   const month=scheduleMonth(req.body?.month),date=String(req.body?.work_date||'');
   if(!scheduleWorkdays(month).includes(date))throw new Error('日期不在所選月份');
   const ids=getSiteAssignments(u).map(x=>Number(x.community_id)).filter(Boolean);
@@ -2579,11 +2593,13 @@ const payroll=require('./payroll-routes')(app,{db,fs,path,DATA_DIR,XLSX,getUser,
 orgApi=require('./org-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,requireSuperAdmin,getSiteAssignments,syncWorkAssignments,guardSensitivePermissions,parsePermissions,PERMISSION_LABELS:STAFF_PERMISSION_LABELS,COMPANY_KEYS:COMPANY_PERMISSION_KEYS,SITE_KEYS:SITE_PERMISSION_KEYS});
 require('./account-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireCompanyPermission,requireSuperAdmin});
 // ===== 請假（多層審核、證明補交、連動班表／特休／薪資）=====
-require('./leave-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,payroll,org:orgApi,redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));if(!c)scheduleTaiwanHolidayDates(Number(y)).catch(()=>{});return c||scheduleFallbackRedDates(y);}});
+const leaveApi=require('./leave-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,payroll,org:orgApi,redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));if(!c)scheduleTaiwanHolidayDates(Number(y)).catch(()=>{});return c||scheduleFallbackRedDates(y);}});
 // ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
 handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
 
+// ===== 代班／調假／加班（依組織架構調度，連動班表與薪資）=====
+coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,leave:leaveApi,sched:{redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));return c||scheduleFallbackRedDates(y);},platformRules:schedulePlatformRules,effectiveRule:scheduleEffectiveRule,getProfile:scheduleGetProfile,defaultRole:scheduleDefaultRole}});
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll});
 

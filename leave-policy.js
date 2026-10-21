@@ -33,6 +33,16 @@ const MATERNITY = [
   ['m1', '妊娠未滿 2 個月流產（5 日）', 5],
 ];
 const LEGAL_ORDER = Object.keys(TYPES);
+// 加班種類（平台預設，總後台可依公司修改）
+// calc：law_rest 休息日倍率、law_holiday 國定假日加倍、law_weekday 平日倍率、hourly 時薪、daily 日薪比例、allowance_time 每次固定金額、allowance_hour 每小時固定金額
+// comp：pay 給錢、comp 換補休、choose 由本人選擇（依法以補休代替須本人同意）
+const OT_CALC = { law_rest: '休息日加班費（前 2 小時 1.34 倍、3～8 小時 1.67 倍、9 小時起 2.67 倍）', law_holiday: '國定假日出勤（加倍發給）', law_weekday: '平日加班費（前 2 小時 1.34 倍、之後 1.67 倍）', hourly: '依時薪計算', daily: '依日薪計算（以時數比例）', allowance_time: '每次固定支援費', allowance_hour: '每小時固定支援費' };
+const OT_DEFAULTS = [
+  { id: 'rest_day', name: '休假日被請回', calc: 'law_rest', comp: 'choose', amount: 0, enabled: true, hint: '休假日被公司請回來上班或幫忙代班' },
+  { id: 'holiday', name: '國定假日出勤', calc: 'law_holiday', comp: 'choose', amount: 0, enabled: true, hint: '國定假日被請回來上班' },
+  { id: 'meeting', name: '社區夜間會議', calc: 'law_weekday', comp: 'choose', amount: 0, enabled: true, hint: '區權會、月例會等下班後的會議，依時數' },
+  { id: 'voluntary', name: '自願加班', calc: 'daily', comp: 'pay', amount: 0, enabled: true, hint: '本人想多上班（例如保全多上幾天），需主管核准' },
+];
 
 function defaults() {
   return {
@@ -45,6 +55,7 @@ function defaults() {
     overtime_mode: 'pay',      // pay 時數加班費、allowance 車馬費／支援費、comp 加班換補休
     overtime_allowance: { name: '支援費', unit: 'time', amount: 0 }, // allowance：每次或每小時固定金額
     overtime_auto: true,       // 依加班紀錄自動計算加班費（平日費率）
+    overtime_types: OT_DEFAULTS.map(x => ({ ...x })),
     attendance: { enabled: false, name: '全勤獎金', personal: 'prorate' },
     types: {},                 // 各法定假別的優於法定設定
     custom: [],                // 公司自訂假別（例如生日假）
@@ -76,6 +87,10 @@ function normalize(input) {
     overtime_mode: ['comp', 'allowance'].includes(b.overtime_mode) ? b.overtime_mode : 'pay',
     overtime_allowance: { name: str(b.overtime_allowance?.name, 12) || '支援費', unit: b.overtime_allowance?.unit === 'hour' ? 'hour' : 'time', amount: Math.max(0, Math.min(100000, Math.round(num(b.overtime_allowance?.amount)))) },
     overtime_auto: b.overtime_auto !== false,
+    overtime_types: (() => { const src = Array.isArray(b.overtime_types) && b.overtime_types.length ? b.overtime_types : OT_DEFAULTS; const seen = new Set(); const out = [];
+      for (const x of src.slice(0, 12)) { const name = str(x?.name, 16); if (!name) continue; let oid = /^[a-z0-9_]{2,20}$/.test(x?.id) ? x.id : `o_${id()}`; while (seen.has(oid)) oid = `o_${id()}`; seen.add(oid);
+        out.push({ id: oid, name, calc: OT_CALC[x?.calc] ? x.calc : 'law_weekday', comp: ['pay', 'comp', 'choose'].includes(x?.comp) ? x.comp : 'pay', amount: Math.max(0, Math.min(100000, Math.round(num(x?.amount)))), enabled: x?.enabled !== false, hint: str(x?.hint, 60) }); }
+      return out; })(),
     attendance: { enabled: !!b.attendance?.enabled, name: str(b.attendance?.name, 20) || '全勤獎金', personal: b.attendance?.personal === 'all' ? 'all' : 'prorate' },
     types: {}, custom: [], flow: [],
   };
@@ -106,7 +121,7 @@ function normalize(input) {
 function typeList(policy) {
   const out = [];
   for (const k of LEGAL_ORDER) {
-    if (k === 'comp' && policy.overtime_mode !== 'comp') continue;
+    if (k === 'comp' && policy.overtime_mode !== 'comp' && !(policy.overtime_types || []).some(o => o.enabled && o.comp !== 'pay')) continue;
     const L = TYPES[k]; const o = policy.types[k] || {};
     out.push({ key: k, name: L.name, legal: true, pay: o.pay ?? L.pay, legal_pay: L.pay, quota: o.quota ?? L.quota, legal_quota: L.quota, per: L.per, proof: L.proofLocked ? 'none' : (o.proof || L.proof), proof_locked: !!L.proofLocked, reason: L.reason || !!o.reason, reason_locked: !!L.reason, att: L.att === 'company' ? policy.attendance.personal : L.att, female: !!L.female, calendar: !!L.calendar, event: L.event || '', hourly: !!L.hourly, subs: k === 'funeral' ? FUNERAL.map(([v, l, n]) => ({ value: v, label: `${l}（${n} 日）`, days: n })) : k === 'maternity' ? MATERNITY.map(([v, l, n]) => ({ value: v, label: l, days: n })) : (L.subs || []).map(([v, l]) => ({ value: v, label: l })), full_pay_days: k === 'sick' ? (o.full_pay_days || 0) : 0, hint: L.hint });
   }
@@ -114,4 +129,4 @@ function typeList(policy) {
   return out;
 }
 
-module.exports = { TYPES, FUNERAL, MATERNITY, LEGAL_ORDER, defaults, normalize, typeList };
+module.exports = { OT_CALC, OT_DEFAULTS, TYPES, FUNERAL, MATERNITY, LEGAL_ORDER, defaults, normalize, typeList };

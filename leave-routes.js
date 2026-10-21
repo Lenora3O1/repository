@@ -23,6 +23,9 @@ module.exports = function registerLeaveRoutes(app, d) {
   CREATE INDEX IF NOT EXISTS idx_leave_actions_req ON leave_actions(request_id);
   CREATE TABLE IF NOT EXISTS leave_files (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL, filename TEXT NOT NULL, original TEXT DEFAULT '', mime TEXT DEFAULT '', size INTEGER DEFAULT 0, uploaded_by TEXT DEFAULT '', created_at TEXT NOT NULL);
   `);
+  { const cols = db.prepare('PRAGMA table_info(leave_requests)').all().map(c => c.name); if (!cols.includes('need_cover')) db.exec('ALTER TABLE leave_requests ADD COLUMN need_cover INTEGER'); }
+  // 代班模組（cover-routes.js）註冊後提供：核准／取消時建立或取消代班需求、假單上顯示代班狀態
+  let hooks = {};
   { const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name); if (cols.length && !cols.includes('gender')) db.exec("ALTER TABLE hr_profiles ADD COLUMN gender TEXT DEFAULT ''"); }
 
   // ---------- 小工具 ----------
@@ -68,8 +71,17 @@ module.exports = function registerLeaveRoutes(app, d) {
   // 生理假全年前 3 日不併入病假；超過的部分併入病假
   function menstrualMerged(list, hpd) { let acc = 0, merged = 0; for (const e of [...list].sort((a, b) => a.d.localeCompare(b.d) || a.id - b.id)) { const free = Math.max(0, 3 * hpd - acc); merged += Math.max(0, e.h - free); acc += e.h; } return merged; }
   function annualWindow(tid, sid) { const h = hireOf(tid, sid); const al = payroll?.annualLeave ? payroll.annualLeave(h.hire_date, todayTW()) : null; return { al, manual: Number(h.annual_used) || 0 }; }
+  // 加班紀錄是否計入：已核准，或不需核准（公司登錄、代班自動產生）且未退回
+  const OT_COUNTED = "(status='approved' OR (COALESCE(needs_approval,0)=0 AND status<>'rejected'))";
+  function otRows(tid, sid, from, to) {
+    try { return db.prepare(`SELECT * FROM schedule_overtime WHERE tenant_id=? AND staff_id=? AND ${OT_COUNTED} AND work_date BETWEEN ? AND ?`).all(tid, sid, from, to); }
+    catch { try { return db.prepare("SELECT * FROM schedule_overtime WHERE tenant_id=? AND staff_id=? AND status<>'rejected' AND work_date BETWEEN ? AND ?").all(tid, sid, from, to); } catch { return []; } }
+  }
+  // 這筆加班要換補休還是給錢
+  function otChoice(o, p) { const T = (p.overtime_types || []).find(x => x.id === o.ot_type); if (o.comp_choice === 'comp' || o.comp_choice === 'pay') return o.comp_choice; if (T) return T.comp === 'comp' ? 'comp' : 'pay'; return p.overtime_mode === 'comp' ? 'comp' : 'pay'; }
   function compBalance(tid, sid, year, hpd, exclude = 0) {
-    let ot = 0; try { ot = db.prepare("SELECT COALESCE(SUM(hours),0) h FROM schedule_overtime WHERE tenant_id=? AND staff_id=? AND status<>'rejected' AND substr(work_date,1,4)=?").get(tid, sid, String(year)).h; } catch {}
+    const p = policyFor(tid);
+    const ot = otRows(tid, sid, `${year}-01-01`, `${year}-12-31`).filter(o => otChoice(o, p) === 'comp').reduce((a, o) => a + (Number(o.hours) || 0), 0);
     const used = sumH(activeEntries(tid, sid, { exclude }).filter(e => e.type === 'comp' && e.d.startsWith(String(year))));
     return Math.max(0, r2(Number(ot) - used));
   }
@@ -240,7 +252,7 @@ module.exports = function registerLeaveRoutes(app, d) {
   const reload = id => db.prepare('SELECT * FROM leave_requests WHERE id=?').get(id);
   function finalize(r, actor) {
     db.prepare("UPDATE leave_requests SET status='approved',decided_at=?,updated_at=? WHERE id=?").run(now(), now(), r.id);
-    const x = reload(r.id); applySchedule(x, actor);
+    const x = reload(r.id); applySchedule(x, actor); try { hooks.onApproved?.(reload(r.id), actor); } catch (e) { console.warn('cover hook failed', e.message); }
     notify(r.tenant_id, actor, [r.staff_id], `✅ 您的${r.type_name}（${when(r)}，${fmt(r.hours, policyFor(r.tenant_id).hours_per_day)}）已核准。${r.proof_status === 'pending' ? `\n請於 ${r.proof_due} 前上傳證明文件，逾期${policyFor(r.tenant_id).overdue_action === 'absent' ? '將視為曠職' : '會再提醒'}。` : ''}`);
   }
 
@@ -280,7 +292,7 @@ module.exports = function registerLeaveRoutes(app, d) {
       proof_req: r.proof_req, proof_due: r.proof_due, proof_status: r.proof_status, proof_label: PROOF[r.proof_status] || '', absent: !!r.absent,
       files: db.prepare('SELECT id,original,mime,size,uploaded_by,created_at FROM leave_files WHERE request_id=? ORDER BY id').all(r.id),
       actions: acts.map(a => ({ action: a.action, step_name: a.step_name, actor: a.actor_name, comment: a.comment, at: a.created_at })),
-      created_at: r.created_at, decided_at: r.decided_at,
+      created_at: r.created_at, decided_at: r.decided_at, need_cover: r.need_cover, cover: (() => { try { return hooks.coverInfo ? hooks.coverInfo(r.id) : null; } catch { return null; } })(),
       can: viewer ? { cancel: r.staff_id === viewer.id && (r.status === 'pending' || (r.status === 'approved' && r.start_date > todayTW())), decide: canDecide(r, viewer), upload: (r.staff_id === viewer.id || canHR(viewer)) && r.proof_req !== 'none' && ['pending', 'approved'].includes(r.status), manage: canHR(viewer) || viewer.role === 'company_admin' } : {},
     };
   }
@@ -298,7 +310,7 @@ module.exports = function registerLeaveRoutes(app, d) {
     const merged = menstrualMerged(yr(act, ['menstrual']), hpd);
     out_.sick = { quota: q('sick'), used: D(sumH(yr(ap, ['sick']).filter(e => (e.sub || 'outpatient') === 'outpatient')) + menstrualMerged(yr(ap, ['menstrual']), hpd)), pending: D(sumH(yr(pe, ['sick']).filter(e => (e.sub || 'outpatient') === 'outpatient'))), hospital: D(sumH(yr(ap, ['sick']).filter(e => e.sub === 'hospital'))), merged_menstrual: D(merged) };
     out_.menstrual = { quota: q('menstrual'), month_used: D(sumH(act.filter(e => e.type === 'menstrual' && e.d.startsWith(m)))), year_used: D(sumH(yr(act, ['menstrual']))) };
-    if (policy.overtime_mode === 'comp') out_.comp = { hours: compBalance(tid, u.id, y, hpd) };
+    if (typesFor(policy).some(t => t.key === 'comp')) out_.comp = { hours: compBalance(tid, u.id, y, hpd) };
     for (const c of policy.custom.filter(c => c.enabled && c.quota && c.per === 'year')) out_[c.id] = { quota: c.quota, used: D(sumH(yr(ap, [c.id]))), pending: D(sumH(yr(pe, [c.id]))) };
     return out_;
   }
@@ -319,7 +331,8 @@ module.exports = function registerLeaveRoutes(app, d) {
       const isApprover = u.role === 'company_admin' || !!db.prepare('SELECT 1 FROM leave_approvers WHERE tenant_id=? AND staff_id=? LIMIT 1').get(tid, u.id);
       const pendingForMe = db.prepare("SELECT * FROM leave_requests WHERE tenant_id=? AND status='pending'").all(tid).filter(r => canDecide(r, u)).length;
       res.set('Cache-Control', 'no-store');
-      res.json({ unit: p.unit, hours_per_day: p.hours_per_day, proof_days: p.proof_days, overdue_action: p.overdue_action, types, gender, gender_missing: !gender, flow: p.flow.map(s => ({ name: s.name, min_days: s.min_days })), balances: balances(tid, u, p), is_approver: isApprover, pending_for_me: pendingForMe, can_manage: canHR(u) || u.role === 'company_admin', is_admin: u.role === 'company_admin', today: todayTW() });
+      const ok_ = (() => { try { return org?.memberInfo(u)?.kind; } catch { return ''; } })();
+      res.json({ cover_question: ['site_manager', 'site_deputy'].includes(ok_), unit: p.unit, hours_per_day: p.hours_per_day, proof_days: p.proof_days, overdue_action: p.overdue_action, types, gender, gender_missing: !gender, flow: p.flow.map(s => ({ name: s.name, min_days: s.min_days })), balances: balances(tid, u, p), is_approver: isApprover, pending_for_me: pendingForMe, can_manage: canHR(u) || u.role === 'company_admin', is_admin: u.role === 'company_admin', today: todayTW() });
     }));
     app.post(`${base}/leave/preview`, mw, wrap((req, res) => {
       const u = getUser(req); const tid = tenantId(req); const p = policyFor(tid);
@@ -338,8 +351,8 @@ module.exports = function registerLeaveRoutes(app, d) {
       tx(() => {
         const x = build(tid, u, req.body, p);
         const steps = resolveSteps(tid, u, x.days, p); const first = nextStep(steps, 0);
-        const info = db.prepare('INSERT INTO leave_requests (tenant_id,staff_id,leave_type,sub,event_date,start_date,end_date,hours,days,entries_json,reason,status,step_index,steps_json,pay_ratio,proof_req,proof_due,proof_status,type_name,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(tid, u.id, x.type, x.sub, x.event_date, x.start_date, x.end_date, x.hours, x.days, JSON.stringify(x.entries), x.reason, 'pending', Math.max(0, first), JSON.stringify(steps), x.pay_ratio, x.proof_req, x.proof_due, x.proof_req === 'required' ? 'pending' : 'none', x.T.name, now(), now());
+        const info = db.prepare('INSERT INTO leave_requests (need_cover,tenant_id,staff_id,leave_type,sub,event_date,start_date,end_date,hours,days,entries_json,reason,status,step_index,steps_json,pay_ratio,proof_req,proof_due,proof_status,type_name,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(req.body?.need_cover === undefined || req.body?.need_cover === null || req.body?.need_cover === '' ? null : (req.body.need_cover ? 1 : 0), tid, u.id, x.type, x.sub, x.event_date, x.start_date, x.end_date, x.hours, x.days, JSON.stringify(x.entries), x.reason, 'pending', Math.max(0, first), JSON.stringify(steps), x.pay_ratio, x.proof_req, x.proof_due, x.proof_req === 'required' ? 'pending' : 'none', x.T.name, now(), now());
         id = Number(info.lastInsertRowid);
       })();
       const r = reload(id); log(r, u, 'submit', '', '');
@@ -360,7 +373,7 @@ module.exports = function registerLeaveRoutes(app, d) {
       if (r.status === 'approved' && r.start_date <= todayTW()) return bad(res, '假期已經開始，請洽人事辦理撤銷');
       if (!['pending', 'approved'].includes(r.status)) return bad(res, '這張假單已經結案');
       const wasApproved = r.status === 'approved';
-      db.prepare("UPDATE leave_requests SET status='cancelled',updated_at=? WHERE id=?").run(now(), r.id); if (wasApproved) revertSchedule(r);
+      db.prepare("UPDATE leave_requests SET status='cancelled',updated_at=? WHERE id=?").run(now(), r.id); if (wasApproved) { revertSchedule(r); try { hooks.onCancelled?.(r, u); } catch (e) { console.warn('cover hook failed', e.message); } }
       log(r, u, 'cancel', str(req.body?.comment, 200));
       const steps = parse(r.steps_json, []);
       notify(r.tenant_id, u, wasApproved ? steps.flatMap(s => s.approvers) : (steps[r.step_index]?.approvers || []), `↩ ${u.name} 已取消${r.type_name}（${when(r)}）。`);
@@ -447,7 +460,7 @@ module.exports = function registerLeaveRoutes(app, d) {
     const u = getUser(req); const r = getReq(req, req.params.id); const comment = str(req.body?.comment, 300);
     if (!['pending', 'approved'].includes(r.status)) return bad(res, '這張假單已經結案'); if (!comment) return bad(res, '請填寫撤銷原因');
     const wasApproved = r.status === 'approved';
-    db.prepare("UPDATE leave_requests SET status='cancelled',updated_at=? WHERE id=?").run(now(), r.id); if (wasApproved) revertSchedule(r);
+    db.prepare("UPDATE leave_requests SET status='cancelled',updated_at=? WHERE id=?").run(now(), r.id); if (wasApproved) { revertSchedule(r); try { hooks.onCancelled?.(r, u); } catch (e) { console.warn('cover hook failed', e.message); } }
     log(r, u, 'revoke', comment);
     notify(r.tenant_id, u, [r.staff_id], `↩ 您的${r.type_name}（${when(r)}）已由人事撤銷。\n原因：${comment}`);
     let warn = ''; try { const months = [...new Set(parse(r.entries_json, []).map(e => e.d.slice(0, 7)))]; const pub = months.filter(m => db.prepare("SELECT 1 FROM payroll_runs WHERE tenant_id=? AND month=? AND status='published'").get(r.tenant_id, m)); if (pub.length) warn = `${pub.join('、')} 的薪資已經發布，請會計撤回後重新計算。`; } catch {}
@@ -533,10 +546,23 @@ module.exports = function registerLeaveRoutes(app, d) {
     }
     let attendance = 0;
     if (p.attendance.enabled) { const A = (allowances || []).find(a => String(a.name || '').includes(p.attendance.name)); const amt = Number(A?.amount) || 0; if (amt) attendance = attAll ? amt : Math.min(amt, Math.round(amt * attHours / (denom * hpd))); }
-    let overtime = 0, otHours = 0;
+    let overtime = 0, otHours = 0, otComp = 0; const otLines = new Map();
     try {
       const OA = p.overtime_allowance || {};
-      for (const o of db.prepare("SELECT hours FROM schedule_overtime WHERE tenant_id=? AND staff_id=? AND status<>'rejected' AND work_date BETWEEN ? AND ?").all(tid, u.id, first, last)) { const h = Number(o.hours) || 0; otHours += h; overtime += p.overtime_mode === 'allowance' ? (OA.unit === 'hour' ? h * (Number(OA.amount) || 0) : (Number(OA.amount) || 0)) : hourly * (Math.min(h, 2) * 4 / 3 + Math.max(0, h - 2) * 5 / 3); }
+      for (const o of otRows(tid, u.id, first, last)) {
+        const h = Number(o.hours) || 0; if (otChoice(o, p) === 'comp') { otComp += h; continue; }
+        const T = (p.overtime_types || []).find(x => x.id === o.ot_type); let amt;
+        if (!T) amt = p.overtime_mode === 'allowance' ? (OA.unit === 'hour' ? h * (Number(OA.amount) || 0) : (Number(OA.amount) || 0)) : hourly * (Math.min(h, 2) * 4 / 3 + Math.max(0, h - 2) * 5 / 3);
+        else if (T.calc === 'law_rest') amt = hourly * (Math.min(h, 2) * 4 / 3 + Math.min(Math.max(h - 2, 0), 6) * 5 / 3 + Math.max(h - 8, 0) * 8 / 3);
+        else if (T.calc === 'law_holiday') amt = hourly * Math.min(h, hpd) + hourly * (Math.min(Math.max(h - hpd, 0), 2) * 4 / 3 + Math.max(h - hpd - 2, 0) * 5 / 3);
+        else if (T.calc === 'law_weekday') amt = hourly * (Math.min(h, 2) * 4 / 3 + Math.max(0, h - 2) * 5 / 3);
+        else if (T.calc === 'hourly' || T.calc === 'daily') amt = hourly * h;
+        else if (T.calc === 'allowance_time') amt = Number(T.amount) || 0;
+        else if (T.calc === 'allowance_hour') amt = (Number(T.amount) || 0) * h;
+        else amt = 0;
+        otHours += h; overtime += amt;
+        const label = T ? T.name : '加班'; const L = otLines.get(label) || { label, hours: 0, amount: 0 }; L.hours += h; L.amount += amt; otLines.set(label, L);
+      }
     } catch {}
     const yearSick = reqs.filter(r => r.leave_type === 'sick' || r.leave_type === 'menstrual').flatMap(r => parse(r.entries_json, []).map(e => ({ ...e, type: r.leave_type, id: r.id }))).filter(e => e.d.startsWith(month.slice(0, 4)) && e.d <= last);
     const sickH = sumH(yearSick.filter(e => e.type === 'sick')) + menstrualMerged(yearSick.filter(e => e.type === 'menstrual'), hpd);
@@ -544,7 +570,7 @@ module.exports = function registerLeaveRoutes(app, d) {
       leave_deduct: Math.round(leave), attendance_deduct: attendance,
       lines: [...lines.values()].map(l => ({ label: l.label, type: l.type, hours: r2(l.hours), length: fmt(l.hours, hpd), amount: Math.round(l.amount) })),
       wage: { monthly: Math.round(W), daily: r2(daily), hourly: r2(hourly), denom, workdays, mode: p.daily_wage_mode, hours_per_day: hpd },
-      overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, overtime: p.overtime_mode !== 'comp' ? Math.round(overtime) : 0, overtime_label: p.overtime_mode === 'allowance' ? (p.overtime_allowance?.name || '支援費') : '加班費', overtime_hours: r2(otHours),
+      overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, overtime: Math.round(overtime), overtime_lines: [...otLines.values()].map(l => ({ label: l.label, hours: r2(l.hours), amount: Math.round(l.amount) })), overtime_comp_hours: r2(otComp), overtime_label: p.overtime_mode === 'allowance' ? (p.overtime_allowance?.name || '支援費') : '加班費', overtime_hours: r2(otHours),
       sick_days_year: r2(sickH / hpd), attendance_enabled: p.attendance.enabled, attendance_name: p.attendance.name,
     };
   }
@@ -554,5 +580,5 @@ module.exports = function registerLeaveRoutes(app, d) {
     return { used: r2(sumH(l.filter(e => e.status === 'approved')) / hpd), pending: r2(sumH(l.filter(e => e.status === 'pending')) / hpd) };
   }
   if (payroll?.setLeaveHooks) payroll.setLeaveHooks({ forMonth, annualUsed });
-  return { forMonth, annualUsed, policyFor, sweep };
+  return { forMonth, annualUsed, policyFor, sweep, typesFor, setHooks: h => { hooks = { ...hooks, ...h }; } };
 };

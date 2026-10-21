@@ -3,6 +3,7 @@
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
   const J=(method,body)=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const OT_CALC={law_rest:'休息日倍率（1.34／1.67／2.67）',law_holiday:'國定假日加倍',law_weekday:'平日倍率（1.34／1.67）',hourly:'時薪',daily:'日薪（依時數比例）',allowance_time:'每次固定支援費',allowance_hour:'每小時固定支援費'};
   const S={tid:null,list:null,p:null,types:null};
   function injectStyle(){
     if(document.getElementById('leaveAdminStyle'))return;
@@ -61,10 +62,13 @@
       <div class="la-grid">
         <label>日薪算法<select data-k="daily_wage_mode"><option value="month30" ${P.daily_wage_mode==='month30'?'selected':''}>月薪 ÷ 30</option><option value="workdays" ${P.daily_wage_mode==='workdays'?'selected':''}>月薪 ÷ 當月應出勤日（扣除例假、國定假日）</option></select><small class="muted" style="font-weight:400">時薪＝日薪 ÷ 每日工時；請假扣款、加班費都用這個時薪</small></label>
         <label class="chk"><input type="checkbox" data-k="wage_includes_allowances" ${P.wage_includes_allowances?'checked':''}> 日薪含固定加給（經常性給與）</label>
-        <label>加班（內勤見紅休，加班另計）<select data-k="overtime_mode" data-redraw><option value="pay" ${P.overtime_mode==='pay'?'selected':''}>時數加班費（依時薪與法定倍數）</option><option value="allowance" ${P.overtime_mode==='allowance'?'selected':''}>車馬費／支援費（固定金額）</option><option value="comp" ${P.overtime_mode==='comp'?'selected':''}>加班換補休（開放「補休」假別）</option></select></label>
+        <label>未分類加班的計算方式（舊紀錄）<select data-k="overtime_mode" data-redraw><option value="pay" ${P.overtime_mode==='pay'?'selected':''}>時數加班費（依時薪與法定倍數）</option><option value="allowance" ${P.overtime_mode==='allowance'?'selected':''}>車馬費／支援費（固定金額）</option><option value="comp" ${P.overtime_mode==='comp'?'selected':''}>加班換補休（開放「補休」假別）</option></select></label>
         ${P.overtime_mode==='allowance'?`<label>名稱<input data-oa="name" value="${esc(P.overtime_allowance?.name||'支援費')}"></label><label>計算方式<select data-oa="unit"><option value="time" ${P.overtime_allowance?.unit!=='hour'?'selected':''}>每次</option><option value="hour" ${P.overtime_allowance?.unit==='hour'?'selected':''}>每小時</option></select></label><label>金額（元）<input type="number" min="0" data-oa="amount" value="${P.overtime_allowance?.amount||0}"></label>`:''}
         <label class="chk"><input type="checkbox" data-k="overtime_auto" ${P.overtime_auto?'checked':''}> 依班表加班紀錄自動計算（加班費：平日前 2 小時 1.34 倍、之後 1.67 倍；支援費：依上面金額）</label>
       </div>
+      <div class="la-sec">加班種類（平台預設，可依公司修改）</div>
+      <div class="la-wrap"><table class="la-tbl"><thead><tr><th>名稱</th><th>計算方式</th><th>金額</th><th>領錢或補休</th><th>啟用</th><th></th></tr></thead><tbody>${(P.overtime_types||[]).map((o,i)=>`<tr><td><input data-ot="${i}" data-f="name" value="${esc(o.name)}"><small>${esc(o.hint||'')}</small></td><td><select data-ot="${i}" data-f="calc" data-redraw>${Object.entries(OT_CALC).map(([v,l])=>`<option value="${v}" ${o.calc===v?'selected':''}>${esc(l)}</option>`).join('')}</select></td><td>${String(o.calc).startsWith('allowance')?`<input type="number" min="0" data-ot="${i}" data-f="amount" value="${o.amount||0}"><small>元／${o.calc==='allowance_hour'?'小時':'次'}</small>`:'<small>—</small>'}</td><td><select data-ot="${i}" data-f="comp">${[['choose','本人選擇'],['pay','領加班費'],['comp','換補休']].map(([v,l])=>`<option value="${v}" ${o.comp===v?'selected':''}>${l}</option>`).join('')}</select></td><td><input type="checkbox" data-ot="${i}" data-f="enabled" style="width:auto" ${o.enabled!==false?'checked':''}></td><td><button type="button" class="danger" data-otdel="${i}" style="padding:3px 9px;min-height:0">刪除</button></td></tr>`).join('')}</tbody></table></div>
+      <div class="la-bar"><button type="button" class="secondary" id="laOtAdd">＋ 新增加班種類</button><small class="muted">休假日代班會自動記為「休假日被請回」（國定假日記為「國定假日出勤」）。依法以補休代替加班費需本人同意，建議設為「本人選擇」。</small></div>
       <div class="la-sec">全勤獎金</div>
       <div class="la-grid">
         <label class="chk"><input type="checkbox" data-a="enabled" ${P.attendance.enabled?'checked':''}> 公司有全勤獎金</label>
@@ -84,6 +88,9 @@
     el.querySelectorAll('[data-t]').forEach(i=>i.addEventListener('change',()=>{const k=i.dataset.t;P.types[k]=P.types[k]||{};P.types[k][i.dataset.f]=i.dataset.f==='pay'?Number(i.value):val(i);}));
     el.querySelectorAll('[data-c]').forEach(i=>i.addEventListener('change',()=>{const c=P.custom[Number(i.dataset.c)];c[i.dataset.f]=i.dataset.f==='pay'?Number(i.value):val(i);}));
     el.querySelectorAll('[data-s]').forEach(i=>i.addEventListener('change',()=>{const s=P.flow[Number(i.dataset.s)];s[i.dataset.f]=val(i);if(i.dataset.f==='by'&&!s.name)s.name=i.selectedOptions[0].textContent.replace(/（.*$/,'');if(i.hasAttribute('data-redraw'))paint(el,d);}));
+    el.querySelectorAll('[data-ot]').forEach(i=>i.addEventListener('change',()=>{const o=P.overtime_types[Number(i.dataset.ot)];o[i.dataset.f]=i.type==='checkbox'?i.checked:i.type==='number'?Number(i.value):i.value;if(i.hasAttribute('data-redraw'))paint(el,d);}));
+    el.querySelectorAll('[data-otdel]').forEach(b=>b.addEventListener('click',()=>{P.overtime_types.splice(Number(b.dataset.otdel),1);paint(el,d);}));
+    el.querySelector('#laOtAdd')?.addEventListener('click',()=>{P.overtime_types=P.overtime_types||[];P.overtime_types.push({id:'',name:'新加班種類',calc:'law_weekday',comp:'choose',amount:0,enabled:true});paint(el,d);});
     el.querySelectorAll('[data-oa]').forEach(i=>i.addEventListener('change',()=>{P.overtime_allowance=P.overtime_allowance||{};P.overtime_allowance[i.dataset.oa]=val(i);}));
     const redraw=()=>paint(el,d);
     el.querySelectorAll('[data-cdel]').forEach(b=>b.addEventListener('click',()=>{P.custom.splice(Number(b.dataset.cdel),1);redraw();}));
