@@ -320,6 +320,6 @@ button.lnk{border:0!important;background:transparent!important;color:#1f5c42!imp
   }
   window.PayrollCompanyModule={render,openMine,showPayslip};
   // 公司頁頂端加「我的薪資單」按鈕（內勤人員自己的薪資單）
-  function addHeaderButton(){const wrap=document.getElementById('logoutWrap');if(!wrap||document.getElementById('myPayslipBtn'))return;const b=document.createElement('button');b.type='button';b.id='myPayslipBtn';b.className='top-link';b.style.marginRight='8px';b.textContent='📄 我的薪資單';b.addEventListener('click',()=>{injectStyle();openMine().catch(err=>alert(err.message));});wrap.insertBefore(b,wrap.firstChild);}
+  function addHeaderButton(){const wrap=document.getElementById('logoutWrap');if(!wrap||document.getElementById('myPayslipBtn'))return;const b=document.createElement('button');b.type='button';b.id='myPayslipBtn';b.className='top-link';b.style.marginRight='8px';b.textContent='📄 我的薪資單';b.addEventListener('click',()=>{injectStyle();openMine().catch(err=>alert(err.message));});wrap.insertBefore(b,wrap.firstChild);if(!document.getElementById('myPwBtn')){const k=document.createElement('button');k.type='button';k.id='myPwBtn';k.className='top-link';k.style.marginRight='8px';k.textContent='🔑 修改密碼';k.addEventListener('click',()=>window.PasswordModule?.open('/api/company/my'));wrap.insertBefore(k,b.nextSibling);}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addHeaderButton);else addHeaderButton();
 })();

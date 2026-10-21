@@ -171,7 +171,7 @@ module.exports = function registerPayrollRoutes(app, d) {
       base: baseNow, base_manual: !!keep.base_manual, base_note: keep.base_manual ? '本月手動調整' : bm.base_note,
       deductions: deductionsFor(prof.deductions, run.month),
       allowances: prof.allowances,
-      overtime: otAuto ? int(L.overtime) : int(keep.overtime), overtime_manual: !!otManual, overtime_autocalc: otAuto, overtime_hours: L ? L.overtime_hours : 0, overtime_mode: L?.overtime_mode || 'pay',
+      overtime: otAuto ? int(L.overtime) : int(keep.overtime), overtime_manual: !!otManual, overtime_autocalc: otAuto, overtime_hours: L ? L.overtime_hours : 0, overtime_mode: L?.overtime_mode || 'pay', overtime_label: L?.overtime_label || '加班費',
       leave_deduct: L && !leaveManual ? int(L.leave_deduct) : int(keep.leave_deduct), leave_manual: !!leaveManual, leave_auto: !!L && !leaveManual, leave_lines: L ? L.lines : [],
       attendance_deduct: keep.att_manual ? int(keep.attendance_deduct) : (L ? int(L.attendance_deduct) : 0), att_manual: !!keep.att_manual, attendance_name: L?.attendance_name || '',
       wage: L ? L.wage : null, sick_days_year: L ? L.sick_days_year : 0,

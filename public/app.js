@@ -1,6 +1,6 @@
 let formConfig=null, answers={}, currentPage=0, draftId=null, draftCommunityId=null, autosaveTimer=null, saving=false, dirty=false, communities=[];
 const $=id=>document.getElementById(id);
-async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
+async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok){if(d.must_change_password)window.PasswordModule?.force('/api/staff');throw new Error(d.error||'操作失敗');}return d;}
 async function applyStaffBranding(){try{const b=await api('/api/staff/branding');document.title=b.title||document.title;const root=document.documentElement;root.style.setProperty('--accent',b.accent);root.style.setProperty('--accent-dark',b.accentDark);root.style.setProperty('--bg',b.bg);root.style.setProperty('--panel',b.panel);}catch(e){console.warn('Staff branding load skipped',e)}}
 async function boot(){
   // 平台名稱與「表單範本標題」分離，避免公司自訂的表單名稱跑到網站／瀏覽器標題。
@@ -19,6 +19,7 @@ async function boot(){
     if(s.loggedIn){
       if(s.entry==='company' || s.user.role==='company_admin'){ location.href='company.html'; return; }
       await applyStaffBranding();
+      if(s.user.must_change_password)window.PasswordModule?.force('/api/staff');
       showHome(s.user);
     }else showLogin();
   }catch(err){
@@ -98,10 +99,14 @@ async function showStaffProfile(user){
       <button type="button" class="monthly-payslip-card" id="salaryDetailsBtn">
         <span><strong>薪資相關</strong><small>試用期、正式薪資、投保等資料</small></span><b>›</b>
       </button>
+      <button type="button" class="monthly-payslip-card" id="changePasswordBtn">
+        <span><strong>🔑 修改密碼</strong><small>登入帳號：員編 ${escapeHtml(d.employee_id||'')}，也可以用人事登記的手機號碼登入</small></span><b>›</b>
+      </button>
       <button type="button" class="monthly-payslip-card" id="monthlyPayslipBtn">
         <span><strong>本月薪資單</strong><small>${d.payslip?.available?`${escapeHtml(d.payslip.month.slice(0,4)+' 年 '+Number(d.payslip.month.slice(5,7))+' 月')}｜實發 ${Number(d.payslip.net||0).toLocaleString('en-US')} 元${d.payslip.confirmed?'':'（待確認）'}`:'點選查看當月薪資單'}</small></span><b>›</b>
       </button>`;
     modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard({...salary,pay_method:d.pay_method},d.advances));
+    modal.querySelector('#changePasswordBtn').addEventListener('click',()=>window.PasswordModule?.open('/api/staff'));
     modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d).catch(e=>alert(e.message)));
   }catch(e){modal.querySelector('#staffProfileBody').innerHTML=`<div class="profile-error">目前無法載入職員資料。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
@@ -546,7 +551,7 @@ async function onSubmit(e){
 }
 function showHomeAfterSubmit(){api('/api/staff/session').then(s=>showHome(s.user)).catch(showLogin)}
 async function backHome(){await saveNow(true);await loadHandoverHome(handoverType,handoverLabel);}
-$('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
+$('staffLoginForm').addEventListener('submit',async e=>{e.preventDefault();const m=$('loginMsg');try{const r=await api('/api/staff/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:$('employeeId').value,password:$('employeePassword').value,tenantCode:$('staffTenantCode')?.value||'',entry:'staff'})});if(r.user.role==='company_admin'){location.href='company.html';return}await applyStaffBranding();if(r.user.must_change_password)window.PasswordModule?.force('/api/staff');showHome(r.user)}catch(err){if(err.message?.includes('多家公司')&&$('staffTenantCode')){$('staffTenantCode').closest('.field').style.display='block';$('staffTenantCode').focus();}m.innerHTML=`<div class="msg error">${escapeHtml(err.message)}</div>`}});
 $('staffLogout')?.addEventListener('click',async()=>{if(dirty&&draftId)await saveNow(true);await api('/api/staff/logout',{method:'POST'});showLogin();$('employeePassword').value='';});
 function showMessage(text,type){$('msgArea').innerHTML=`<div class="msg ${type}">${escapeHtml(text)}</div>`;setTimeout(()=>{if($('msgArea'))$('msgArea').innerHTML=''},5000)}
 function formatDate(s){return new Date(s).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
