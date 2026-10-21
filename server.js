@@ -432,6 +432,15 @@ function readMenuConfig(){
       c._payrollMenuAdded=1;writeMenuConfig(c);
     }catch(e){console.error('payroll menu migration error',e);}
   }
+  // 一次性升級：現場工作台加入「請假」、公司內勤加入「請假管理」（申請、審核、人事管理）。
+  if(!c._leaveMenuAdded){
+    try{
+      const after=(list,item,pred)=>{if(list.some(x=>String(x.id)===item.id))return;let i=list.findIndex(pred);if(i<0){list.push(item);return;}const pid=String(list[i].id);i++;while(i<list.length&&String(list[i].parentId||'')===pid)i++;list.splice(i,0,item);};
+      after(c.staff,{id:'staff-leave',parentId:null,icon:'📝',label:'請假',action:'staff-leave',enabled:true},x=>String(x.id)==='staff-schedule');
+      after(c.company,{id:'company-leave',parentId:null,icon:'📝',label:'請假管理',action:'leave',enabled:true},x=>String(x.id)==='company-hr');
+      c._leaveMenuAdded=1;writeMenuConfig(c);
+    }catch(e){console.error('leave menu migration error',e);}
+  }
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
   // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
@@ -2551,6 +2560,8 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
 // ===== 工作日誌（每日／每週）：路由在 journal-routes.js =====
 // ===== 人事管理、借資、人員薪資統計表、人員薪資單、投保級距表 =====
 const payroll=require('./payroll-routes')(app,{db,fs,path,DATA_DIR,XLSX,getUser,tenantId,now,effectivePermissions,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments});
+// ===== 請假（多層審核、證明補交、連動班表／特休／薪資）=====
+require('./leave-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,payroll,redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));if(!c)scheduleTaiwanHolidayDates(Number(y)).catch(()=>{});return c||scheduleFallbackRedDates(y);}});
 // ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
 handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
