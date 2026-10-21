@@ -93,6 +93,7 @@ async function showStaffProfile(user){
         <div><span>職務</span><strong>${escapeHtml(d.position||'尚未設定')}</strong></div>
         <div><span>公司</span><strong>${escapeHtml(d.tenant_name||'—')}</strong></div>
         <div><span>服務案場</span><strong>${communityNames.length?escapeHtml(communityNames.join('、')):'目前無駐點案場'}</strong></div>
+        ${d.annual_leave?`<div><span>特休</span><strong>${d.annual_leave.days?`本期 ${d.annual_leave.days} 天，剩 ${Math.max(0,d.annual_leave.days-Number(d.annual_used||0))} 天<br><small style="font-weight:400;color:#6a7a73">${escapeHtml(d.annual_leave.start)}～${escapeHtml(d.annual_leave.end)}</small>`:`${escapeHtml(d.annual_leave.next_date)} 起 3 天`}</strong></div>`:''}
       </div>
       <button type="button" class="monthly-payslip-card" id="salaryDetailsBtn">
         <span><strong>薪資相關</strong><small>試用期、正式薪資、投保等資料</small></span><b>›</b>
@@ -100,7 +101,7 @@ async function showStaffProfile(user){
       <button type="button" class="monthly-payslip-card" id="monthlyPayslipBtn">
         <span><strong>本月薪資單</strong><small>${d.payslip?.available?`${escapeHtml(d.payslip.month.slice(0,4)+' 年 '+Number(d.payslip.month.slice(5,7))+' 月')}｜實發 ${Number(d.payslip.net||0).toLocaleString('en-US')} 元${d.payslip.confirmed?'':'（待確認）'}`:'點選查看當月薪資單'}</small></span><b>›</b>
       </button>`;
-    modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard(salary,d.advances));
+    modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard({...salary,pay_method:d.pay_method},d.advances));
     modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d).catch(e=>alert(e.message)));
   }catch(e){modal.querySelector('#staffProfileBody').innerHTML=`<div class="profile-error">目前無法載入職員資料。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
@@ -138,6 +139,7 @@ function openSalaryDetailsCard(salary,advances){
     <div><span>健保投保金額</span><strong>${yes(salary.health_insured,salary.health_grade?`${money(salary.health_grade)} 元`:'尚未設定')}</strong></div>
     <div><span>健保眷屬</span><strong>${Number(salary.health_dependents||0)} 人</strong></div>
     <div><span>勞退</span><strong>${salary.pension_enabled?`公司提繳 6%${salary.pension_self_rate?`，自提 ${salary.pension_self_rate}%`:''}`:'未提繳'}</strong></div>
+    <div><span>薪資發放</span><strong>${salary.pay_method==='cash'?'領現':'薪轉'}</strong></div>
     ${salary.configured?`<div><span>每月保費自付</span><strong>${money(eeSum)} 元</strong></div>`:''}
     ${(salary.deductions||[]).map(x=>`<div><span>每月代扣：${escapeHtml(x.name)}</span><strong>${money(x.amount)} 元（${escapeHtml(x.period)}）</strong></div>`).join('')}
     ${advances.map(a=>`<div><span>借資餘額</span><strong>${money(a.balance)} 元（每月扣回 ${money(a.monthly_deduct)}）</strong></div>`).join('')}
