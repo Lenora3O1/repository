@@ -350,7 +350,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
   const data=await api('/api/staff/schedule/community-view?'+query.toString());
   const communities=data.communities||[], selected=String(data.selected_community_id||'');
   const profile=data.profile||{}; const entries=data.entries||[], staff=data.staff||[];
-  const selfAllowed=['security','mobile'].includes(profile.schedule_role);
+  const selfAllowed=data.self_allowed!==undefined?!!data.self_allowed:['security','mobile'].includes(profile.schedule_role);
   const selfDates=new Set(data.self_off_dates||[]);
   const offByDate=new Map((data.off_conflicts||[]).map(x=>[x.work_date,Number(x.count||0)]));
   const days=Array.from({length:new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);
@@ -372,6 +372,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
   const used=selfDates.size, limit=Number(profile.self_select_days||0);
   const selfNote=mode==='self'?`<div class="staff-schedule-note">${selfAllowed?`本月已自選 <strong>${used}</strong>／${limit} 天。只有當天案場沒有其他人排休時才能選擇；若撞假，按鈕會停用，後端也會再次檢查。`:'目前職務不開放自選休假；仍可查看案場全班班表。'}</div>`:'';
   el.innerHTML=`<style>.staff-schedule-page{padding:22px}.staff-schedule-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:16px 0}.staff-schedule-controls label{display:grid;gap:6px;color:#705E58;font-size:13px}.staff-schedule-controls input,.staff-schedule-controls select{min-width:170px;padding:10px;border:1px solid #DAD2CF;border-radius:9px;background:white}.staff-schedule-page button{padding:9px 12px;border:1px solid #CDC1BD;border-radius:8px;background:#F6F3EE;color:#4A2A25;font-weight:700}.staff-schedule-page button:disabled{background:#F3F2F2;border-color:#E4E1E0;color:#9b4d4d;cursor:not-allowed}.staff-schedule-note{margin:10px 0 16px;padding:12px;background:#fff7e5;border:1px solid #efd99c;border-radius:9px;line-height:1.7}.staff-schedule-table-wrap{overflow:auto;max-height:65vh;border:1px solid #E9E2E0;border-radius:10px}.staff-schedule-table{border-collapse:separate;border-spacing:0;min-width:100%;white-space:nowrap}.staff-schedule-table th,.staff-schedule-table td{padding:9px 10px;border-right:1px solid #ECE8E7;border-bottom:1px solid #ECE8E7;text-align:center}.staff-schedule-table thead th{position:sticky;top:0;background:#F6F4F2;z-index:3}.staff-schedule-table th small,.staff-schedule-table td small{display:block;font-size:11px;color:#817571;margin-top:3px}.staff-schedule-table .staff-schedule-date-col{position:sticky;left:0;z-index:2;background:#FBFAF8;text-align:left}.staff-schedule-table thead .staff-schedule-date-col{z-index:4}.staff-schedule-work{background:#F7F4EF;color:#4C2C27}.staff-schedule-off{background:#fff0ef;color:#a33131;font-weight:800}.staff-schedule-empty{color:#BBB4B2}.staff-schedule-self-cell{min-width:100px}</style><div class="panel staff-schedule-page"><div class="eyebrow">📅 現場勤務</div><h1>${mode==='self'?'自選休假':'案場全班班表'}</h1><p class="hint">可查看您有權限的案場全體人員班表；休假安排會即時顯示，避免同一天多人撞假。</p>${controls}${selfNote}<div class="staff-schedule-table-wrap"><table class="staff-schedule-table"><thead>${rosterHead.replace('</tr>',`${selfHeader}</tr>`)}</thead><tbody>${rows||'<tr><td colspan="2">本月尚無班表資料。</td></tr>'}</tbody></table></div><p class="hint">「—」代表目前尚未建立該人員當日班別；班表由公司排定後會顯示在這裡。</p></div>`;
+  if(mode==='self'&&data.rule){const box=el.querySelector('.staff-schedule-controls');if(box){const r=data.rule;const b=document.createElement('div');b.className='staff-rule-banner';b.style.cssText='margin:12px 0;padding:12px 14px;border-radius:12px;background:#F6ECE6;border:1px solid #E2D3CC;color:#1D0D0C;line-height:1.7';b.innerHTML=`<b>📋 我的休假制度：${escapeHtml(r.mode_label||'')}</b>${r.community?`｜${escapeHtml(r.community)}`:''}<br>${escapeHtml(r.text||'')}`;box.parentNode.insertBefore(b,box);}}
   const refresh=()=>loadStaffSchedulePage(mode,'班表',$('staffScheduleMonth')?.value||month,$('staffScheduleCommunity')?.value||selected).catch(err=>showWorkspaceError('班表',err));
   $('staffScheduleRefresh')?.addEventListener('click',refresh);
   $('staffScheduleMonth')?.addEventListener('change',refresh);
@@ -382,7 +383,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
 // 目錄設定使用的動作代碼與程式內部代碼對照（目錄的 handover-manager 等原本沒有對應，點了只會看到「建置中」）。
 const WORKSPACE_ACTION_ALIASES={'handover':'checklist','handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
 // 企業自訂目錄若沒有設定功能代碼（placeholder），依名稱對應到已上線的功能
-const WORKSPACE_LABEL_ACTIONS=[['住戶聯繫表','residents-contact'],['區分所有權人','residents-owners'],['所有權人','residents-owners'],['承租人','residents-tenants'],['出勤打卡','staff-attendance-checkin'],['巡邏紀錄','staff-patrol-records'],['巡邏巡檢','staff-patrol'],['出勤與巡邏','staff-attendance'],['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop'],['請假管理','staff-leave'],['請假申請','staff-leave']];
+const WORKSPACE_LABEL_ACTIONS=[['住戶聯繫表','residents-contact'],['區分所有權人','residents-owners'],['所有權人','residents-owners'],['承租人','residents-tenants'],['出勤打卡','staff-attendance-checkin'],['巡邏紀錄','staff-patrol-records'],['巡邏巡檢','staff-patrol'],['出勤與巡邏','staff-attendance'],['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop'],['請假管理','staff-schedule-leave'],['請假申請','staff-schedule-leave'],['請假／代班','staff-schedule-leave'],['加班','staff-schedule-overtime'],['我的休假制度','staff-schedule-rules'],['排班規則','staff-schedule-rules']];
 function labelWorkspaceAction(label){const t=String(label||'');const hit=WORKSPACE_LABEL_ACTIONS.find(([k])=>t.includes(k));return hit?hit[1]:'';}
 function resolveWorkspaceAction(detail){
   // 舊設定常把連字號存成底線（work_journal），一律轉回平台代碼
@@ -397,9 +398,14 @@ async function handleWorkspaceMenu(e){
     return;
   }
   if(action==='home'){const s=await api('/api/staff/session');if(s.loggedIn)showHome(s.user);return;}
-  if(action==='staff-leave'||(!action||action==='placeholder')&&String(label||'').trim()==='請假'){
+  if(['staff-schedule-overtime','staff-schedule-rules'].includes(action)){
+    const L=label||(action==='staff-schedule-rules'?'我的休假制度':'加班');showWorkspaceLoading(L);
+    try{if(!window.CoverModule)throw new Error('班表模組尚未載入，請重新整理頁面');if(action==='staff-schedule-rules')await window.CoverModule.renderMyRule($('staffHome'),{base:'/api/staff',label:L});else await window.CoverModule.renderOvertime($('staffHome'),{base:'/api/staff',side:'staff',label:L});}catch(err){showWorkspaceError(L,err);}
+    return;
+  }
+  if(action==='staff-schedule-leave'||action==='staff-leave'||(!action||action==='placeholder')&&String(label||'').trim()==='請假'){
     showWorkspaceLoading(label||'請假');
-    try{if(!window.LeaveModule)throw new Error('請假模組尚未載入，請重新整理頁面');await window.LeaveModule.render($('staffHome'),{base:'/api/staff',side:'staff',label:label||'請假'});}catch(err){showWorkspaceError(label||'請假',err);}
+    try{if(!window.LeaveModule)throw new Error('請假模組尚未載入，請重新整理頁面');await window.LeaveModule.render($('staffHome'),{base:'/api/staff',side:'staff',label:label||'請假／代班',withCover:true});}catch(err){showWorkspaceError(label||'請假',err);}
     return;
   }
   if(action==='todo'){
