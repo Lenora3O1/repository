@@ -46,6 +46,7 @@ const PORT = process.env.PORT || 3000;
 // 組織架構模組（org-routes.js）註冊後提供職位與上下級關係
 let orgApi=null;
 let coverApi=null;
+let equipApi;
 let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
@@ -457,6 +458,18 @@ function readMenuConfig(){
       c._coverMenuV1=1;writeMenuConfig(c);
     }catch(e){console.error('cover menu migration error',e);}
   }
+  // 一次性升級：總務管理底下加入設備清冊／設備申請紀錄／社區進駐設備；現場加入「設備申請」。
+  if(!c._equipMenuV1){
+    try{
+      const after=(list,item,pred)=>{if(list.some(x=>String(x.id)===item.id))return;let i=list.findIndex(pred);if(i<0){list.push(item);return;}const pid=String(list[i].id);i++;while(i<list.length&&String(list[i].parentId||'')===pid)i++;list.splice(i,0,item);};
+      after(c.staff,{id:'staff-equipment',parentId:null,icon:'🧰',label:'設備申請',action:'staff-equipment',enabled:true},x=>String(x.id)==='company-resources');
+      const ga=c.company.find(x=>String(x.id)==='company-general-affairs');
+      if(ga){let i=c.company.indexOf(ga)+1;while(i<c.company.length&&String(c.company[i].parentId||'')==='company-general-affairs')i++;
+        const add=[{id:'company-equip-inventory',parentId:'company-general-affairs',icon:'↳',label:'設備清冊',action:'equip-inventory',enabled:true},{id:'company-equip-requests',parentId:'company-general-affairs',icon:'↳',label:'設備申請紀錄',action:'equip-requests',enabled:true},{id:'company-equip-sites',parentId:'company-general-affairs',icon:'↳',label:'社區進駐設備',action:'equip-sites',enabled:true}].filter(x=>!c.company.some(y=>String(y.id)===x.id));
+        c.company.splice(i,0,...add);}
+      c._equipMenuV1=1;writeMenuConfig(c);
+    }catch(e){console.error('equipment menu migration error',e);}
+  }
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
   // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
@@ -564,6 +577,7 @@ function menuPermissionKey(item,scope='staff'){
   // SOP 在公司後台與現場工作台是兩種不同權限；不能讓「案場 SOP」被誤判成公司 SOP 管理。
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
+  if(scope==='company' && /^equip-/.test(String(item?.action||''))) return 'company-general-affairs';
   const rules=[
     // 只比對公司後台的人員管理項目；不可用 'staff' 子字串，否則 staff-schedule、staff-attendance 等現場目錄
     // 都會被判成「公司人員管理」而在現場工作台被整組隱藏。
@@ -699,6 +713,8 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
       if(scope==='staff' && key==='attendance' && hasSiteAccess(staffUser)) return true;
       if(scope==='staff' && key==='residents') return true;
+      // 設備清冊等總務功能：只看「總務管理」權限，不沿用母目錄（公司資源）的權限
+      if(scope==='company' && key==='company-general-affairs') return selected.has(key);
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
     if(scope==='staff'){
@@ -2605,6 +2621,7 @@ coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,req
 // ===== 智慧月班表 =====
 smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,getSiteAssignments,org:orgApi,S:{getProfile:scheduleGetProfile,effectiveRule:scheduleEffectiveRule,platformRules:schedulePlatformRules,holidays:y=>scheduleTaiwanHolidayDates(y),redDatesSync:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),leavePolicy:tid=>leaveApi.policyFor(tid)}});
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
-require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll});
+equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi});
+require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi});
 
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
