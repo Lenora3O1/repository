@@ -49,6 +49,7 @@ let coverApi=null;
 let equipApi;
 let acctApi;
 let contractApi;
+let arApi;
 let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
@@ -346,6 +347,7 @@ function readFormConfig(){
 }
 function writeFormConfig(config){fs.writeFileSync(FORM_CONFIG_PATH,JSON.stringify(config,null,2),'utf-8');}
 // 交接清冊：經理版／秘書版分開（handover-forms.js）
+const MENU_SPEC=require('./menu-spec');
 const handover=require('./handover-forms')({fs,path,DATA_DIR,readFormConfig,writeFormConfig});
 const PLATFORM_STAFF_SCHEDULE_MENU = [
   {id:'staff-schedule',parentId:null,icon:'📅',label:'班表',action:'staff-schedule',enabled:true},
@@ -481,6 +483,10 @@ function readMenuConfig(){
       c._acctMenuV1=1;writeMenuConfig(c);
     }catch(e){console.error('accounting menu migration error',e);}
   }
+  // 平台預設目錄規格（menu-spec.js）：新功能的目錄依版本號套用到平台預設與各公司覆寫，已有同名項目只補功能代碼
+  if((c._menuSpecVersion||0)<MENU_SPEC.VERSION){
+    try{MENU_SPEC.sync(c);c._menuSpecVersion=MENU_SPEC.VERSION;writeMenuConfig(c);}catch(e){console.error('menu spec sync error',e);}
+  }
   // Menu inheritance fix: tenant menus are optional overrides. If a tenant has no
   // explicit array for a scope, resolveMenu() inherits the current platform default.
   // Do not silently create snapshots here: doing so freezes old menus for existing tenants.
@@ -589,7 +595,9 @@ function menuPermissionKey(item,scope='staff'){
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
   if(scope==='company' && (String(item?.action||'')==='contracts'||/社區合約/.test(String(item?.label||'')))) return 'company-general-affairs';
-  if(scope==='company' && (/^acct-/.test(String(item?.action||''))||/傳票|帳冊/.test(String(item?.label||'')))) return 'company-accounting';
+  if(scope==='company' && String(item?.action||'')==='acct-ap') return null; // 公司應支：內勤人員都可以請款
+  if(scope==='company' && (/^acct-(ledger|ar|feedback)$/.test(String(item?.action||''))||/傳票|帳冊|公司應收/.test(String(item?.label||'')))) return 'company-accounting';
+  if(scope==='company' && String(item?.action||'')==='equip-apply') return null;
   if(scope==='company' && (/^equip-(inventory|requests|sites)$/.test(String(item?.action||''))||/設備清冊|設備申請紀錄|進駐設備/.test(String(item?.label||'')))) return 'company-general-affairs';
   const rules=[
     // 只比對公司後台的人員管理項目；不可用 'staff' 子字串，否則 staff-schedule、staff-attendance 等現場目錄
@@ -2637,7 +2645,8 @@ smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompany
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
 acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,effectivePermissions,org:orgApi,XLSX});
 contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi});
+arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi});
-require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi});
+require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi});
 
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
