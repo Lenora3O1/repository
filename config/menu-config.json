@@ -179,9 +179,9 @@
     },
     {
       "id": "staff-equipment",
-      "parentId": null,
-      "icon": "🧰",
-      "label": "設備申請",
+      "parentId": "company-resources",
+      "icon": "↳",
+      "label": "設備借用申請",
       "action": "staff-equipment",
       "enabled": true
     },
