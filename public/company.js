@@ -354,3 +354,6 @@ async function downloadPlatformResource(id){window.open(`/api/company/platform-r
 async function adoptPlatformResource(id){if(!confirm('要把這份平台公版文件複製到本公司資源嗎？'))return;try{await api(`/api/company/platform-resources/${id}/adopt`,{method:'POST'});await loadAll();alert('已採用這份平台公版文件。')}catch(e){alert(e.message)}}
 async function downloadCompanyResource(id){window.open(`/api/company/resources/${id}/download`,'_blank')}
 async function deleteCompanyResource(id){if(!confirm('確定刪除本公司的這份資源嗎？平台原始公版不會受影響。'))return;try{await api(`/api/company/resources/${id}`,{method:'DELETE'});await loadAll();alert('已刪除公司資源。')}catch(e){alert(e.message)}}
+
+// 面試電腦：這台電腦設定過公司代碼、且公司已開通面試功能時，登入頁右下角才顯示「面試人員填寫履歷」
+(function(){try{const c=localStorage.getItem('interviewCompany');const a=document.getElementById('interviewEntry');if(!c||!a)return;fetch(`/api/interview/${encodeURIComponent(c)}/meta`,{cache:'no-store'}).then(r=>{if(r.ok)a.style.display='';}).catch(()=>{});}catch{}})();

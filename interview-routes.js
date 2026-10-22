@@ -6,7 +6,10 @@
 const BANK = require('./interview-bank');
 
 module.exports = function registerInterviewRoutes(app, d) {
-  const { db, crypto, getUser, tenantId, now, requireCompanyAdmin, requireSuperAdmin, org, acct } = d;
+  const { db, crypto, getUser, tenantId, now, requireCompanyAdmin, requireSuperAdmin, org, acct, addons } = d;
+  // 加值功能：總後台開通的公司才能使用
+  const addonOn = tid => !addons || addons.isOn(tid, 'interview');
+  const OFF = '這家公司尚未開通線上面試功能，請洽系統管理者';
 
   db.exec(`
   CREATE TABLE IF NOT EXISTS interview_settings (tenant_id INTEGER PRIMARY KEY, config_json TEXT NOT NULL DEFAULT '{}', bank_json TEXT, updated_at TEXT, updated_by TEXT DEFAULT '');
@@ -65,7 +68,7 @@ module.exports = function registerInterviewRoutes(app, d) {
 
   // ---------- 誰可以看：職務主管（依總後台設定的職位）＋人事＋老闆／總經理＋公司管理員 ----------
   function reviewerCats(u) {
-    if (!u) return []; const s = settingsFor(u.tenant_id); const m = mi(u);
+    if (!u || !addonOn(u.tenant_id)) return []; const s = settingsFor(u.tenant_id); const m = mi(u);
     if (u.role === 'company_admin' || ['owner', 'gm'].includes(m?.kind)) return s.categories.map(c => c.id);
     let hr = false; try { hr = acct.perms(u).has('company-hr') || acct.perms(u).has('hr-records'); } catch {}
     if (s.hr_view && hr) return s.categories.map(c => c.id);
@@ -84,7 +87,7 @@ module.exports = function registerInterviewRoutes(app, d) {
   // ---------- 面試電腦（公開頁面） ----------
   const hits = new Map();
   function limit(req) { const k = req.ip || 'x'; const t = Date.now(); const a = (hits.get(k) || []).filter(x => t - x < 3600e3); a.push(t); hits.set(k, a); if (a.length > 120) throw err('操作太頻繁，請稍後再試', 429); }
-  function tenantByCode(code) { const t = db.prepare("SELECT id,name,code,status FROM tenants WHERE code=?").get(str(code, 60)); if (!t || t.status !== 'active') throw err('找不到這家公司，請確認公司代碼', 404); return t; }
+  function tenantByCode(code) { const t = db.prepare("SELECT id,name,code,status FROM tenants WHERE code=?").get(str(code, 60)); if (!t || t.status !== 'active') throw err('找不到這家公司，請確認公司代碼', 404); if (!addonOn(t.id)) throw err(OFF, 403); return t; }
   function app0(req) {
     const t = tenantByCode(req.params.code); const token = str(req.body?.token || req.query?.token, 80);
     const a = db.prepare("SELECT * FROM interview_applicants WHERE tenant_id=? AND token=?").get(t.id, token);
@@ -162,7 +165,7 @@ module.exports = function registerInterviewRoutes(app, d) {
 
   // ================= 公司：面試管理 =================
   const STATUS = { submitted: '待審核', reviewing: '審核中', hold: '備取', hired: '錄取', rejected: '不錄取' };
-  const needRev = (req, res, next) => { if (!isReviewer(getUser(req))) return bad(res, '您沒有查看面試資料的權限', 403); next(); };
+  const needRev = (req, res, next) => { const u = getUser(req); if (u && !addonOn(u.tenant_id)) return bad(res, OFF, 403); if (!isReviewer(u)) return bad(res, '您沒有查看面試資料的權限', 403); next(); };
   function out(a, { detail = false } = {}) {
     const r = parse(a.resume_json, {}); const s = settingsFor(a.tenant_id); const cat = s.categories.find(c => c.id === a.category); const man = parse(a.manual_json, {});
     const o = { id: a.id, name: a.name || r.name || '（未填姓名）', category: a.category, category_name: cat?.name || a.category, position: a.position, status: a.status, status_label: STATUS[a.status] || a.status, experienced: !!a.experienced, exp_years: a.exp_years,
@@ -222,7 +225,7 @@ module.exports = function registerInterviewRoutes(app, d) {
   app.get('/api/admin/interview-settings/:tid', requireSuperAdmin, wrap((req, res) => {
     const tid = Number(req.params.tid); let positions = []; try { positions = org.configFor(tid).positions.map(p => ({ id: p.id, name: p.name, kind: p.kind })); } catch {}
     const r = db.prepare('SELECT bank_json,updated_at FROM interview_settings WHERE tenant_id=?').get(tid);
-    res.json({ settings: settingsFor(tid), bank: bankFor(tid), bank_custom: !!r?.bank_json, updated_at: r?.updated_at || '', positions });
+    res.json({ settings: settingsFor(tid), bank: bankFor(tid), bank_custom: !!r?.bank_json, updated_at: r?.updated_at || '', positions, addon: addons ? addons.status(tid, 'interview') : { enabled: true } });
   }));
   app.put('/api/admin/interview-settings/:tid', requireSuperAdmin, wrap((req, res) => {
     const tid = Number(req.params.tid); const b = req.body || {}; const cur = db.prepare('SELECT * FROM interview_settings WHERE tenant_id=?').get(tid);
