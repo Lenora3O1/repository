@@ -3,7 +3,7 @@
 'use strict';
 
 module.exports = function registerDashboardRoutes(app, d) {
-  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar } = d;
+  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar, ap } = d;
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const twNow = () => new Date(Date.now() + 8 * 3600e3);
   const todayTW = () => twNow().toISOString().slice(0, 10);
@@ -138,6 +138,13 @@ module.exports = function registerDashboardRoutes(app, d) {
         { text: '公司制式文件', value: '開啟', action: { action: 'manage-templates', label: '公司制式文件' } },
         { text: '禮品推放', value: '開啟', action: { action: 'gifts', label: '禮品推放' } },
       ] });
+    }
+
+    // ---------- 請款審核／待付款 ----------
+    if (ap) {
+      const p = safe(() => ap.dashboard(tid, u), null);
+      if (p && p.todo) cards.push({ id: 'ap_todo', size: 'sm', icon: '💸', title: '請款待我審核', value: p.todo, sub: '張請款單', tone: 'alert', action: { action: 'ap-my', label: '請款', tab: 'todo' } });
+      if (p && acct && safe(() => acct.canAcct(u), false)) cards.push({ id: 'ap_unpaid', size: 'sm', icon: '💰', title: '公司應支', value: `$${money(p.unpaid_amount)}`, sub: `待付款 ${p.unpaid} 張${p.overdue ? `・逾期 ${p.overdue} 張` : ''}`, tone: p.overdue ? 'alert' : '', action: { action: 'acct-ap', label: '公司應支' } });
     }
 
     // ---------- 公司應收（會計）----------

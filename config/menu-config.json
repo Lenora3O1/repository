@@ -276,6 +276,14 @@
       "enabled": true
     },
     {
+      "id": "company-expense",
+      "parentId": null,
+      "icon": "💸",
+      "label": "請款",
+      "action": "ap-my",
+      "enabled": true
+    },
+    {
       "id": "company-staff",
       "parentId": null,
       "icon": "👥",
