@@ -52,6 +52,7 @@ let contractApi;
 let arApi;
 let apApi;
 let interviewApi;
+let addonsApi;
 let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
@@ -721,6 +722,8 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   let items=mergeTenantMenuWithPlatform(platformItems,override,baseIds);
   items=repairMenuItems(items,platformItems);
   items=items.filter(x=>x.enabled!==false);
+  // 加值功能：沒有開通的公司（公司管理員也一樣）不顯示面試管理
+  if(staffUser && scope==='company') items=items.filter(x=>String(x.action||'')!=='interviews'||!!interviewApi?.isReviewer(staffUser));
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectiveMenuPermissions(staffUser,scope));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
@@ -2650,7 +2653,8 @@ acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompa
 contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi});
 arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});
 apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,contracts:contractApi});
-interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi});
+addonsApi=require('./addons')(app,{db,now,requireSuperAdmin});
+interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi,addons:addonsApi});
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi});
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi});
 

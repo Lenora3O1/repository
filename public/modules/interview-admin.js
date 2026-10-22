@@ -13,6 +13,7 @@
     const c=S.c,d=S.d;const cat=c.categories.find(x=>x.id===S.cat)||c.categories[0];
     const qs=S.bank.map((q,i)=>({q,i})).filter(x=>x.q.category===cat.id);
     el.innerHTML=`<div class="panel"><div class="eyebrow">📝 平台設定</div><h1>面試設定與考核題庫</h1>
+      ${d.addon&&!d.addon.enabled?`<div style="background:#F6E3DC;border:1px solid #EBCFC4;color:#7A2E1A;border-radius:10px;padding:10px 14px;margin:8px 0">🔒 這家公司${d.addon.expired?'的面試功能已經到期':'尚未開通面試功能'}，請到「🧩 加值功能」開通。開通前可以先在這裡準備設定與題庫。</div>`:d.addon?.expires_at?`<div class="muted" style="margin:6px 0">✅ 已開通，到期日 ${esc(d.addon.expires_at)}</div>`:''}
       <p class="hint">面試人員在公司電腦上從登入頁右下角進入，填寫履歷後依有無經驗作答。這裡設定各公司開放與否、各類別的職位與審核主管，以及考核題庫。</p>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>公司</b><select id="iT" style="width:auto;margin:0">${S.list.tenants.map(t=>`<option value="${t.id}" ${t.id===S.tid?'selected':''}>${esc(t.name)}（${esc(t.code)}）${t.customized?' ✎':''}</option>`).join('')}</select><small class="muted">${d.bank_custom?'題庫已客製化':'使用平台預設題庫'}</small></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 16px;margin-top:14px">
