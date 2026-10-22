@@ -3,7 +3,7 @@
 'use strict';
 
 module.exports = function registerDashboardRoutes(app, d) {
-  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip } = d;
+  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct } = d;
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const twNow = () => new Date(Date.now() + 8 * 3600e3);
   const todayTW = () => twNow().toISOString().slice(0, 10);
@@ -138,6 +138,12 @@ module.exports = function registerDashboardRoutes(app, d) {
         { text: '公司制式文件', value: '開啟', action: { action: 'manage-templates', label: '公司制式文件' } },
         { text: '禮品推放', value: '開啟', action: { action: 'gifts', label: '禮品推放' } },
       ] });
+    }
+
+    // ---------- 社區合約到期 ----------
+    if (contracts && safe(() => contracts.canEdit(u), false)) {
+      const c = safe(() => contracts.dashboard(tid), null);
+      if (c && (c.expiring.length || (!boss && u.role !== 'company_admin'))) cards.push({ id: 'contracts', size: 'sm', icon: '📄', title: '社區合約', value: c.expiring.length, sub: c.expiring.length ? `即將到期：${c.expiring.slice(0, 3).map(x => `${x.community}（${x.days} 天）`).join('、')}` : `履約中 ${c.current} 份`, tone: c.expiring.some(x => x.days <= 30) ? 'alert' : '', action: { action: 'contracts', label: '社區合約' } });
     }
 
     // ---------- 設備借用（總務）----------
