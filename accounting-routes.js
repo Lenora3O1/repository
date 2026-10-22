@@ -124,7 +124,7 @@ module.exports = function registerAccountingRoutes(app, d) {
 
   // ---------- 傳票 ----------
   const TYPE = { receipt: '收入傳票', payment: '支出傳票', transfer: '轉帳傳票' };
-  const SOURCE = { manual: '手動開立', ar: '公司應收', ap: '公司應支', payroll: '薪資', feedback: '社區回饋金', adjust: '調整' };
+  const SOURCE = { manual: '手動開立', ar: '公司應收', ar_receipt: '應收收款', ap: '公司應支', ap_payment: '應支付款', payroll: '薪資', feedback: '社區回饋金', adjust: '調整' };
   function readLines(tid, lines) {
     if (!Array.isArray(lines) || lines.length < 2) throw err('傳票至少要有兩筆分錄（借方和貸方）');
     if (lines.length > 200) throw err('分錄太多了');

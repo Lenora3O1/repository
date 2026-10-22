@@ -178,6 +178,14 @@
       "enabled": true
     },
     {
+      "id": "staff-equipment",
+      "parentId": null,
+      "icon": "🧰",
+      "label": "設備申請",
+      "action": "staff-equipment",
+      "enabled": true
+    },
+    {
       "id": "gifts",
       "parentId": null,
       "icon": "🎁",
@@ -316,6 +324,22 @@
       "enabled": true
     },
     {
+      "id": "company-ar",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "公司應收",
+      "action": "acct-ar",
+      "enabled": true
+    },
+    {
+      "id": "company-ap",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "公司應支",
+      "action": "acct-ap",
+      "enabled": true
+    },
+    {
       "id": "company-payroll-stats",
       "parentId": "company-accounting",
       "icon": "↳",
@@ -340,11 +364,67 @@
       "enabled": true
     },
     {
+      "id": "company-feedback",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "社區回饋金",
+      "action": "acct-feedback",
+      "enabled": true
+    },
+    {
+      "id": "company-ledger",
+      "parentId": "company-accounting",
+      "icon": "↳",
+      "label": "傳票與帳冊",
+      "action": "acct-ledger",
+      "enabled": true
+    },
+    {
       "id": "company-general-affairs",
       "parentId": null,
       "icon": "🧰",
       "label": "總務管理",
       "action": "company-resources",
+      "enabled": true
+    },
+    {
+      "id": "company-equip-inventory",
+      "parentId": "company-general-affairs",
+      "icon": "↳",
+      "label": "設備清冊",
+      "action": "equip-inventory",
+      "enabled": true
+    },
+    {
+      "id": "company-equip-apply",
+      "parentId": "company-general-affairs",
+      "icon": "↳",
+      "label": "設備申請",
+      "action": "equip-apply",
+      "enabled": true
+    },
+    {
+      "id": "company-equip-requests",
+      "parentId": "company-general-affairs",
+      "icon": "↳",
+      "label": "設備申請紀錄",
+      "action": "equip-requests",
+      "enabled": true
+    },
+    {
+      "id": "company-equip-sites",
+      "parentId": "company-general-affairs",
+      "icon": "↳",
+      "label": "社區管理",
+      "action": "equip-sites",
+      "enabled": true
+    },
+    {
+      "id": "company-contracts",
+      "parentId": "company-general-affairs",
+      "icon": "↳",
+      "label": "社區合約",
+      "action": "contracts",
       "enabled": true
     },
     {

@@ -170,5 +170,5 @@
     bindRange(box,()=>exporter(box));
     box.querySelector('#xGo').onclick=()=>{const qs=new URLSearchParams({entity_id:S.eid,from:S.from,to:S.to,format:box.querySelector('#xF').value});fetch(`/api/company/acct/export?${qs}`,{credentials:'same-origin'}).then(async r=>{if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||'匯出失敗');}const cd=r.headers.get('Content-Disposition')||'';const m=/filename\*=UTF-8''([^;]+)/.exec(cd);const name=m?decodeURIComponent(m[1]):'傳票.csv';const n=r.headers.get('X-Export-Count');const note=r.headers.get('X-Export-Note');const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);if(n==='0')alert('這段期間沒有傳票，下載的檔案只有欄位標題。');if(note==='big5-unavailable')alert('伺服器目前無法轉成 Big5，已改用 UTF-8 匯出。');}).catch(e=>alert(e.message));};
   }
-  window.AccountingModule={render};
+  window.AccountingModule={render,style:injectStyle};
 })();

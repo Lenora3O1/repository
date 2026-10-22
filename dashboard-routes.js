@@ -3,7 +3,7 @@
 'use strict';
 
 module.exports = function registerDashboardRoutes(app, d) {
-  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct } = d;
+  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar } = d;
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const twNow = () => new Date(Date.now() + 8 * 3600e3);
   const todayTW = () => twNow().toISOString().slice(0, 10);
@@ -138,6 +138,12 @@ module.exports = function registerDashboardRoutes(app, d) {
         { text: '公司制式文件', value: '開啟', action: { action: 'manage-templates', label: '公司制式文件' } },
         { text: '禮品推放', value: '開啟', action: { action: 'gifts', label: '禮品推放' } },
       ] });
+    }
+
+    // ---------- 公司應收（會計）----------
+    if (ar && acct && safe(() => acct.canAcct(u), false)) {
+      const a = safe(() => ar.dashboard(tid), null);
+      if (a) cards.push({ id: 'ar', size: 'sm', icon: '🧾', title: '公司應收', value: `$${money(a.outstanding)}`, sub: `未收款｜${a.overdue ? `逾期 ${a.overdue} 張 $${money(a.overdue_amount)}` : '沒有逾期'}${a.drafts ? `・未開立 ${a.drafts} 張` : ''}`, tone: a.overdue ? 'alert' : '', action: { action: 'acct-ar', label: '公司應收' } });
     }
 
     // ---------- 社區合約到期 ----------
