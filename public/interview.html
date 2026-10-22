@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面試人員資料填寫</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--bg:#FCFAF1;--card:#fff;--line:#E2D3CC;--soft:#F6ECE6;--accent:#A44528;--brown:#5F403B;--ink:#1D0D0C;--muted:#9A6654}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif;font-size:17px;line-height:1.6}
+header{background:#1D0D0C;color:#fff;padding:18px 32px;display:flex;justify-content:space-between;align-items:center}
+header h1{margin:0;font-size:1.35rem;letter-spacing:2px;font-weight:600}header small{color:#C9B0A8}
+main{max-width:980px;margin:28px auto;padding:0 20px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px 32px;box-shadow:0 8px 30px rgba(95,64,59,.06)}
+h2{margin:0 0 6px;color:var(--brown);font-size:1.5rem}.sub{color:var(--muted);margin:0 0 18px}
+.steps{display:flex;gap:6px;margin:0 0 18px;flex-wrap:wrap}.steps span{padding:4px 14px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:.85rem;font-weight:700}.steps span.on{background:var(--accent);color:#fff}.steps span.done{background:#C9B0A8;color:#fff}
+.cats{display:grid;grid-template-columns:1fr 1fr;gap:18px}.cat{border:2px solid var(--line);border-radius:18px;padding:26px;cursor:pointer;background:#fff;text-align:center;transition:.15s}.cat:hover{border-color:var(--accent);transform:translateY(-2px)}.cat b{font-size:1.8rem;color:var(--brown);display:block}.cat.sel{border-color:var(--accent);background:#FCF3EE}
+.pos{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.pos label{border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;background:#fff}.pos input{margin-right:6px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px}.grid label{display:flex;flex-direction:column;gap:6px;font-weight:700;font-size:.95rem}.grid .w2{grid-column:span 2}.grid .w4{grid-column:1/-1}
+input,select,textarea{font:inherit;padding:10px 12px;border:1px solid #D5C2BA;border-radius:10px;background:#fff;width:100%}input:focus,select:focus,textarea:focus{outline:2px solid #C9B0A8;border-color:var(--accent)}
+.sec{margin:22px 0 10px;font-weight:800;color:var(--brown);border-top:1px solid var(--soft);padding-top:16px;font-size:1.05rem}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;text-align:left;font-size:.92rem}th{color:var(--muted)}
+button{font:inherit;font-weight:800;border-radius:12px;padding:12px 26px;border:0;background:var(--accent);color:#fff;cursor:pointer}button.sec2{background:#fff;color:var(--brown);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:not-allowed}
+.bar{display:flex;justify-content:space-between;gap:12px;margin-top:24px;align-items:center}
+.note{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px 18px;color:var(--brown);line-height:1.8}
+.err{background:#F6E3DC;border:1px solid #EBCFC4;color:#7A2E1A;border-radius:12px;padding:10px 14px;margin:12px 0;display:none}
+.q{border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px;background:#fff}.q h3{margin:0 0 10px;font-size:1.05rem}.q .opt{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:10px;cursor:pointer}.q .opt:hover{background:var(--soft)}.q .opt input{width:auto;margin-top:5px}
+.q .pt{float:right;color:var(--muted);font-size:.85rem;font-weight:700}
+.big{font-size:1.2rem}.center{text-align:center}
+.lic{display:flex;flex-wrap:wrap;gap:8px 18px}.lic label{flex-direction:row;font-weight:500;align-items:center;gap:6px}.lic input{width:auto}
+.timer{color:var(--muted);font-weight:700}
+</style>
+</head>
+<body>
+<header><h1 id="hd">面試人員資料填寫</h1><small id="hd2">請使用電腦鍵盤與滑鼠填寫</small></header>
+<main><div class="card" id="app"><p>讀取中…</p></div></main>
+<script>
+(function(){
+  const $=s=>document.querySelector(s);const app=$('#app');
+  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const store={get(){try{return localStorage.getItem('interviewCompany')||''}catch{return ''}},set(v){try{localStorage.setItem('interviewCompany',v)}catch{}}};
+  const qp=new URLSearchParams(location.search);if(qp.get('c')){store.set(qp.get('c'));history.replaceState(null,'','interview.html');}
+  let CODE=store.get(),META=null,S=null;
+  const metrics={keys:0,chars:0,paste_blocked:0,blur:0,clicks:0};let t0=0,tResume=0,tQuiz=0;
+  async function api(path,body){const r=await fetch(`/api/interview/${encodeURIComponent(CODE)}${path}`,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});let d={};try{d=await r.json()}catch{}if(!r.ok){const e=new Error(d.error||'操作失敗');e.status=r.status;throw e;}return d;}
+  const isDesktop=()=>{const coarse=matchMedia('(pointer:coarse)').matches&&!matchMedia('(pointer:fine)').matches;return !coarse&&window.innerWidth>=1000&&!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);};
+  const STEPS=['應徵職務','個資告知','履歷','工作經驗','考核題目','完成'];
+  const steps=i=>`<div class="steps">${STEPS.map((s,k)=>`<span class="${k<i?'done':k===i?'on':''}">${k+1}. ${s}</span>`).join('')}</div>`;
+  function showErr(m){const e=$('#err');if(e){e.textContent=m;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'center'});}else alert(m);}
+  // 操作紀錄：鍵盤、輸入字數、貼上、切換視窗、滑鼠點擊
+  document.addEventListener('keydown',()=>{if(S)metrics.keys++;},true);
+  document.addEventListener('input',e=>{if(S&&e.inputType&&e.inputType.startsWith('insert')&&e.data)metrics.chars+=e.data.length;},true);
+  document.addEventListener('paste',e=>{if(!S)return;e.preventDefault();metrics.paste_blocked++;showErr('這裡需要自己用鍵盤輸入，不能貼上。');},true);
+  window.addEventListener('blur',()=>{if(S)metrics.blur++;});document.addEventListener('mousedown',()=>{if(S)metrics.clicks++;},true);
+  let idle=null;const resetIdle=()=>{clearTimeout(idle);idle=setTimeout(()=>{if(S&&confirm('已經 20 分鐘沒有操作，要繼續填寫嗎？\n按「取消」會清除資料並回到開始畫面。'))resetIdle();else if(S)start();},20*60e3);};
+  ['keydown','mousedown'].forEach(ev=>document.addEventListener(ev,resetIdle,true));
+
+  async function boot(){
+    if(!isDesktop()){app.innerHTML='<h2>請使用公司的電腦填寫</h2><p class="sub">面試資料需要用電腦的鍵盤與滑鼠填寫，手機和平板不能使用。請向面試人員詢問面試用的電腦。</p>';return;}
+    if(!CODE)return setup();
+    try{META=await api('/meta');$('#hd').textContent=`${META.company}｜面試人員資料填寫`;start();}
+    catch(e){if(e.status===404){store.set('');CODE='';return setup(e.message);}app.innerHTML=`<h2>目前無法填寫</h2><p class="sub">${esc(e.message)}</p>`;}
+  }
+  function setup(msg){
+    app.innerHTML=`<h2>面試電腦設定</h2><p class="sub">由公司人事在這台電腦設定一次就可以（之後會記住）。公司代碼可以在「面試管理」頁面找到。</p>${msg?`<div class="err" style="display:block">${esc(msg)}</div>`:''}<div class="grid"><label class="w2">公司代碼<input id="code" autocomplete="off"></label></div><div class="bar"><span></span><button id="go">確定</button></div>`;
+    $('#go').onclick=()=>{const v=$('#code').value.trim();if(!v)return;store.set(v);CODE=v;boot();};
+  }
+  function start(){
+    if(app._ac)app._ac.abort();S={};Object.keys(metrics).forEach(k=>metrics[k]=0);t0=Date.now();window.scrollTo(0,0);
+    app.innerHTML=`${steps(0)}<h2>歡迎來面試！</h2><p class="sub">請先選擇您要應徵的工作類別。</p>
+      <div class="cats">${META.categories.map(c=>`<div class="cat" data-c="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.hint)}</span></div>`).join('')}</div><div id="posBox"></div><div class="err" id="err"></div>
+      <div class="bar"><span></span><button id="next" disabled>下一步</button></div>`;
+    app.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{S.category=el.dataset.c;app.querySelectorAll('[data-c]').forEach(x=>x.classList.toggle('sel',x===el));const c=META.categories.find(x=>x.id===S.category);
+      $('#posBox').innerHTML=`<p style="margin:20px 0 0;font-weight:800">應徵職位</p><div class="pos">${c.positions.map(p=>`<label><input type="radio" name="pos" value="${esc(p)}">${esc(p)}</label>`).join('')}<label><input type="radio" name="pos" value="">還不確定</label></div>`;
+      app.querySelectorAll('[name=pos]').forEach(r=>r.onchange=()=>{S.position=r.value;$('#next').disabled=false;});});
+    $('#next').onclick=consent;
+  }
+  function consent(){
+    app.innerHTML=`${steps(1)}<h2>個人資料蒐集告知</h2><p class="sub">請仔細閱讀後勾選同意。</p><div class="note">${esc(META.consent).replace(/\n/g,'<br>')}</div>
+      <label style="display:flex;gap:10px;align-items:center;margin-top:18px;font-weight:800"><input type="checkbox" id="ok" style="width:auto"> 我已閱讀並同意以上說明</label><div class="err" id="err"></div>
+      <div class="bar"><button class="sec2" id="back">上一步</button><button id="next">同意，開始填寫</button></div>`;
+    $('#back').onclick=start;
+    $('#next').onclick=async()=>{if(!$('#ok').checked)return showErr('請先勾選同意。');try{const r=await api('/start',{category:S.category,position:S.position,consent:true});S.token=r.token;tResume=Date.now();resume();}catch(e){showErr(e.message);}};
+  }
+  function resume(){
+    const c=META.categories.find(x=>x.id===S.category);const R=S.resume||{};
+    const eduRow=(e={})=>`<tr><td><input data-k="school" value="${esc(e.school||'')}" placeholder="學校"></td><td><input data-k="major" value="${esc(e.major||'')}" placeholder="科系"></td><td><select data-k="degree">${['','國中','高中職','專科','大學','碩士以上'].map(x=>`<option ${e.degree===x?'selected':''}>${x}</option>`).join('')}</select></td><td><select data-k="status">${['畢業','肄業','就學中'].map(x=>`<option ${e.status===x?'selected':''}>${x}</option>`).join('')}</select></td></tr>`;
+    const workRow=(w={})=>`<tr><td><input data-k="company" value="${esc(w.company||'')}" placeholder="公司名稱"></td><td><input data-k="title" value="${esc(w.title||'')}" placeholder="職稱"></td><td><input data-k="start" type="month" value="${esc(w.start||'')}"></td><td><input data-k="end" type="month" value="${esc(w.end||'')}"></td><td><input data-k="duty" value="${esc(w.duty||'')}" placeholder="主要工作內容"></td><td><input data-k="reason" value="${esc(w.reason||'')}" placeholder="離職原因"></td></tr>`;
+    app.innerHTML=`${steps(2)}<h2>個人履歷</h2><p class="sub">應徵：${esc(c.name)}${S.position?`｜${esc(S.position)}`:''}。標示 * 的欄位一定要填。</p>
+      <div class="sec">基本資料</div><div class="grid">
+        <label>姓名 *<input id="name" value="${esc(R.name||'')}"></label><label>性別<select id="gender"><option value="">請選擇</option><option value="M" ${R.gender==='M'?'selected':''}>男</option><option value="F" ${R.gender==='F'?'selected':''}>女</option></select></label><label>生日 *<input type="date" id="birthday" value="${esc(R.birthday||'')}"></label><label>手機 *<input id="phone" inputmode="tel" value="${esc(R.phone||'')}" placeholder="0912345678"></label>
+        <label>證件 *<select id="id_type"><option value="national">身分證</option><option value="arc" ${R.id_type==='arc'?'selected':''}>居留證</option><option value="passport" ${R.id_type==='passport'?'selected':''}>護照</option></select></label><label>證號 *<input id="id_no" value="${esc(R.id_no||'')}" autocomplete="off" placeholder="A123456789"></label><label class="w2" id="natL">國籍<input id="nationality" value="${esc(R.nationality||'')}"></label>
+        <label class="w2">Email<input id="email" type="email" value="${esc(R.email||'')}"></label><label class="w2">通訊地址<input id="address" value="${esc(R.address||'')}"></label>
+        <label>緊急聯絡人<input id="emergency_name" value="${esc(R.emergency_name||'')}"></label><label>關係<input id="emergency_relation" value="${esc(R.emergency_relation||'')}"></label><label>緊急聯絡電話<input id="emergency_phone" value="${esc(R.emergency_phone||'')}"></label><label>通勤方式<select id="transport">${['','機車','汽車','大眾運輸','步行／腳踏車'].map(x=>`<option ${R.transport===x?'selected':''}>${x}</option>`).join('')}</select></label></div>
+      <div class="sec">學歷</div><table><thead><tr><th>學校</th><th>科系</th><th>學歷</th><th>狀態</th></tr></thead><tbody id="edu">${(R.education?.length?R.education:[{}]).map(eduRow).join('')}</tbody></table><button class="sec2" id="eduAdd" style="padding:6px 14px;margin-top:6px">＋ 學歷</button>
+      <div class="sec">工作經歷（最近的寫在最上面）</div><table><thead><tr><th>公司</th><th>職稱</th><th>開始</th><th>結束</th><th>工作內容</th><th>離職原因</th></tr></thead><tbody id="work">${(R.work?.length?R.work:[{},{}]).map(workRow).join('')}</tbody></table><button class="sec2" id="workAdd" style="padding:6px 14px;margin-top:6px">＋ 經歷</button>
+      <div class="sec">證照與技能</div><div class="lic">${c.licenses.map(l=>`<label><input type="checkbox" name="lic" value="${esc(l)}" ${(R.licenses||[]).includes(l)?'checked':''}>${esc(l)}</label>`).join('')}</div><div class="grid" style="margin-top:10px"><label class="w4">其他證照或技能<input id="other_license" value="${esc(R.other_license||'')}"></label></div>
+      <div class="sec">工作意願</div><div class="grid"><label>可以上班日期<input type="date" id="available_date" value="${esc(R.available_date||'')}"></label><label>期望月薪<input type="number" id="expected_salary" min="0" value="${esc(R.expected_salary||'')}"></label>${S.category==='duty'?`<label class="w2">班別意願<select id="shift_pref">${['都可以','日班','夜班'].map(x=>`<option ${R.shift_pref===x?'selected':''}>${x}</option>`).join('')}</select></label>`:'<span class="w2"></span>'}
+        <label class="w4">自我介紹（請用鍵盤輸入，大約 100 字）<textarea id="intro" rows="5" placeholder="介紹一下您自己、過去的工作經驗，以及為什麼想應徵這份工作。">${esc(R.intro||'')}</textarea><small style="font-weight:400;color:#9A6654" id="introN"></small></label></div>
+      <div class="err" id="err"></div><div class="bar"><span></span><button id="next">下一步</button></div>`;
+    $('#eduAdd').onclick=()=>$('#edu').insertAdjacentHTML('beforeend',eduRow());$('#workAdd').onclick=()=>$('#work').insertAdjacentHTML('beforeend',workRow());
+    const nat=()=>{$('#natL').style.visibility=$('#id_type').value==='national'?'hidden':'visible';};$('#id_type').onchange=nat;nat();
+    const cnt=()=>{$('#introN').textContent=`已輸入 ${$('#intro').value.trim().length} 字`;};$('#intro').oninput=cnt;cnt();
+    $('#next').onclick=async()=>{const v=id=>$('#'+id)?.value||'';const rows=(sel)=>[...app.querySelectorAll(sel+' tr')].map(tr=>Object.fromEntries([...tr.querySelectorAll('[data-k]')].map(i=>[i.dataset.k,i.value])));
+      const r={name:v('name'),gender:v('gender'),birthday:v('birthday'),phone:v('phone'),id_type:v('id_type'),id_no:v('id_no'),nationality:v('nationality'),email:v('email'),address:v('address'),emergency_name:v('emergency_name'),emergency_relation:v('emergency_relation'),emergency_phone:v('emergency_phone'),transport:v('transport'),
+        education:rows('#edu'),work:rows('#work'),licenses:[...app.querySelectorAll('[name=lic]:checked')].map(x=>x.value),other_license:v('other_license'),available_date:v('available_date'),expected_salary:v('expected_salary'),shift_pref:v('shift_pref'),intro:v('intro'),position:S.position||''};
+      S.resume=r;if(r.intro.trim().length<20)return showErr('自我介紹請至少寫 20 個字。');
+      try{await api('/resume',{token:S.token,resume:r});tResume=Date.now()-tResume;experience();}catch(e){if(e.status===410){alert(e.message);return start();}showErr(e.message);}};
+  }
+  function experience(){
+    const c=META.categories.find(x=>x.id===S.category);
+    app.innerHTML=`${steps(3)}<h2>請問您有${esc(c.name)}相關的工作經驗嗎？</h2><p class="sub">${S.category==='duty'?'例如保全、警衛、門禁管理等工作。':'例如物業管理、社區秘書、櫃台、行政等工作。'}接下來的考核題目會依您的經驗出題。</p>
+      <div class="cats"><div class="cat" data-e="1"><b>有</b><span>做過相關工作</span></div><div class="cat" data-e="0"><b>沒有</b><span>第一次做這類工作</span></div></div>
+      <div id="yrs" style="display:none;margin-top:16px" class="grid"><label>大約幾年<input type="number" id="years" min="0" max="60" step="0.5" value="1"></label></div><div class="err" id="err"></div>
+      <div class="bar"><span></span><button id="next" disabled>開始作答</button></div>`;
+    app.querySelectorAll('[data-e]').forEach(el=>el.onclick=()=>{S.exp=el.dataset.e==='1';app.querySelectorAll('[data-e]').forEach(x=>x.classList.toggle('sel',x===el));$('#yrs').style.display=S.exp?'':'none';$('#next').disabled=false;});
+    $('#next').onclick=async()=>{try{const r=await api('/questions',{token:S.token,experienced:S.exp,years:Number($('#years').value)||0});S.questions=r.questions;S.answers={};tQuiz=Date.now();quiz();}catch(e){if(e.status===410){alert(e.message);return start();}showErr(e.message);}};
+  }
+  function quiz(){
+    const Q=S.questions;
+    app.innerHTML=`${steps(4)}<h2>職務考核</h2><p class="sub">共 ${Q.length} 題。選擇題請點選答案；情境題請用鍵盤寫下您會怎麼做，沒有標準答案，寫得越具體越好。<span class="timer" id="tm"></span></p>
+      ${Q.map((q,i)=>`<div class="q" data-q="${q.id}"><span class="pt">${q.points} 分${q.type==='multi'?'・複選':q.type==='text'?'・情境題':''}</span><h3>${i+1}. ${esc(q.text)}</h3>${q.type==='text'?`<textarea rows="5" data-t="${q.id}" placeholder="請在這裡輸入您的回答"></textarea>`:q.options.map((o,k)=>`<label class="opt"><input type="${q.type==='multi'?'checkbox':'radio'}" name="${q.id}" value="${k}"><span>${String.fromCharCode(65+k)}. ${esc(o)}</span></label>`).join('')}</div>`).join('')}
+      <div class="err" id="err"></div><div class="bar"><span id="left" class="timer"></span><button id="send">送出答案</button></div>`;
+    const tick=()=>{if(!$('#tm'))return;const s=Math.round((Date.now()-tQuiz)/1000);$('#tm').textContent=`　已作答 ${Math.floor(s/60)} 分 ${s%60} 秒`;setTimeout(tick,1000);};tick();
+    const collect=()=>{for(const q of Q){if(q.type==='text')S.answers[q.id]=app.querySelector(`[data-t="${q.id}"]`).value;else if(q.type==='single'){const c=app.querySelector(`[name="${q.id}"]:checked`);S.answers[q.id]=c?Number(c.value):null;}else S.answers[q.id]=[...app.querySelectorAll(`[name="${q.id}"]:checked`)].map(x=>Number(x.value));}
+      const miss=Q.filter(q=>q.type==='text'?!String(S.answers[q.id]).trim():q.type==='single'?S.answers[q.id]===null:!S.answers[q.id].length);$('#left').textContent=miss.length?`還有 ${miss.length} 題沒有作答`:'全部都作答了';return miss;};
+    if(app._ac)app._ac.abort();app._ac=new AbortController();app.addEventListener('change',collect,{signal:app._ac.signal});app.addEventListener('input',collect,{signal:app._ac.signal});collect();
+    $('#send').onclick=async()=>{const miss=collect();if(miss.length&&!confirm(`還有 ${miss.length} 題沒有作答，確定要送出嗎？送出後不能修改。`))return;if(!miss.length&&!confirm('確定要送出嗎？送出後不能修改。'))return;
+      $('#send').disabled=true;const now=Date.now();
+      try{await api('/submit',{token:S.token,answers:S.answers,metrics:{...metrics,resume_seconds:Math.round(tResume/1000),quiz_seconds:Math.round((now-tQuiz)/1000),total_seconds:Math.round((now-t0)/1000),screen_w:screen.width,screen_h:screen.height,touch:navigator.maxTouchPoints||0}});done();}
+      catch(e){$('#send').disabled=false;if(e.status===410){alert(e.message);return start();}showErr(e.message);}};
+  }
+  function done(){
+    if(app._ac)app._ac.abort();S=null;window.scrollTo(0,0);let n=30;
+    app.innerHTML=`${steps(5)}<div class="center"><h2 class="big">填寫完成，謝謝您！</h2><p class="sub">資料已經交給面試主管，請稍候，面試主管會再與您面談。</p><p class="sub" id="cd"></p><button id="again" class="sec2">回到開始畫面</button></div>`;
+    const t=setInterval(()=>{n--;if($('#cd'))$('#cd').textContent=`${n} 秒後自動回到開始畫面`;if(n<=0){clearInterval(t);start();}},1000);$('#again').onclick=()=>{clearInterval(t);start();};
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

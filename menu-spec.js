@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 4;
+const VERSION = 5;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -24,6 +24,7 @@ const COMPANY = [
   ] },
 ];
 COMPANY.unshift({ parent: null, children: [{ id: 'company-expense', label: '請款', action: 'ap-my', exact: ['請款', '我的請款', '費用請款'], after: 'company-overview', icon: '💸' }] });
+COMPANY.push({ parent: null, children: [{ id: 'company-interviews', label: '面試管理', action: 'interviews', exact: ['面試管理', '面試人員', '招募管理'], after: 'company-hr', icon: '📝' }] });
 const STAFF = [
   // 現場「設備借用申請」放在公司資源底下；舊版放在最上層的「設備申請」會合併過來
   { parent: { id: 'company-resources', label: '公司資源', labels: ['公司資源'], icon: '📦', action: 'company-resources' }, keepOrder: true, children: [{ id: 'staff-equipment', label: '設備借用申請', action: 'staff-equipment', match: ['設備借用'], exact: ['設備申請'], anywhere: true }] },

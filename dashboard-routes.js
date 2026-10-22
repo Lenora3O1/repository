@@ -3,7 +3,7 @@
 'use strict';
 
 module.exports = function registerDashboardRoutes(app, d) {
-  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar, ap } = d;
+  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar, ap, interview } = d;
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const twNow = () => new Date(Date.now() + 8 * 3600e3);
   const todayTW = () => twNow().toISOString().slice(0, 10);
@@ -139,6 +139,9 @@ module.exports = function registerDashboardRoutes(app, d) {
         { text: '禮品推放', value: '開啟', action: { action: 'gifts', label: '禮品推放' } },
       ] });
     }
+
+    // ---------- 面試 ----------
+    if (interview) { const iv = safe(() => interview.dashboard(tid, u), null); if (iv && iv.open) cards.push({ id: 'interviews', size: 'sm', icon: '📝', title: '面試待審核', value: iv.open, sub: '位面試人員', tone: 'alert', action: { action: 'interviews', label: '面試管理' } }); }
 
     // ---------- 請款審核／待付款 ----------
     if (ap) {
