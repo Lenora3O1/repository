@@ -48,6 +48,21 @@ module.exports = function registerPayrollRoutes(app, d) {
     for (const [c, def] of [['trial_salary', 'INTEGER DEFAULT 0'], ['pay_method', "TEXT DEFAULT 'transfer'"], ['bank_name', "TEXT DEFAULT ''"], ['annual_used', 'REAL DEFAULT 0'], ['deductions_json', "TEXT DEFAULT '[]'"], ['birthday', "TEXT DEFAULT ''"], ['mobile', "TEXT DEFAULT ''"], ['address', "TEXT DEFAULT ''"], ['emergency_name', "TEXT DEFAULT ''"], ['emergency_relation', "TEXT DEFAULT ''"], ['emergency_phone', "TEXT DEFAULT ''"], ['insured_date', "TEXT DEFAULT ''"], ['salary_note', "TEXT DEFAULT ''"], ['hr_updated_at', 'TEXT'], ['hr_updated_by', "TEXT DEFAULT ''"], ['salary_updated_at', 'TEXT'], ['salary_updated_by', "TEXT DEFAULT ''"], ['gender', "TEXT DEFAULT ''"]])
       if (!cols.includes(c)) db.exec(`ALTER TABLE hr_profiles ADD COLUMN ${c} ${def}`); }
 
+  { const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name);
+    for (const [c, def] of [['id_type', "TEXT DEFAULT 'national'"], ['id_no', "TEXT DEFAULT ''"], ['nationality', "TEXT DEFAULT ''"]]) if (!cols.includes(c)) db.exec(`ALTER TABLE hr_profiles ADD COLUMN ${c} ${def}`); }
+  // 身分證字號／居留證號碼檢查（內政部檢查碼）：身分證 A123456789；新式居留證 A800000014（第 2 碼 8、9）；舊式居留證 AB12345678（第 2 碼 A～D）
+  const ID_LETTER = { A: 10, B: 11, C: 12, D: 13, E: 14, F: 15, G: 16, H: 17, I: 34, J: 18, K: 19, L: 20, M: 21, N: 22, O: 35, P: 23, Q: 24, R: 25, S: 26, T: 27, U: 28, V: 29, W: 32, X: 30, Y: 31, Z: 33 };
+  function idCheck(v) {
+    const s = String(v || '').trim().toUpperCase(); let digits;
+    if (/^[A-Z][1289]\d{8}$/.test(s)) digits = s.slice(1);
+    else if (/^[A-Z][A-D]\d{8}$/.test(s)) digits = String(ID_LETTER[s[1]] % 10) + s.slice(2);
+    else return false;
+    const n = ID_LETTER[s[0]]; let sum = Math.floor(n / 10) + (n % 10) * 9;
+    for (let i = 0; i < 8; i++) sum += Number(digits[i]) * (8 - i);
+    sum += Number(digits[8]); return sum % 10 === 0;
+  }
+  const maskId = v => v ? `${v.slice(0, 3)}****${v.slice(-3)}` : '';
+
   // ---------- 小工具 ----------
   const int = v => { const n = Math.round(Number(String(v ?? '').replace(/[,\s元]/g, ''))); return Number.isFinite(n) ? n : 0; };
   const str = (v, m = 200) => String(v ?? '').trim().slice(0, m);
@@ -120,7 +135,7 @@ module.exports = function registerPayrollRoutes(app, d) {
       tenant_id: u.tenant_id, gender: ['F', 'M'].includes(p.gender) ? p.gender : '',
       trial_salary: int(p.trial_salary), deductions: parse(p.deductions_json, []), salary_note: p.salary_note || '',
       pay_method: p.pay_method === 'cash' ? 'cash' : 'transfer', bank_name: p.bank_name || '', annual_used: Number(p.annual_used) || 0,
-      birthday: p.birthday || '', mobile: p.mobile || '', address: p.address || '', emergency_name: p.emergency_name || '', emergency_relation: p.emergency_relation || '', emergency_phone: p.emergency_phone || '', insured_date: p.insured_date || '',
+      id_type: ['national', 'arc', 'passport'].includes(p.id_type) ? p.id_type : 'national', id_no: p.id_no || '', nationality: p.nationality || '', birthday: p.birthday || '', mobile: p.mobile || '', address: p.address || '', emergency_name: p.emergency_name || '', emergency_relation: p.emergency_relation || '', emergency_phone: p.emergency_phone || '', insured_date: p.insured_date || '',
       hr_updated_at: p.hr_updated_at || '', hr_updated_by: p.hr_updated_by || '', salary_updated_at: p.salary_updated_at || '', salary_updated_by: p.salary_updated_by || '',
     };
     return prof;
@@ -235,7 +250,7 @@ module.exports = function registerPayrollRoutes(app, d) {
   const C = '/api/company';
   // 目前月份的投保級距（試用期中依試用期薪資自動對應）
   const gradesNow = (p, t) => { const inTrial = p.trial_salary && p.trial_end_date && p.trial_end_date >= `${monthTW()}-01`; const monthly = (inTrial ? p.trial_salary : p.base_salary) + p.allowances.reduce((a, x) => a + int(x.amount), 0); return { ...p, ...(p.auto_grade ? INS.suggestGrades(t, monthly) : {}), in_trial: !!inTrial }; };
-  const hrView0 = p => ({ staff_id: p.staff_id, employee_id: p.employee_id, name: p.name, position: p.position, role: p.role, work_type: p.work_type, hire_date: p.hire_date, trial_end_date: p.trial_end_date, birthday: p.birthday, mobile: p.mobile, address: p.address, emergency_name: p.emergency_name, emergency_relation: p.emergency_relation, emergency_phone: p.emergency_phone, insured_date: p.insured_date, labor_insured: p.labor_insured, employment_insured: p.employment_insured, health_insured: p.health_insured, pension_enabled: p.pension_enabled, health_dependents: p.health_dependents, gender: p.gender, note: p.note, hr_updated_at: p.hr_updated_at, hr_updated_by: p.hr_updated_by });
+  const hrView0 = p => ({ staff_id: p.staff_id, employee_id: p.employee_id, name: p.name, position: p.position, role: p.role, work_type: p.work_type, hire_date: p.hire_date, trial_end_date: p.trial_end_date, id_type: p.id_type, id_no: p.id_no, id_masked: maskId(p.id_no), nationality: p.nationality, birthday: p.birthday, mobile: p.mobile, address: p.address, emergency_name: p.emergency_name, emergency_relation: p.emergency_relation, emergency_phone: p.emergency_phone, insured_date: p.insured_date, labor_insured: p.labor_insured, employment_insured: p.employment_insured, health_insured: p.health_insured, pension_enabled: p.pension_enabled, health_dependents: p.health_dependents, gender: p.gender, note: p.note, hr_updated_at: p.hr_updated_at, hr_updated_by: p.hr_updated_by });
   const hrView = (p, t) => { const g = gradesNow(p, t); const al = annualLeave(p.hire_date, todayTW()); return { ...hrView0(p), auto_grade: p.auto_grade, salary_set: p.configured, labor_grade: g.labor_grade, health_grade: g.health_grade, pension_grade: g.pension_grade, occupational_grade: g.occupational_grade, pay_method: p.pay_method, bank_name: p.bank_name, bank_account: p.bank_account, annual_leave: al, annual_used: p.annual_used, ...annualSys(p, al) }; };
   // 特休已休＝人事登記的「系統外已休」＋系統中核准的特休假單
   function annualSys(p, al) { let s = { used: 0, pending: 0 }; try { if (leaveHooks?.annualUsed) s = leaveHooks.annualUsed(p.tenant_id, p.staff_id, al); } catch {} return { annual_system_used: s.used, annual_pending: s.pending, annual_left: al ? Math.max(0, al.days - p.annual_used - s.used - s.pending) : 0 }; }
@@ -264,6 +279,15 @@ module.exports = function registerPayrollRoutes(app, d) {
     db.prepare('UPDATE hr_profiles SET hire_date=?,trial_end_date=?,birthday=?,mobile=?,address=?,emergency_name=?,emergency_relation=?,emergency_phone=?,insured_date=?,labor_insured=?,employment_insured=?,occupational_insured=?,health_insured=?,pension_enabled=?,health_dependents=?,note=?,hr_updated_at=?,hr_updated_by=?,updated_at=? WHERE tenant_id=? AND staff_id=?')
       .run(b.hire_date || '', b.trial_end_date || '', b.birthday || '', str(b.mobile, 30), str(b.address, 200), str(b.emergency_name, 30), str(b.emergency_relation, 20), str(b.emergency_phone, 30), b.insured_date || '', b.labor_insured === false ? 0 : 1, b.employment_insured === false ? 0 : 1, b.labor_insured === false ? 0 : 1, b.health_insured === false ? 0 : 1, b.pension_enabled === false ? 0 : 1, Math.max(0, Math.min(int(b.health_dependents), 20)), str(b.note, 500), now(), by(getUser(req)), now(), tid, sid);
     db.prepare('UPDATE hr_profiles SET gender=? WHERE tenant_id=? AND staff_id=?').run(['F', 'M'].includes(b.gender) ? b.gender : '', tid, sid);
+    if (b.id_no !== undefined) {
+      const type = ['national', 'arc', 'passport'].includes(b.id_type) ? b.id_type : 'national'; const no = str(b.id_no, 20).toUpperCase().replace(/\s/g, '');
+      if (no && type !== 'passport' && !idCheck(no)) return bad(res, type === 'arc' ? '居留證號碼格式或檢查碼不正確（新式：1 個英文＋8 或 9 開頭的 9 碼數字；舊式：2 個英文＋8 碼數字）' : '身分證字號格式或檢查碼不正確');
+      if (no && type === 'national' && !/^[A-Z][12]/.test(no)) return bad(res, '這是居留證號碼，請把證件類別改成「居留證」');
+      if (no && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND id_no=? AND staff_id<>?').get(tid, no, sid)) return bad(res, '這個證號已經登記在其他人員的資料上');
+      // 身分證第 2 碼 1＝男、2＝女，性別未登記時自動帶入
+      const g = type === 'national' && no ? (no[1] === '1' ? 'M' : 'F') : '';
+      db.prepare('UPDATE hr_profiles SET id_type=?,id_no=?,nationality=?,gender=CASE WHEN COALESCE(gender,\'\')=\'\' AND ?<>\'\' THEN ? ELSE gender END WHERE tenant_id=? AND staff_id=?').run(type, no, type === 'national' ? '' : str(b.nationality, 30), g, g, tid, sid);
+    }
     try { db.prepare('UPDATE staff_users SET trial_end_date=?,health_dependents=? WHERE id=?').run(b.trial_end_date || '', Math.max(0, int(b.health_dependents)), sid); } catch {}
     res.json({ success: true, profile: hrView(profileOut(u, profileRow(tid, sid), t), t) });
   }));
