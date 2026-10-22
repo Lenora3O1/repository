@@ -7,7 +7,8 @@
 'use strict';
 
 module.exports = function registerApRoutes(app, d) {
-  const { db, fs, path, crypto, multer, DATA_DIR, getUser, tenantId, now, requireCompanyAdmin, getSiteAssignments, org, acct, contracts } = d;
+  const { db, fs, path, crypto, multer, DATA_DIR, getUser, tenantId, now, requireCompanyAdmin, getSiteAssignments, org, acct, contracts, plans } = d;
+  const acctOn = tid => !plans || plans.isOn(tid, 'accounting');
   const DIR = path.join(DATA_DIR, 'uploads', 'ap'); try { fs.mkdirSync(DIR, { recursive: true }); } catch {}
 
   db.exec(`
@@ -168,6 +169,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
   }
   // 核准後入帳（應付）
   function postAccrual(r, u) {
+    if (!acctOn(r.tenant_id)) return null; // 沒有開通會計模組：請款照常審核，不產生傳票
     const items = parse(r.items_json, []); const k = calc(items, r.invoice_kind, r.tax); const lines = [];
     const defaultKey = r.kind === 'feedback' ? 'cost_feedback' : 'exp_other';
     for (const x of k.lines) lines.push({ code: x.account || undefined, key: x.account ? undefined : defaultKey, debit: x.net, memo: x.desc, community_id: x.community_id || r.community_id, party: r.payee, party_tax_id: r.payee_tax_id });

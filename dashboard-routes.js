@@ -3,7 +3,7 @@
 'use strict';
 
 module.exports = function registerDashboardRoutes(app, d) {
-  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar, ap, interview } = d;
+  const { db, getUser, tenantId, effectivePermissions, requireCompanyAdmin, getSiteAssignments, org, payroll, equip, contracts, acct, ar, ap, interview, plans } = d;
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const twNow = () => new Date(Date.now() + 8 * 3600e3);
   const todayTW = () => twNow().toISOString().slice(0, 10);
@@ -44,6 +44,7 @@ module.exports = function registerDashboardRoutes(app, d) {
     const deptName = mi?.dept && cfg ? (cfg.departments.find(x => x.id === mi.dept)?.name || '') : '';
     const staff = staffOf(tid); const nameOf = new Map(staff.map(s => [s.id, s.name]));
     const t = todayTW(), m = monthTW();
+    const modOn = k => !plans || safe(() => plans.isOn(tid, k), true);
 
     // ---------- 每個人都有：我的待辦 ----------
     const pend = pendingFor(tid, u);
@@ -147,11 +148,11 @@ module.exports = function registerDashboardRoutes(app, d) {
     if (ap) {
       const p = safe(() => ap.dashboard(tid, u), null);
       if (p && p.todo) cards.push({ id: 'ap_todo', size: 'sm', icon: '💸', title: '請款待我審核', value: p.todo, sub: '張請款單', tone: 'alert', action: { action: 'ap-my', label: '請款', tab: 'todo' } });
-      if (p && acct && safe(() => acct.canAcct(u), false)) cards.push({ id: 'ap_unpaid', size: 'sm', icon: '💰', title: '公司應支', value: `$${money(p.unpaid_amount)}`, sub: `待付款 ${p.unpaid} 張${p.overdue ? `・逾期 ${p.overdue} 張` : ''}`, tone: p.overdue ? 'alert' : '', action: { action: 'acct-ap', label: '公司應支' } });
+      if (p && acct && modOn('accounting') && safe(() => acct.canAcct(u), false)) cards.push({ id: 'ap_unpaid', size: 'sm', icon: '💰', title: '公司應支', value: `$${money(p.unpaid_amount)}`, sub: `待付款 ${p.unpaid} 張${p.overdue ? `・逾期 ${p.overdue} 張` : ''}`, tone: p.overdue ? 'alert' : '', action: { action: 'acct-ap', label: '公司應支' } });
     }
 
     // ---------- 公司應收（會計）----------
-    if (ar && acct && safe(() => acct.canAcct(u), false)) {
+    if (ar && acct && modOn('accounting') && safe(() => acct.canAcct(u), false)) {
       const a = safe(() => ar.dashboard(tid), null);
       if (a) cards.push({ id: 'ar', size: 'sm', icon: '🧾', title: '公司應收', value: `$${money(a.outstanding)}`, sub: `未收款｜${a.overdue ? `逾期 ${a.overdue} 張 $${money(a.overdue_amount)}` : '沒有逾期'}${a.drafts ? `・未開立 ${a.drafts} 張` : ''}`, tone: a.overdue ? 'alert' : '', action: { action: 'acct-ar', label: '公司應收' } });
     }
@@ -163,7 +164,7 @@ module.exports = function registerDashboardRoutes(app, d) {
     }
 
     // ---------- 設備借用（總務）----------
-    if (equip && safe(() => equip.isGA(u), false)) {
+    if (equip && modOn('equip_apply') && safe(() => equip.isGA(u), false)) {
       const e = safe(() => equip.dashboard(tid), null);
       const todo = e ? e.pending_ga + e.approved + e.returning : 0;
       if (e && (todo || e.overdue || (!boss && u.role !== 'company_admin'))) cards.push({ id: 'equip', size: 'sm', icon: '🧰', title: '設備借用', value: todo, sub: `待處理｜出借中 ${e.lent}${e.overdue ? `・逾期 ${e.overdue}` : ''}${e.repair ? `・維修中 ${e.repair}` : ''}`, tone: e.overdue ? 'alert' : '', action: { action: 'equip-requests', label: '設備申請紀錄' } });
@@ -197,6 +198,9 @@ module.exports = function registerDashboardRoutes(app, d) {
         cards.push({ id: 'sites', size: 'lg', icon: '🏘', title: kind === 'region' ? '我負責的社區今天' : '各社區今天', table: { head: ['社區', '上班', '已打卡', '請假', '今日日誌'], rows: rows.map(r => [r.name, r.working, r.working ? `${r.checked}/${r.working}` : '—', r.leave || '—', r.journal]), alerts: rows.map(r => [...(r.working && r.checked < r.working ? [2] : []), ...(!r.journal_ok ? [4] : [])]) }, action: { action: 'work-journal', label: '工作日誌管理' } });
       }
     }
+
+    // ---------- 方案提醒（公司高層）：用量接近上限、即將到期、寬限期、試用即將結束 ----------
+    if (plans) { const pl = safe(() => plans.dashboard(tid, u), null); if (pl) cards.unshift({ id: 'plan', size: 'md', icon: '💳', title: '方案提醒', tone: pl.alert ? 'alert' : '', items: pl.warnings.map(w => ({ text: w.text, value: '', tone: w.tone })), action: { action: 'plan-billing', label: '方案與費用' } }); }
 
     res.set('Cache-Control', 'no-store');
     res.json({
