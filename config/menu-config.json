@@ -546,6 +546,14 @@
       "label": "加班",
       "action": "schedule-overtime",
       "enabled": true
+    },
+    {
+      "id": "company-plan",
+      "parentId": null,
+      "icon": "💳",
+      "label": "方案與費用",
+      "action": "plan-billing",
+      "enabled": true
     }
   ],
   "tenants": {},

@@ -52,7 +52,7 @@ let contractApi;
 let arApi;
 let apApi;
 let interviewApi;
-let addonsApi;
+let plansApi;
 let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
@@ -225,6 +225,8 @@ app.use(session({
   resave: false, saveUninitialized: false,
   cookie: { maxAge: 1000 * 60 * 60 * 12, sameSite: 'lax', httpOnly: true }
 }));
+// 方案與計費：唯讀（到期）、加值模組、方案上限（模組在後面註冊，這裡延後取用）
+app.use((req,res,next)=>plansApi?plansApi.guard(req,res,next):next());
 
 function requireSuperAdmin(req,res,next){ if(req.session?.isAdmin) return next(); return res.status(401).json({error:'尚未登入總後臺或登入已過期'}); }
 // 第一次登入（或管理員重設密碼後）必須先修改密碼，其他功能暫停使用
@@ -724,6 +726,8 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
   items=items.filter(x=>x.enabled!==false);
   // 加值功能：沒有開通的公司（公司管理員也一樣）不顯示面試管理
   if(staffUser && scope==='company') items=items.filter(x=>String(x.action||'')!=='interviews'||!!interviewApi?.isReviewer(staffUser));
+  // 方案與計費：沒有開通的加值模組不顯示；「方案與費用」只給公司高層（與開通會計模組時的會計）
+  if(staffUser && plansApi) items=items.filter(x=>plansApi.menuAllowed(tenantIdValue,x,staffUser,scope));
   if(staffUser && staffUser.role!=='company_admin'){
     const selected=new Set(effectiveMenuPermissions(staffUser,scope));
     const allowedKeys=scope==='company'?COMPANY_PERMISSION_KEYS:SITE_PERMISSION_KEYS;
@@ -2649,13 +2653,13 @@ coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,req
 // ===== 智慧月班表 =====
 smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,getSiteAssignments,org:orgApi,S:{getProfile:scheduleGetProfile,effectiveRule:scheduleEffectiveRule,platformRules:schedulePlatformRules,holidays:y=>scheduleTaiwanHolidayDates(y),redDatesSync:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),leavePolicy:tid=>leaveApi.policyFor(tid)}});
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
+plansApi=require('./plans')(app,{db,now,requireSuperAdmin,requireCompanyAdmin,getUser,tenantId,getAcct:()=>acctApi});
 acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,effectivePermissions,org:orgApi,XLSX});
 contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi});
 arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});
-apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,contracts:contractApi});
-addonsApi=require('./addons')(app,{db,now,requireSuperAdmin});
-interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi,addons:addonsApi});
-equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi});
-require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi});
+apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,contracts:contractApi,plans:plansApi});
+interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi,addons:plansApi});
+equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi,plans:plansApi});
+require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi,plans:plansApi});
 
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));

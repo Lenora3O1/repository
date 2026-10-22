@@ -8,7 +8,8 @@
 'use strict';
 
 module.exports = function registerEquipmentRoutes(app, d) {
-  const { db, fs, path, crypto, multer, DATA_DIR, getUser, tenantId, now, requireStaff, requireCompanyAdmin, requireSuperAdmin, getSiteAssignments, effectivePermissions, org } = d;
+  const { db, fs, path, crypto, multer, DATA_DIR, getUser, tenantId, now, requireStaff, requireCompanyAdmin, requireSuperAdmin, getSiteAssignments, effectivePermissions, org, plans } = d;
+  const applyOn = tid => !plans || plans.isOn(tid, 'equip_apply');
   const DIR = path.join(DATA_DIR, 'uploads', 'equipment');
   try { fs.mkdirSync(DIR, { recursive: true }); } catch {}
 
@@ -285,7 +286,7 @@ module.exports = function registerEquipmentRoutes(app, d) {
         || comms.some(c => siteApprovers(tid, c.id, -1).includes(u.id));
       const waiting = db.prepare("SELECT site_approver_ids_json FROM equip_requests WHERE tenant_id=? AND status='pending_site'").all(tid).filter(r => parse(r.site_approver_ids_json, []).includes(u.id)).length;
       res.set('Cache-Control', 'no-store');
-      res.json({ settings: cfg, communities: comms, catalog: catalog(tid), is_site_approver: approver, waiting, is_ga: isGA(u), today: todayTW() });
+      res.json({ settings: cfg, communities: comms, catalog: catalog(tid), is_site_approver: approver, waiting, is_ga: isGA(u), today: todayTW(), addon_apply: applyOn(tid) });
     }));
     app.get(`${base}/equip/availability`, mw, wrap((req, res) => {
       const tid = tenantId(req); const cfg = settingsFor(tid); const q = req.query || {};
@@ -382,7 +383,7 @@ module.exports = function registerEquipmentRoutes(app, d) {
     const cnt = s => db.prepare('SELECT COUNT(*) c FROM equip_requests WHERE tenant_id=? AND status=?').get(tid, s).c;
     const overdue = db.prepare("SELECT COUNT(*) c FROM equip_requests WHERE tenant_id=? AND status='lent' AND end_date<?").get(tid, todayTW()).c;
     res.set('Cache-Control', 'no-store');
-    res.json({ settings: settingsFor(tid), communities: allCommunities(tid), item_status: ITEM_STATUS, status: STATUS, counts: { pending_site: cnt('pending_site'), pending_ga: cnt('pending_ga'), approved: cnt('approved'), lent: cnt('lent'), returning: cnt('returning'), overdue }, is_admin: getUser(req).role === 'company_admin', today: todayTW() });
+    res.json({ addon_apply: applyOn(tid), settings: settingsFor(tid), communities: allCommunities(tid), item_status: ITEM_STATUS, status: STATUS, counts: { pending_site: cnt('pending_site'), pending_ga: cnt('pending_ga'), approved: cnt('approved'), lent: cnt('lent'), returning: cnt('returning'), overdue }, is_admin: getUser(req).role === 'company_admin', today: todayTW() });
   }));
   app.put('/api/company/equip/categories', requireCompanyAdmin, needGA, wrap((req, res) => {
     const tid = tenantId(req); const cur = settingsFor(tid); const cats = Array.isArray(req.body?.categories) ? req.body.categories : [];
