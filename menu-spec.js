@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 2;
+const VERSION = 3;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -23,6 +23,7 @@ const COMPANY = [
     { id: 'company-ledger', label: '傳票與帳冊', action: 'acct-ledger', match: ['傳票', '帳冊'] },
   ] },
 ];
+COMPANY.unshift({ parent: null, children: [{ id: 'company-expense', label: '請款', action: 'ap-my', exact: ['請款', '我的請款', '費用請款'], after: 'company-overview', icon: '💸' }] });
 const STAFF = [
   { parent: null, children: [{ id: 'staff-equipment', label: '設備申請', action: 'staff-equipment', exact: ['設備申請', '設備借用'], after: 'company-resources', icon: '🧰' }] },
 ];

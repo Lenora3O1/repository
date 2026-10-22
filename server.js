@@ -50,6 +50,7 @@ let equipApi;
 let acctApi;
 let contractApi;
 let arApi;
+let apApi;
 let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
@@ -2646,7 +2647,8 @@ smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompany
 acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,effectivePermissions,org:orgApi,XLSX});
 contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi});
 arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});
+apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,contracts:contractApi});
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi});
-require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi});
+require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi});
 
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));
