@@ -468,6 +468,14 @@
       "enabled": true
     },
     {
+      "id": "company-interviews",
+      "parentId": null,
+      "icon": "📝",
+      "label": "面試管理",
+      "action": "interviews",
+      "enabled": true
+    },
+    {
       "id": "company-new-record",
       "parentId": null,
       "icon": "🗒️",

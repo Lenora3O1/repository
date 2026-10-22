@@ -1,0 +1,53 @@
+// 總後台：各公司面試設定（是否開放、保存期限、類別與職位、審核主管、個資告知）與考核題庫
+(function(){
+  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
+  const J=(method,body)=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const S={tid:null,cat:'admin'};
+  const inp='margin:0;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #D8CECB;border-radius:8px;background:#fff;font:inherit';
+  const lab='display:flex;flex-direction:column;gap:5px;font-weight:700;font-size:.86rem;margin:0';
+  const TYPE={single:'單選',multi:'複選',text:'情境題（主管評分）'},LEVEL={all:'全部',experienced:'有經驗',novice:'沒經驗'};
+  async function load(el){el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';try{S.list=await api('/api/admin/interview-settings');if(!S.tid)S.tid=S.list.tenants[0]?.id;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}}
+  async function draw(el){if(!S.tid){el.innerHTML='<div class="panel"><div class="empty">還沒有公司。</div></div>';return;}const d=await api(`/api/admin/interview-settings/${S.tid}`);S.d=d;S.c=JSON.parse(JSON.stringify(d.settings));S.bank=JSON.parse(JSON.stringify(d.bank));paint(el);}
+  function paint(el){
+    const c=S.c,d=S.d;const cat=c.categories.find(x=>x.id===S.cat)||c.categories[0];
+    const qs=S.bank.map((q,i)=>({q,i})).filter(x=>x.q.category===cat.id);
+    el.innerHTML=`<div class="panel"><div class="eyebrow">📝 平台設定</div><h1>面試設定與考核題庫</h1>
+      <p class="hint">面試人員在公司電腦上從登入頁右下角進入，填寫履歷後依有無經驗作答。這裡設定各公司開放與否、各類別的職位與審核主管，以及考核題庫。</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>公司</b><select id="iT" style="width:auto;margin:0">${S.list.tenants.map(t=>`<option value="${t.id}" ${t.id===S.tid?'selected':''}>${esc(t.name)}（${esc(t.code)}）${t.customized?' ✎':''}</option>`).join('')}</select><small class="muted">${d.bank_custom?'題庫已客製化':'使用平台預設題庫'}</small></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 16px;margin-top:14px">
+        <label style="${lab};flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="sEn" ${c.enabled?'checked':''} style="width:auto;margin:0"> 開放線上面試填寫</label>
+        <label style="${lab}">未錄取資料保存（月）<input type="number" id="sRet" min="1" max="36" value="${c.retention_months}" style="${inp}"></label>
+        <label style="${lab};flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="sHr" ${c.hr_view?'checked':''} style="width:auto;margin:0"> 人事（有人事權限的人）可以看所有類別</label></div>
+      <label style="${lab};margin-top:12px">個資蒐集告知<textarea id="sCon" rows="3" style="${inp}">${esc(c.consent)}</textarea></label>
+      <div style="display:flex;gap:6px;margin:18px 0 8px">${c.categories.map(x=>`<button type="button" data-cat="${x.id}" class="${x.id===cat.id?'':'secondary'}">${esc(x.name)}</button>`).join('')}</div>
+      <div style="border:1px solid #E2D3CC;border-radius:12px;padding:12px 14px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 16px"><label style="${lab}">類別名稱<input id="cN" value="${esc(cat.name)}" style="${inp}"></label><label style="${lab}">說明<input id="cH" value="${esc(cat.hint)}" style="${inp}"></label></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 16px;margin-top:10px"><label style="${lab}">應徵職位（一行一個）<textarea id="cP" rows="5" style="${inp}">${esc(cat.positions.join('\n'))}</textarea></label><label style="${lab}">證照選項（一行一個）<textarea id="cL" rows="5" style="${inp}">${esc(cat.licenses.join('\n'))}</textarea></label>
+          <div style="${lab}">審核主管（這些職位看得到這個類別的面試資料）<div style="display:grid;gap:4px;max-height:150px;overflow:auto;border:1px solid #E9E3E1;border-radius:8px;padding:6px 8px">${d.positions.map(p=>`<label style="display:flex;gap:6px;align-items:center;font-weight:500;margin:0"><input type="checkbox" data-rp="${esc(p.id)}" ${cat.reviewer_positions.includes(p.id)?'checked':''} style="width:auto;margin:0"> ${esc(p.name)}</label>`).join('')}</div><small class="muted" style="font-weight:400">老闆、總經理、公司管理員都看得到</small></div></div>
+        <p style="margin:14px 0 6px;font-weight:800">考核題目（${qs.length} 題，滿分：選擇題 ${qs.filter(x=>x.q.type!=='text').reduce((s,x)=>s+x.q.points,0)} 分、情境題 ${qs.filter(x=>x.q.type==='text').reduce((s,x)=>s+x.q.points,0)} 分）</p>
+        <table style="width:100%;border-collapse:collapse;font-size:.86rem"><thead><tr style="background:#F6F4F2"><th style="padding:6px">#</th><th style="text-align:left">題目</th><th>題型</th><th>對象</th><th>分數</th><th></th></tr></thead><tbody>${qs.map(({q,i},n)=>`<tr style="border-bottom:1px solid #F2EFEE"><td style="padding:6px">${n+1}</td><td>${esc(q.text)}${q.type!=='text'?`<br><small class="muted">答案：${(Array.isArray(q.answer)?q.answer:[q.answer]).map(k=>esc(q.options[k]||'')).join('、')}</small>`:''}</td><td>${TYPE[q.type]}</td><td>${LEVEL[q.level]}</td><td>${q.points}</td><td style="white-space:nowrap"><button type="button" class="secondary" data-eq="${i}" style="padding:3px 9px;min-height:0;margin:0">編輯</button> <button type="button" class="secondary" data-dq="${i}" style="padding:3px 9px;min-height:0;margin:0">✕</button></td></tr>`).join('')}</tbody></table>
+        <div style="margin-top:8px"><button type="button" class="secondary" id="qAdd" style="padding:5px 12px;min-height:0">＋ 新增題目</button></div><div id="qEd"></div></div>
+      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap"><button type="button" id="sSave">💾 儲存這家公司設定與題庫</button>${d.bank_custom?'<button type="button" class="secondary" id="sReset">↩ 題庫恢復平台預設</button>':''}<span id="sMsg" class="muted" style="align-self:center"></span></div></div>`;
+    const sync=()=>{c.enabled=el.querySelector('#sEn').checked;c.retention_months=Number(el.querySelector('#sRet').value)||6;c.hr_view=el.querySelector('#sHr').checked;c.consent=el.querySelector('#sCon').value;
+      cat.name=el.querySelector('#cN').value;cat.hint=el.querySelector('#cH').value;cat.positions=el.querySelector('#cP').value.split('\n').map(s=>s.trim()).filter(Boolean);cat.licenses=el.querySelector('#cL').value.split('\n').map(s=>s.trim()).filter(Boolean);cat.reviewer_positions=[...el.querySelectorAll('[data-rp]:checked')].map(x=>x.dataset.rp);};
+    el.querySelector('#iT').onchange=e=>{S.tid=Number(e.target.value);draw(el).catch(x=>alert(x.message));};
+    el.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{sync();S.cat=b.dataset.cat;paint(el);});
+    el.querySelectorAll('[data-dq]').forEach(b=>b.onclick=()=>{if(!confirm('刪除這一題？'))return;sync();S.bank.splice(Number(b.dataset.dq),1);paint(el);});
+    const edit=i=>{sync();const q=i===null?{category:cat.id,level:'all',type:'single',text:'',options:['','','',''],answer:0,points:5,explain:''}:{...S.bank[i]};const box=el.querySelector('#qEd');
+      const opts=()=>q.type==='text'?'':`<label style="${lab}">選項（一行一個，最多 8 個）<textarea id="qO" rows="5" style="${inp}">${esc((q.options||[]).join('\n'))}</textarea></label><label style="${lab}">正確答案（選項編號，例如 2；複選用逗號：1,3）<input id="qA" value="${esc((Array.isArray(q.answer)?q.answer:[q.answer]).filter(x=>x!==null&&x!==undefined).map(x=>x+1).join(','))}" style="${inp}"></label>`;
+      box.innerHTML=`<div style="border:1px solid #C9B0A8;border-radius:12px;padding:12px;margin-top:10px;background:#FCFAF1"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px"><label style="${lab}">題型<select id="qT" style="${inp}">${Object.entries(TYPE).map(([k,l])=>`<option value="${k}" ${q.type===k?'selected':''}>${l}</option>`).join('')}</select></label><label style="${lab}">出題對象<select id="qL" style="${inp}">${Object.entries(LEVEL).map(([k,l])=>`<option value="${k}" ${q.level===k?'selected':''}>${l}</option>`).join('')}</select></label><label style="${lab}">分數<input type="number" id="qP" min="1" max="50" value="${q.points}" style="${inp}"></label></div>
+        <label style="${lab};margin-top:10px">題目<textarea id="qX" rows="2" style="${inp}">${esc(q.text)}</textarea></label><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:10px" id="qOpt">${opts()}</div><label style="${lab};margin-top:10px">解說（只有面試主管看得到）<input id="qE" value="${esc(q.explain||'')}" style="${inp}"></label>
+        <div style="margin-top:10px;display:flex;gap:8px"><button type="button" id="qOk">套用（記得按下方儲存）</button><button type="button" class="secondary" id="qC">取消</button></div></div>`;
+      box.querySelector('#qT').onchange=e=>{q.type=e.target.value;box.querySelector('#qOpt').innerHTML=opts();};
+      box.querySelector('#qC').onclick=()=>{box.innerHTML='';};
+      box.querySelector('#qOk').onclick=()=>{q.type=box.querySelector('#qT').value;q.level=box.querySelector('#qL').value;q.points=Number(box.querySelector('#qP').value)||5;q.text=box.querySelector('#qX').value.trim();q.explain=box.querySelector('#qE').value;
+        if(!q.text){alert('請填寫題目');return;}
+        if(q.type!=='text'){q.options=box.querySelector('#qO').value.split('\n').map(s=>s.trim()).filter(Boolean);const a=box.querySelector('#qA').value.split(/[,，、\s]+/).map(Number).filter(n=>n>=1&&n<=q.options.length).map(n=>n-1);if(q.options.length<2){alert('至少要 2 個選項');return;}if(!a.length){alert('請填正確答案的選項編號');return;}q.answer=q.type==='single'?a[0]:a;}else{q.options=[];q.answer=null;}
+        if(i===null)S.bank.push(q);else S.bank[i]=q;paint(el);};};
+    el.querySelector('#qAdd').onclick=()=>edit(null);el.querySelectorAll('[data-eq]').forEach(b=>b.onclick=()=>edit(Number(b.dataset.eq)));
+    el.querySelector('#sSave').onclick=async()=>{sync();try{const r=await api(`/api/admin/interview-settings/${S.tid}`,J('PUT',{settings:c,bank:S.bank}));S.list=await api('/api/admin/interview-settings');S.d={...S.d,settings:r.settings,bank:r.bank,bank_custom:r.bank_custom};S.c=JSON.parse(JSON.stringify(r.settings));S.bank=JSON.parse(JSON.stringify(r.bank));paint(el);el.querySelector('#sMsg').textContent='✅ 已儲存';}catch(e){alert(e.message);}};
+    el.querySelector('#sReset')?.addEventListener('click',async()=>{if(!confirm('題庫恢復平台預設？這家公司自訂的題目會清除。'))return;sync();try{await api(`/api/admin/interview-settings/${S.tid}`,J('PUT',{settings:c,reset_bank:true}));S.list=await api('/api/admin/interview-settings');await draw(el);}catch(e){alert(e.message);}});
+  }
+  window.InterviewAdminModule={load};
+})();
