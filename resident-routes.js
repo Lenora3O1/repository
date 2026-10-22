@@ -41,7 +41,7 @@ function unitLabel(r) { return [r.building, r.unit].filter(x => String(x || '').
 function cleanText(v, max = 200) { return String(v ?? '').trim().slice(0, max); }
 
 module.exports = function registerResidentRoutes(app, d) {
-  const { db, getUser, tenantId, now, requireStaffFiller, residentCategory, residentActiveCommunity, residentCanEdit, residentParseFile, residentUpload, RESIDENT_IMPORTS_DIR, path } = d;
+  const { db, getUser, tenantId, now, requireStaffFiller, residentCategory, residentActiveCommunity, residentCanEdit, residentParseFile, residentUpload, RESIDENT_IMPORTS_DIR, path, XLSX } = d;
 
   // ---------- 資料表 ----------
   const cols = db.prepare('PRAGMA table_info(resident_records)').all().map(c => c.name);
@@ -61,6 +61,21 @@ module.exports = function registerResidentRoutes(app, d) {
     );
   `);
   const tx = fn => (db.transaction ? db.transaction(fn) : fn);
+  db.exec(`CREATE TABLE IF NOT EXISTS resident_acks (tenant_id INTEGER NOT NULL, staff_id INTEGER NOT NULL, version INTEGER NOT NULL, at TEXT NOT NULL, user_agent TEXT DEFAULT '', PRIMARY KEY (tenant_id,staff_id,version))`);
+
+  // ---------- 個資保護 ----------
+  // - 只有在職、啟用中、而且目前駐點在該社區的人員看得到（每次讀取都重新檢查；離職、停用、調離社區立即失效）。
+  // - 公司管理員帳號與系統總後台都沒有住戶名冊的讀取介面：系統服務商不接觸各公司、各社區的住戶資料。
+  // - 第一次查看前要先同意保密聲明（留存同意紀錄，屬公司內部資料）。
+  const NOTICE_VERSION = 1;
+  const NOTICE = [
+    '住戶名冊含有住戶的姓名、電話、地址等個人資料，受《個人資料保護法》保護。',
+    '僅限為執行本社區職務（例如櫃檯聯繫、通知、收發包裹）時查看與使用，不得提供給無關的人，也不得用於其他目的。',
+    '請勿截圖、翻拍、複製或私下傳送住戶資料。畫面會顯示您的姓名與時間，下載檔案也會留下紀錄。',
+    '離職、停用帳號或調離本社區後，將立即無法再查看任何住戶資料。',
+    '本系統服務商不查看、不取得各公司與各社區的住戶資料；因使用者個人行為造成的資料外洩，由行為人自行負責。',
+  ];
+  const ackOf = (tid, uid) => db.prepare('SELECT at FROM resident_acks WHERE tenant_id=? AND staff_id=? AND version=?').get(tid, uid, NOTICE_VERSION) || null;
 
   // ---------- 共用 ----------
   function ctx(req, res, { edit = false } = {}) {
@@ -68,6 +83,7 @@ module.exports = function registerResidentRoutes(app, d) {
     const c = residentActiveCommunity(req);
     if (!c) { res.status(400).json({ error: '請先選擇目前要操作的案場' }); return null; }
     const u = getUser(req);
+    if (!u || !u.is_active || u.role === 'company_admin' || ['left', 'blacklist', 'disabled'].includes(String(u.person_status || ''))) { res.status(403).json({ error: '這個帳號已沒有查看住戶名冊的權限', revoked: true }); return null; }
     if (edit && !residentCanEdit(u)) { res.status(403).json({ error: '目前帳號沒有修改住戶名冊的權限（經理、秘書可以修改）' }); return null; }
     return { tid: tenantId(req), cid: c.id, community: c, category, u, by: u?.name || u?.employee_id || '' };
   }
@@ -169,12 +185,14 @@ module.exports = function registerResidentRoutes(app, d) {
   // ---------- API ----------
   app.get('/api/staff/residents', requireStaffFiller, (req, res) => {
     const t = ctx(req, res); if (!t) return;
+    res.set('Cache-Control', 'no-store');
+    if (!ackOf(t.tid, t.u.id)) return res.json({ ack_required: true, notice: { version: NOTICE_VERSION, items: NOTICE }, community: t.community, category: t.category, records: [] });
     try {
       const imp = activeImport(t.tid, t.cid, t.category);
       const today = todayTW();
       const rows = records(t.tid, t.cid, t.category).map(r => t.category === 'residents-tenants' ? { ...r, lease_state: leaseState(r, today) } : r);
       const pref = db.prepare('SELECT sort_key FROM resident_sort_preferences WHERE staff_id=? AND tenant_id=? AND community_id=? AND category=?').get(t.u.id, t.tid, t.cid, t.category);
-      const out = { community: t.community, category: t.category, records: rows, preference: { sort: pref?.sort_key || 'building' }, last_import: imp || null, viewer: { can_upload: residentCanEdit(t.u), can_edit: residentCanEdit(t.u) }, settings: settings(t.tid, t.cid), today };
+      const out = { community: t.community, category: t.category, records: rows, preference: { sort: pref?.sort_key || 'building' }, last_import: imp || null, viewer: { can_upload: residentCanEdit(t.u), can_edit: residentCanEdit(t.u), name: t.u.name || '', employee_id: t.u.employee_id || '' }, settings: settings(t.tid, t.cid), today };
       if (t.category === 'residents-contact') {
         const plan = syncPlan(t.tid, t.cid);
         out.sync = { pending: plan.add.length + plan.update.length, add: plan.add.length, update: plan.update.length, units: plan.total_units, owners: records(t.tid, t.cid, 'residents-owners', { includeEnded: false }).length, tenants: records(t.tid, t.cid, 'residents-tenants', { includeEnded: false }).filter(r => ['active', 'expiring'].includes(leaseState(r, today))).length };
@@ -261,6 +279,7 @@ module.exports = function registerResidentRoutes(app, d) {
 
   app.get('/api/staff/residents/history', requireStaffFiller, (req, res) => {
     const t = ctx(req, res); if (!t) return;
+    if (!ackOf(t.tid, t.u.id)) return res.status(403).json({ error: '請先同意住戶個資保密聲明', ack_required: true });
     const rows = db.prepare('SELECT id,unit_label,action,summary,by_name,at FROM resident_changes WHERE tenant_id=? AND community_id=? AND category=? ORDER BY id DESC LIMIT 200').all(t.tid, t.cid, t.category);
     res.json({ rows });
   });
@@ -285,6 +304,42 @@ module.exports = function registerResidentRoutes(app, d) {
     db.prepare('INSERT INTO resident_settings(tenant_id,community_id,auto_sync,updated_at) VALUES(?,?,?,?) ON CONFLICT(tenant_id,community_id) DO UPDATE SET auto_sync=excluded.auto_sync,updated_at=excluded.updated_at').run(t.tid, t.cid, on, now());
     log(t, { category: 'residents-contact', action: 'settings', summary: on ? '開啟自動同步' : '關閉自動同步' });
     res.json({ success: true, settings: settings(t.tid, t.cid) });
+  });
+
+  // 保密聲明同意
+  app.post('/api/staff/residents/ack', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res); if (!t) return;
+    if (Number(req.body?.version) !== NOTICE_VERSION) return res.status(400).json({ error: '保密聲明已更新，請重新整理後再同意' });
+    db.prepare('INSERT OR IGNORE INTO resident_acks (tenant_id,staff_id,version,at,user_agent) VALUES (?,?,?,?,?)').run(t.tid, t.u.id, NOTICE_VERSION, now(), String(req.headers?.['user-agent'] || '').slice(0, 200));
+    res.json({ success: true });
+  });
+  // 畫面回到前景時確認權限還在（離職、停用、調離社區後立即清除畫面）
+  app.get('/api/staff/residents/access', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res); if (!t) return;
+    res.set('Cache-Control', 'no-store'); res.json({ ok: true, community_id: t.cid, acked: !!ackOf(t.tid, t.u.id) });
+  });
+  // 下載 Excel（經理、秘書）：給櫃檯使用；留下下載紀錄
+  app.get('/api/staff/residents/export', requireStaffFiller, (req, res) => {
+    const t = ctx(req, res, { edit: true }); if (!t) return;
+    if (!ackOf(t.tid, t.u.id)) return res.status(403).json({ error: '請先同意住戶個資保密聲明', ack_required: true });
+    if (!XLSX) return res.status(500).json({ error: '伺服器沒有安裝 Excel 元件' });
+    const lease = t.category === 'residents-tenants'; const today = todayTW();
+    const rows = records(t.tid, t.cid, t.category, { includeEnded: false }).map(r => {
+      const o = { 棟別: r.building || '', 戶號: r.unit || '', 樓層: r.floor || '', 姓名: r.name || '', 電話: r.phone || '' };
+      if (lease) { o.起租日 = r.lease_start || ''; o.租約到期日 = r.lease_end || ''; o.狀態 = { active: '有效', expiring: '30 天內到期', expired: '已到期', upcoming: '尚未起租', ended: '已退租' }[leaseState(r, today)] || ''; }
+      o['門牌／地址'] = r.address || ''; o.其他資料 = r.extra || ''; return o;
+    });
+    const head = ['棟別', '戶號', '樓層', '姓名', '電話', ...(lease ? ['起租日', '租約到期日', '狀態'] : []), '門牌／地址', '其他資料'];
+    const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([head, ...rows.map(o => head.map(h => o[h] ?? ''))]);
+    ws['!cols'] = head.map(h => ({ wch: ['門牌／地址', '其他資料'].includes(h) ? 30 : h === '電話' ? 14 : 10 }));
+    XLSX.utils.book_append_sheet(wb, ws, LABELS[t.category].slice(0, 31));
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    log(t, { category: t.category, action: 'export', summary: `下載 Excel（${rows.length} 筆）` });
+    const fn = `${t.community.name}-${LABELS[t.category]}-${today}.xlsx`;
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Content-Disposition', `attachment; filename="residents.xlsx"; filename*=UTF-8''${encodeURIComponent(fn)}`);
+    res.send(buf);
   });
 
   return { desiredContacts, syncPlan };

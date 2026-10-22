@@ -158,6 +158,59 @@
     box.querySelector('#rSyncGo')?.addEventListener('click',async()=>{try{const r=await api('/api/staff/residents/sync',J('POST',{category:'residents-contact'}));close();alert(`住戶聯繫表已更新 ${r.synced} 戶。`);await reload();}catch(err){alert(err.message);}});
   }
 
+  // ---------- 防截圖模式 ----------
+  // 網頁沒辦法百分之百阻止截圖或用手機翻拍；這裡做的是「讓截圖變難、而且截到的畫面看得出是誰」：
+  // 畫面浮水印（姓名、員編、時間）、離開視窗就遮住、攔截列印鍵與列印／另存／複製、禁止選取與右鍵、
+  // 回到畫面時重新確認權限（離職、停用、調離社區會立刻清空畫面）。
+  let guard=null;
+  function protectCss(){if(document.getElementById('residentProtectCss'))return;const s=document.createElement('style');s.id='residentProtectCss';s.textContent=`
+.resident-module.r-protect{position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.resident-module.r-protect input,.resident-module.r-protect select,.resident-module.r-protect textarea{-webkit-user-select:text;user-select:text}
+.r-wm{position:absolute;inset:0;pointer-events:none;z-index:5;background-repeat:repeat;opacity:1;border-radius:inherit}
+.r-shield-cover{display:none;position:absolute;inset:0;z-index:6;background:rgba(251,249,247,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);align-items:center;justify-content:center;text-align:center;font-weight:700;color:#5D403C;border-radius:inherit;padding:20px}
+.resident-module.r-shield .r-shield-cover{display:flex}
+.resident-module.r-shield #residentTable{filter:blur(16px)}
+.r-protect-tag{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#3E5328;background:#EAF1E3;border-radius:999px;padding:3px 10px}
+.r-notice{max-width:760px}.r-notice ol{line-height:1.8;padding-left:22px}.r-notice label{display:flex;gap:8px;align-items:center;font-weight:700;margin:12px 0}.r-notice label input{width:auto;margin:0}
+@media print{.resident-module{display:none!important}body::after{content:'住戶名冊不提供列印。經理、秘書請使用「下載 Excel」。';display:block;padding:40px;font-size:18px}}
+`;document.head.appendChild(s);}
+  function wmUrl(text){const t=esc(text);const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="200"><text x="20" y="120" transform="rotate(-22 180 100)" font-family="sans-serif" font-size="15" font-weight="700" fill="rgba(93,64,60,0.13)">${t}</text></svg>`;return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;}
+  function stamp(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
+  function protect(el,d){
+    guard?.abort();const ac=new AbortController();guard=ac;const sig={signal:ac.signal};
+    protectCss();const mod=el.querySelector('.resident-module');if(!mod)return;mod.classList.add('r-protect');
+    const who=`${d.viewer?.name||''} ${d.viewer?.employee_id||''}`.trim();
+    const wm=document.createElement('div');wm.className='r-wm';mod.appendChild(wm);
+    const cover=document.createElement('div');cover.className='r-shield-cover';cover.innerHTML='🔒 已隱藏住戶資料<br><small style="font-weight:400">回到這個視窗即可繼續查看</small>';mod.appendChild(cover);
+    const paint=()=>{wm.style.backgroundImage=wmUrl(`${who}　${stamp()}　${d.community?.name||''}`);};paint();
+    const alive=()=>{if(document.body.contains(mod))return true;ac.abort();if(guard===ac)guard=null;return false;};
+    const shield=on=>{if(alive())mod.classList.toggle('r-shield',!!on);};
+    const wipe=msg=>{S.d={...S.d,records:[]};mod.classList.remove('r-shield','r-protect');mod.innerHTML=`<div class="eyebrow">🏠 住戶名冊</div><h1>無法查看住戶名冊</h1><div class="msg error">🔒 您已沒有查看住戶名冊的權限，畫面上的住戶資料已清除。</div><p class="muted">${esc(msg)}</p>`;};
+    const check=async()=>{if(!alive())return;try{const r=await fetch(`/api/staff/residents/access?category=${encodeURIComponent(S.category)}`,{credentials:'same-origin',cache:'no-store'});if(!r.ok){let j={};try{j=await r.json()}catch{}wipe(j.error||'您已沒有查看住戶名冊的權限');ac.abort();return false;}}catch{}return true;};
+    const warn=()=>{const n=document.createElement('div');n.textContent='🔒 住戶名冊不可截圖';n.style.cssText='position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:9999;background:#A44528;color:#fff;padding:10px 18px;border-radius:999px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.2)';document.body.appendChild(n);setTimeout(()=>n.remove(),2200);};
+    const inField=e=>/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'')||e.target?.isContentEditable;
+    for(const ev of ['contextmenu','copy','cut','dragstart','selectstart'])mod.addEventListener(ev,e=>{if(!inField(e))e.preventDefault();},sig);
+    document.addEventListener('keydown',e=>{if(!alive())return;const k=String(e.key||'').toLowerCase();const mod_=e.ctrlKey||e.metaKey;
+      if(k==='printscreen'||(e.metaKey&&e.shiftKey&&['3','4','5','s'].includes(k))||(e.ctrlKey&&e.shiftKey&&k==='s')){shield(true);try{navigator.clipboard?.writeText('');}catch{}warn();setTimeout(()=>shield(document.hasFocus()?false:true),1500);return;}
+      if(mod_&&['p','s'].includes(k)){e.preventDefault();warn();return;}
+      if(mod_&&['c','x','a'].includes(k)&&!inField(e)){e.preventDefault();}},{...sig,capture:true});
+    document.addEventListener('keyup',e=>{if(!alive())return;if(String(e.key||'').toLowerCase()==='printscreen'){try{navigator.clipboard?.writeText('');}catch{}shield(true);warn();setTimeout(()=>shield(false),1500);}},{...sig,capture:true});
+    window.addEventListener('blur',()=>shield(true),sig);
+    window.addEventListener('focus',async()=>{if(!alive())return;if(await check())shield(false);},sig);
+    document.addEventListener('visibilitychange',async()=>{if(!alive())return;if(document.hidden)shield(true);else if(await check()&&document.hasFocus())shield(false);},sig);
+    window.addEventListener('beforeprint',()=>shield(true),sig);window.addEventListener('afterprint',()=>shield(false),sig);
+    const timer=setInterval(()=>{if(!alive()){clearInterval(timer);return;}paint();if(!document.hidden)check();},60000);ac.signal.addEventListener('abort',()=>clearInterval(timer));
+    if(!document.hasFocus())shield(true);
+  }
+  function noticeView(el,d,label){
+    protectCss();
+    el.innerHTML=`<div class="panel resident-module r-notice"><div class="eyebrow">🏠 住戶名冊</div><h1>住戶個人資料保密聲明</h1><p>目前案場：<strong>${esc(d.community?.name||'')}</strong>。第一次查看${esc(label||labels[d.category]||'住戶名冊')}前，請先閱讀並同意以下事項：</p>
+      <ol>${(d.notice?.items||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ol>
+      <label><input type="checkbox" id="rAgree"> 我已閱讀並同意遵守以上事項</label><button type="button" id="rAgreeBtn" disabled>同意並查看</button></div>`;
+    const cb=document.getElementById('rAgree'),btn=document.getElementById('rAgreeBtn');
+    cb.addEventListener('change',()=>{btn.disabled=!cb.checked;});
+    btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('/api/staff/residents/ack',J('POST',{category:d.category,version:d.notice?.version}));await reload();}catch(err){alert(err.message);btn.disabled=false;}});
+  }
   // ---------- 頁面 ----------
   async function loadTemplate(){try{const d=await api('/api/staff/platform-resources?category='+encodeURIComponent('住戶名冊'));return (d.platformResources||[])[0]||null;}catch{return null;}}
   async function render(action,label){
@@ -167,6 +220,7 @@
     if(S.category!==category)S.filter={q:'',building:'',lease:''};
     S.action=action;S.label=label;S.category=category;
     const d=await api(`/api/staff/residents?category=${encodeURIComponent(category)}`);S.d=d;
+    if(d.ack_required){guard?.abort();return noticeView(el,d,label);}
     const sort=d.preference?.sort||'building',edit=!!d.viewer?.can_edit,canUpload=!!d.viewer?.can_upload,c=d.community||{};
     const buildings=[...new Set((d.records||[]).map(r=>String(r.building||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-Hant',{numeric:true}));
     const template=category==='residents-contact'?await loadTemplate():null;
@@ -176,12 +230,13 @@
     if(category==='residents-tenants'&&d.lease_summary){const L=d.lease_summary;banner=(L.expired?`<div class="r-alert bad">⚠ 有 ${L.expired} 筆租約已經到期，請確認是續約還是退租。</div>`:'')+(L.expiring?`<div class="r-alert warn">⏰ 有 ${L.expiring} 筆租約將在 30 天內到期。</div>`:'')+`<div class="r-chips">${[['','目前租約',(L.active||0)+(L.expiring||0)+(L.expired||0)+(L.upcoming||0)],['expiring','30 天內到期',L.expiring||0],['expired','已到期',L.expired||0],['upcoming','尚未起租',L.upcoming||0],['ended','已退租',L.ended||0]].map(([k,t,n])=>`<button type="button" class="${S.filter.lease===k?'':'secondary'}" data-lease="${k}">${t}（${n}）</button>`).join('')}</div>`;}
     el.innerHTML=`<div class="panel resident-module"><div class="eyebrow">🏠 住戶名冊</div><h1>${esc(label||labels[category])}</h1><p>目前案場：<strong>${esc(c.name||'尚未選擇案場')}</strong>。${intro}</p>
       <div class="resident-toolbar"><label>排序方式<select id="residentSort"><option value="building" ${sort==='building'?'selected':''}>棟別 → 戶號</option><option value="unit" ${sort==='unit'?'selected':''}>戶號 → 棟別</option><option value="floor" ${sort==='floor'?'selected':''}>樓層 → 棟別 → 戶號</option></select></label>
-      <div class="resident-actions">${edit?`<button type="button" id="rAdd">${category==='residents-tenants'?'🔑 登錄租約':'＋ 新增'}</button>`:''}${canUpload?`<button type="button" class="secondary" id="residentUploadBtn">📤 上傳 Excel 更新</button><input id="residentFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden>`:''}${template?`<a href="/api/staff/platform-resources/${Number(template.id)}/download" target="_blank" rel="noopener">📥 上傳範本</a>`:''}<button type="button" class="secondary" id="rHist">📜 異動紀錄</button></div></div>
+      <div class="resident-actions">${edit?`<button type="button" id="rAdd">${category==='residents-tenants'?'🔑 登錄租約':'＋ 新增'}</button>`:''}${canUpload?`<button type="button" class="secondary" id="residentUploadBtn">📤 上傳 Excel 更新</button><input id="residentFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden>`:''}${template?`<a href="/api/staff/platform-resources/${Number(template.id)}/download" target="_blank" rel="noopener">📥 上傳範本</a>`:''}${edit?`<a href="/api/staff/residents/export?category=${encodeURIComponent(category)}" id="rExport">📥 下載 Excel</a>`:''}<button type="button" class="secondary" id="rHist">📜 異動紀錄</button></div></div>
       ${banner}
       <div class="resident-searchbar"><label>🔎 搜尋<input id="residentSearch" type="search" value="${esc(S.filter.q)}" placeholder="姓名、戶號、電話、門牌、備註"></label><label>🏢 棟別<select id="residentBuilding"><option value="">全部棟別</option>${buildings.map(b=>`<option value="${esc(b)}" ${S.filter.building===b?'selected':''}>${esc(b)}</option>`).join('')}</select></label><button type="button" class="secondary" id="residentClear" style="padding:9px 13px;min-height:0">清除</button><span class="resident-search-count" id="residentSearchCount"></span></div>
-      <div class="resident-meta"><span>資料共 ${(d.records||[]).length} 筆</span>${d.last_import?`<span>最近整批更新：${esc(d.last_import.original_filename||'')}${d.last_import.imported_by_name?`（${esc(d.last_import.imported_by_name)}）`:''}</span>`:''}${!edit?'<span>僅供查詢，修改請洽經理或秘書</span>':''}</div>
+      <div class="resident-meta"><span class="r-protect-tag" title="畫面顯示您的姓名與時間；離開視窗會自動遮住；不提供列印與複製">🔒 防截圖模式</span><span>資料共 ${(d.records||[]).length} 筆</span>${d.last_import?`<span>最近整批更新：${esc(d.last_import.original_filename||'')}${d.last_import.imported_by_name?`（${esc(d.last_import.imported_by_name)}）`:''}</span>`:''}${!edit?'<span>僅供查詢，修改請洽經理或秘書</span>':''}</div>
       <div id="residentTable"></div></div>`;
     drawTable();
+    protect(el,d);
     const $=id=>document.getElementById(id);
     $('residentSort')?.addEventListener('change',async e=>{try{await api('/api/staff/residents/preference',J('PUT',{category,sort:e.target.value}));await reload();}catch(err){alert(err.message)}});
     $('residentSearch')?.addEventListener('input',e=>{S.filter.q=e.target.value;drawTable();});

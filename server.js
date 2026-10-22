@@ -1913,7 +1913,7 @@ function residentActiveCommunity(req){const cid=Number(req.session?.activeCommun
 app.put('/api/staff/residents/preference',requireStaffFiller,(req,res)=>{try{const category=residentCategory(req),u=getUser(req),c=residentActiveCommunity(req),sort=['building','unit','floor'].includes(String(req.body?.sort||''))?String(req.body.sort):'building';if(!c)return res.status(400).json({error:'請先選擇案場'});db.prepare(`INSERT INTO resident_sort_preferences(staff_id,tenant_id,community_id,category,sort_key,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(staff_id,community_id,category) DO UPDATE SET sort_key=excluded.sort_key,updated_at=excluded.updated_at`).run(u.id,tenantId(req),c.id,category,sort,now());res.json({success:true,sort});}catch(e){res.status(400).json({error:e.message||'排序設定失敗'});}});
 // 住戶名冊讀取／上傳／逐筆編輯／聯繫表自動更新：resident-routes.js
 function residentCanEdit(u){if(!u||u.role==='company_admin')return false;if(residentCanUpload(u))return true;const vals=[u.job_level,u.job_category,u.position,...getJobCategories(u)];return vals.some(v=>String(v||'').includes('秘書'));}
-require('./resident-routes')(app,{db,getUser,tenantId,now,requireStaffFiller,residentCategory,residentActiveCommunity,residentCanEdit,residentParseFile,residentUpload,RESIDENT_IMPORTS_DIR,path});
+require('./resident-routes')(app,{db,getUser,tenantId,now,requireStaffFiller,residentCategory,residentActiveCommunity,residentCanEdit,residentParseFile,residentUpload,RESIDENT_IMPORTS_DIR,path,XLSX});
 
 
 
