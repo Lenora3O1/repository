@@ -1,5 +1,5 @@
-// 公司應支：請款（內勤人員都可以提出）→ 依總後台設定的關卡審核 → 入帳 → 付款；廠商；進項明細（401）
-// 社區回饋金：依合約的現金回饋產生請款、服務回饋（例如特清）執行紀錄
+// 公費款項申請（內勤人員都可以提出）→ 主管依總後台設定的關卡審核（在首頁直接審）→ 會計總審核 → 入帳（公司應支）→ 付款；廠商；進項明細（401）
+// 社區回饋金：依合約的現金回饋產生應付、服務回饋（例如特清）執行紀錄
 // 薪資入帳：已發布的薪資自動產生傳票（依社區、簽約公司）；發薪付款
 // 會計分錄：
 //   核准：借 費用／成本（未稅，依社區）＋ 進項稅額（可扣抵發票）／ 貸 應付帳款（廠商）、應付費用（員工代墊）、應付社區回饋金
@@ -68,7 +68,7 @@ module.exports = function registerApRoutes(app, d) {
   }
   const needAcct = (req, res, next) => { if (!acct.canAcct(getUser(req))) return bad(res, '需要「會計」權限', 403); next(); };
 
-  const KIND = { vendor: '廠商請款', reimburse: '員工代墊', feedback: '社區回饋金', other: '其他' };
+  const KIND = { vendor: '廠商款項', reimburse: '員工代墊', feedback: '社區回饋金', other: '其他' };
   const LIAB = { vendor: 'ap', reimburse: 'accrued_expense', feedback: 'feedback_payable', other: 'accrued_expense' };
   const INV = { tri: '三聯式發票', e: '電子發票（有統編）', bi: '二聯式／收銀機發票（無統編）', receipt: '收據', none: '無憑證' };
   const STATUS = { draft: '草稿', pending: '審核中', approved: '待付款', rejected: '退回', paid: '已付款', void: '已作廢' };
@@ -88,13 +88,18 @@ module.exports = function registerApRoutes(app, d) {
     if (s.by === 'position') ids = P.filter(u => mi(u)?.position?.id === s.value).map(u => u.id);
     return ids.filter(id => id !== applicantId);
   }
+  // 主管關卡依總後台設定；會計固定是最後一關「會計總審核」（設定裡的會計關卡會移到最後）
+  const isAcctStep = s => s.by === 'perm' && ['company-accounting', 'company-finance'].includes(s.value);
   function buildSteps(tid, amount, applicantId) {
     const flow = acct.settingsFor(tid).ap_flow; const out = [];
-    for (const s of flow) { if (amount < s.min_amount) continue; const ids = resolveStep(tid, s, applicantId); out.push({ name: s.name, approvers: ids, min_amount: s.min_amount, status: ids.length ? 'waiting' : 'skipped', note: ids.length ? '' : '沒有可以審核的人，自動略過' }); }
-    if (!out.some(s => s.status === 'waiting')) out.push({ name: '公司管理員', approvers: adminIds(tid).filter(x => x !== applicantId), status: 'waiting', note: '沒有設定審核人，由公司管理員審核' });
+    for (const s of flow.filter(x => !isAcctStep(x))) { if (amount < s.min_amount) continue; const ids = resolveStep(tid, s, applicantId); out.push({ name: s.name, approvers: ids, min_amount: s.min_amount, status: ids.length ? 'waiting' : 'skipped', note: ids.length ? '' : '沒有可以審核的人，自動略過' }); }
+    const fs = flow.find(isAcctStep) || { value: 'company-accounting' };
+    const ids = resolveStep(tid, { by: 'perm', value: fs.value }, applicantId);
+    out.push({ name: '會計總審核', final: true, approvers: ids.length ? ids : adminIds(tid).filter(x => x !== applicantId), min_amount: 0, status: 'waiting', note: ids.length ? '' : '沒有會計人員，由公司管理員總審核' });
     return out;
   }
   const curStep = r => parse(r.steps_json, [])[r.step_index] || null;
+  const isFinal = r => r.status === 'pending' && !!curStep(r)?.final;
   // 只有這一關的審核人可以審（公司管理員也不能跳過會計直接核准）；沒有任何審核人時才由公司管理員審
 const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u.id) return false; const ap = curStep(r)?.approvers || []; return ap.includes(u.id) || (!ap.length && u.role === 'company_admin'); };
 
@@ -112,7 +117,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     const items = (Array.isArray(arr) ? arr : []).map(x => ({ account: str(x?.account, 12), desc: str(x?.desc, 100), amount: r0(x?.amount), community_id: Number(x?.community_id) || null })).filter(x => x.amount || x.desc);
     if (!items.length || !items.some(x => x.amount > 0)) throw err('請至少填一個有金額的項目');
     if (items.some(x => x.amount < 0)) throw err('金額不能是負數');
-    for (const x of items) { if (x.account) { const a = acct.accountBy(tid, x.account); if (!a || !a.is_active) throw err(`會計科目 ${x.account} 不存在或已停用`); if (!['cost', 'expense', 'asset', 'other_expense'].includes(a.type)) throw err(`請款項目不能用「${a.name}」科目`); } }
+    for (const x of items) { if (x.account) { const a = acct.accountBy(tid, x.account); if (!a || !a.is_active) throw err(`會計科目 ${x.account} 不存在或已停用`); if (!['cost', 'expense', 'asset', 'other_expense'].includes(a.type)) throw err(`公費款項不能用「${a.name}」科目`); } }
     return items.slice(0, 50);
   }
   function nextNo(tid, eid, date) { const r = db.prepare('SELECT MAX(seq) s FROM ap_requests WHERE tenant_id=? AND entity_id=? AND substr(request_date,1,7)=?').get(tid, eid, date.slice(0, 7)); const seq = (r?.s || 0) + 1; return { seq, no: `AP${date.slice(0, 7).replace('-', '')}${String(seq).padStart(4, '0')}` }; }
@@ -125,12 +130,12 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
       request_date: r.request_date, due_date: r.due_date, overdue: r.status === 'approved' && r.due_date && r.due_date < t, pay_method: r.pay_method, status: r.status, status_label: STATUS[r.status], steps, step_index: r.step_index,
       current_step: r.status === 'pending' ? steps[r.step_index]?.name || '' : '', waiting_for: r.status === 'pending' ? (steps[r.step_index]?.approvers || []).map(id => nameOf(r.tenant_id, id)).filter(Boolean) : [],
       note: r.note, reject_reason: r.reject_reason, void_reason: r.void_reason, voucher_id: r.voucher_id, payment_id: r.payment_id, created_at: r.created_at, approved_at: r.approved_at, paid_at: r.paid_at,
-      can: u ? { edit: ['draft', 'rejected'].includes(r.status) && (r.applicant_id === u.id || acct.canAcct(u)), submit: ['draft', 'rejected'].includes(r.status) && (r.applicant_id === u.id || acct.canAcct(u)), decide: canDecide(r, u), classify: r.status === 'pending' && acct.canAcct(u), void: ['draft', 'pending', 'rejected', 'approved'].includes(r.status) && (acct.canAcct(u) || (r.applicant_id === u.id && r.status !== 'approved')), pay: r.status === 'approved' && acct.canAcct(u) } : {},
+      can: u ? { edit: ['draft', 'rejected'].includes(r.status) && (r.applicant_id === u.id || acct.canAcct(u)), submit: ['draft', 'rejected'].includes(r.status) && (r.applicant_id === u.id || acct.canAcct(u)), decide: canDecide(r, u), classify: isFinal(r) && canDecide(r, u), void: ['draft', 'pending', 'rejected', 'approved'].includes(r.status) && (acct.canAcct(u) || (r.applicant_id === u.id && r.status !== 'approved')), pay: r.status === 'approved' && acct.canAcct(u) } : {},
       files: db.prepare('SELECT id,original,mime,size,uploaded_by,created_at FROM ap_files WHERE request_id=? ORDER BY id').all(r.id) };
     if (detail) o.logs = db.prepare('SELECT actor,action,note,created_at FROM ap_logs WHERE request_id=? ORDER BY id').all(r.id);
     return o;
   }
-  const getReq = req => { const r = db.prepare('SELECT * FROM ap_requests WHERE id=? AND tenant_id=?').get(Number(req.params.id), tenantId(req)); if (!r) throw err('找不到請款單', 404); return r; };
+  const getReq = req => { const r = db.prepare('SELECT * FROM ap_requests WHERE id=? AND tenant_id=?').get(Number(req.params.id), tenantId(req)); if (!r) throw err('找不到申請單', 404); return r; };
   const canView = (r, u) => r.applicant_id === u.id || acct.canAcct(u) || parse(r.steps_json, []).some(s => (s.approvers || []).includes(u.id));
 
   // ---------- 建立／修改 ----------
@@ -146,7 +151,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     const buyer = ['tri', 'e'].includes(invKind) ? (str(b.buyer_tax_id ?? cur.buyer_tax_id, 8) || e.tax_id || '') : '';
     const s = acct.settingsFor(tid);
     if (s.ap_require_tax_id && kind !== 'feedback') {
-      if (invKind === 'bi') throw err('公司規定請款發票必須有本公司統編（三聯式或電子發票打統編），二聯式發票不能請款；沒有發票請選「收據」並說明');
+      if (invKind === 'bi') throw err('公司規定公費款項的發票必須有本公司統編（三聯式或電子發票打統編），二聯式發票不能申請；沒有發票請選「收據」並說明');
       if (['tri', 'e'].includes(invKind) && e.tax_id && buyer !== e.tax_id) throw err(`發票上的買受人統編必須是本公司（${e.short_name || e.name}）的統編 ${e.tax_id}`);
     }
     const k = calc(items, invKind, b.tax ?? (cur.tax ?? undefined));
@@ -165,11 +170,11 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     const tid = r.tenant_id; const steps = buildSteps(tid, r.amount, r.applicant_id); const first = steps.findIndex(s => s.status === 'waiting');
     db.prepare("UPDATE ap_requests SET status='pending',steps_json=?,step_index=?,submitted_at=?,reject_reason='',updated_at=? WHERE id=?").run(JSON.stringify(steps), first, now(), now(), r.id);
     log(tid, r.id, u, 'submit', `${steps.filter(s => s.status === 'waiting').map(s => s.name).join(' → ')}`);
-    notify(tid, u, steps[first].approvers, '請款審核', `💸 ${nameOf(tid, r.applicant_id) || r.created_by} 提出請款 ${r.no}：${r.title}　$${Number(r.amount).toLocaleString()}（${r.payee}）\n請到「請款 → 待我審核」處理。`);
+    notify(tid, u, steps[first].approvers, steps[first].final ? '公費款項總審核' : '公費款項審核', `💸 ${nameOf(tid, r.applicant_id) || r.created_by} 提出公費款項申請 ${r.no}：${r.title}　$${Number(r.amount).toLocaleString()}（${r.payee}）\n${steps[first].final ? `請到「${acctOn(tid) ? '公司應支' : '公費款項申請'} → 總審核」處理。` : '請到首頁「公費款項待我審核」處理。'}`);
   }
   // 核准後入帳（應付）
   function postAccrual(r, u) {
-    if (!acctOn(r.tenant_id)) return null; // 沒有開通會計模組：請款照常審核，不產生傳票
+    if (!acctOn(r.tenant_id)) return null; // 沒有開通會計模組：公費款項申請照常審核，不產生傳票
     const items = parse(r.items_json, []); const k = calc(items, r.invoice_kind, r.tax); const lines = [];
     const defaultKey = r.kind === 'feedback' ? 'cost_feedback' : 'exp_other';
     for (const x of k.lines) lines.push({ code: x.account || undefined, key: x.account ? undefined : defaultKey, debit: x.net, memo: x.desc, community_id: x.community_id || r.community_id, party: r.payee, party_tax_id: r.payee_tax_id });
@@ -179,21 +184,23 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     return acct.post(r.tenant_id, { entity_id: r.entity_id, date, summary: `${KIND[r.kind]} ${r.no} ${r.title}`.slice(0, 200), source: 'ap', source_id: r.id, lines }, u).id;
   }
 
-  // ================= 路由：請款（所有內勤人員） =================
+  // ================= 路由：公費款項申請（所有內勤人員） =================
   const B = '/api/company/ap';
   app.get(`${B}/meta`, requireCompanyAdmin, wrap((req, res) => {
     const tid = tenantId(req); const u = getUser(req); const s = acct.settingsFor(tid);
     const accts = (() => { try { return db.prepare("SELECT code,name,type FROM acct_accounts WHERE tenant_id=? AND is_active=1 AND type IN ('cost','expense','asset','other_expense') ORDER BY code").all(tid); } catch { return []; } })();
     const comm = (() => { try { return getSiteAssignments(u).map(a => Number(a.community_id)); } catch { return []; } })();
-    const todo = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending'").all(tid).filter(r => canDecide(r, u)).length;
+    const pend = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending'").all(tid);
+    const todo = pend.filter(r => canDecide(r, u) && !isFinal(r)).length; const final = pend.filter(r => isFinal(r) && canDecide(r, u)).length;
     res.set('Cache-Control', 'no-store');
     res.json({ entities: acct.entities(tid), communities: db.prepare("SELECT id,name FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tid), my_communities: comm,
       vendors: db.prepare('SELECT id,name,tax_id,category,default_account,terms_days,bank_json FROM ap_vendors WHERE tenant_id=? AND is_active=1 ORDER BY name').all(tid).map(v => ({ ...v, bank: parse(v.bank_json, {}) })),
-      accounts: accts, kinds: KIND, invoice_kinds: INV, status: STATUS, methods: METHOD, require_tax_id: s.ap_require_tax_id, flow: s.ap_flow, is_acct: acct.canAcct(u), todo, today: todayTW() });
+      accounts: accts, kinds: KIND, invoice_kinds: INV, status: STATUS, methods: METHOD, require_tax_id: s.ap_require_tax_id, flow: s.ap_flow, is_acct: acct.canAcct(u), acct_on: acctOn(tid), todo, final, today: todayTW() });
   }));
   app.get(`${B}/requests`, requireCompanyAdmin, wrap((req, res) => {
     const tid = tenantId(req); const u = getUser(req); const q = req.query || {}; let rows;
-    if (q.scope === 'todo') rows = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending' ORDER BY id").all(tid).filter(r => canDecide(r, u));
+    if (q.scope === 'todo') rows = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending' ORDER BY id").all(tid).filter(r => canDecide(r, u) && !isFinal(r));
+    else if (q.scope === 'final') rows = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending' ORDER BY id").all(tid).filter(r => isFinal(r) && canDecide(r, u));
     else if (q.scope === 'all') {
       if (!acct.canAcct(u)) throw err('需要「會計」權限', 403);
       const args = [tid]; let w = 'tenant_id=?';
@@ -208,15 +215,15 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     const list = rows.map(r => out(r, u)); const sum = k => list.filter(r => r.status === k).reduce((s, r) => s + r.amount, 0);
     res.set('Cache-Control', 'no-store'); res.json({ rows: list, total: { pending: sum('pending'), approved: sum('approved'), paid: sum('paid') } });
   }));
-  app.get(`${B}/requests/:id`, requireCompanyAdmin, wrap((req, res) => { const u = getUser(req); const r = getReq(req); if (!canView(r, u)) throw err('您沒有權限查看這張請款單', 403); res.json({ request: out(r, u, { detail: true }) }); }));
+  app.get(`${B}/requests/:id`, requireCompanyAdmin, wrap((req, res) => { const u = getUser(req); const r = getReq(req); if (!canView(r, u)) throw err('您沒有權限查看這張申請單', 403); res.json({ request: out(r, u, { detail: true }) }); }));
   app.post(`${B}/requests`, requireCompanyAdmin, wrap((req, res) => {
     const tid = tenantId(req); const u = getUser(req); const b = req.body || {}; const x = readRequest(tid, b);
-    if (x.kind === 'feedback' && !acct.canAcct(u)) throw err('社區回饋金請款由會計建立', 403);
+    if (x.kind === 'feedback' && !acct.canAcct(u)) throw err('社區回饋金由會計建立', 403);
     let id; tx(() => { id = insert(tid, x, u); log(tid, id, u, 'create', `${x.title} $${x.amount}`); if (b.submit) submit(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(id), u); })();
     res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(id), u, { detail: true }) });
   }));
   app.put(`${B}/requests/:id`, requireCompanyAdmin, wrap((req, res) => {
-    const u = getUser(req); const r = getReq(req); if (!out(r, u).can.edit) throw err('這張請款單目前不能修改');
+    const u = getUser(req); const r = getReq(req); if (!out(r, u).can.edit) throw err('這張申請單目前不能修改');
     const x = readRequest(r.tenant_id, req.body || {}, r);
     db.prepare('UPDATE ap_requests SET entity_id=?,kind=?,vendor_id=?,payee=?,payee_tax_id=?,bank_json=?,community_id=?,title=?,items_json=?,amount=?,net=?,tax=?,invoice_kind=?,invoice_no=?,invoice_date=?,buyer_tax_id=?,deductible=?,request_date=?,due_date=?,pay_method=?,note=?,liability_key=?,updated_at=? WHERE id=?')
       .run(x.entity_id, x.kind, x.vendor_id, x.payee, x.payee_tax_id, JSON.stringify(x.bank), x.community_id, x.title, JSON.stringify(x.items), x.amount, x.net, x.tax, x.invoice_kind, x.invoice_no, x.invoice_date, x.buyer_tax_id, x.deductible, x.request_date, x.due_date, x.pay_method, x.note, x.liability_key, now(), r.id);
@@ -224,10 +231,10 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     if (req.body?.submit) submit(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u);
     res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u, { detail: true }) });
   }));
-  app.post(`${B}/requests/:id/submit`, requireCompanyAdmin, wrap((req, res) => { const u = getUser(req); const r = getReq(req); if (!out(r, u).can.submit) throw err('這張請款單目前不能送出'); submit(r, u); res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u, { detail: true }) }); }));
+  app.post(`${B}/requests/:id/submit`, requireCompanyAdmin, wrap((req, res) => { const u = getUser(req); const r = getReq(req); if (!out(r, u).can.submit) throw err('這張申請單目前不能送出'); submit(r, u); res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u, { detail: true }) }); }));
   // 會計審核時調整會計科目、社區、稅額（不改金額）
   app.post(`${B}/requests/:id/classify`, requireCompanyAdmin, needAcct, wrap((req, res) => {
-    const u = getUser(req); const r = getReq(req); if (r.status !== 'pending') throw err('只有審核中的請款單可以調整科目');
+    const u = getUser(req); const r = getReq(req); if (!isFinal(r) || !canDecide(r, u)) throw err('會計總審核時才能調整會計科目');
     const items = parse(r.items_json, []); const nx = Array.isArray(req.body?.items) ? req.body.items : [];
     if (nx.length !== items.length) throw err('項目數量不符');
     const merged = items.map((x, i) => ({ ...x, account: str(nx[i]?.account, 12) || x.account, community_id: nx[i]?.community_id !== undefined ? (Number(nx[i].community_id) || null) : x.community_id }));
@@ -238,21 +245,21 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u, { detail: true }) });
   }));
   app.post(`${B}/requests/:id/decide`, requireCompanyAdmin, wrap((req, res) => {
-    const u = getUser(req); const r = getReq(req); if (!canDecide(r, u)) throw err('這張請款單目前不是由您審核', 403);
+    const u = getUser(req); const r = getReq(req); if (!canDecide(r, u)) throw err('這張申請單目前不是由您審核', 403);
     const approve = !!req.body?.approve; const comment = str(req.body?.comment, 300); const tid = r.tenant_id; const steps = parse(r.steps_json, []); const s = steps[r.step_index];
     if (!approve) {
       if (!comment) throw err('退回請寫原因');
       s.status = 'rejected'; s.by = by(u); s.at = now(); s.comment = comment;
       db.prepare("UPDATE ap_requests SET status='rejected',steps_json=?,reject_reason=?,updated_at=? WHERE id=?").run(JSON.stringify(steps), comment, now(), r.id);
       log(tid, r.id, u, 'reject', `${s.name}：${comment}`);
-      notify(tid, u, [r.applicant_id], '請款退回', `❌ 您的請款 ${r.no}（${r.title} $${Number(r.amount).toLocaleString()}）被${s.name} ${u.name} 退回。\n原因：${comment}\n可以修改後再送出。`);
+      notify(tid, u, [r.applicant_id], '公費款項退回', `❌ 您的公費款項申請 ${r.no}（${r.title} $${Number(r.amount).toLocaleString()}）被${s.name} ${u.name} 退回。\n原因：${comment}\n可以修改後再送出。`);
       return res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u, { detail: true }) });
     }
     s.status = 'approved'; s.by = by(u); s.at = now(); s.comment = comment;
     let next = -1; for (let i = r.step_index + 1; i < steps.length; i++) if (steps[i].status === 'waiting') { next = i; break; }
     if (next >= 0) {
       db.prepare('UPDATE ap_requests SET steps_json=?,step_index=?,updated_at=? WHERE id=?').run(JSON.stringify(steps), next, now(), r.id); log(tid, r.id, u, 'approve', `${s.name}${comment ? `：${comment}` : ''}`);
-      notify(tid, u, steps[next].approvers, '請款審核', `💸 請款 ${r.no}：${r.title}　$${Number(r.amount).toLocaleString()}（${r.payee}），${s.name}已核准，請您審核。`);
+      notify(tid, u, steps[next].approvers, steps[next].final ? '公費款項總審核' : '公費款項審核', `💸 公費款項申請 ${r.no}：${r.title}　$${Number(r.amount).toLocaleString()}（${r.payee}），${s.name}已核准，${steps[next].final ? `請到「${acctOn(tid) ? '公司應支' : '公費款項申請'} → 總審核」處理。` : '請到首頁審核。'}`);
     } else {
       let vid; tx(() => {
         db.prepare("UPDATE ap_requests SET status='approved',steps_json=?,approved_at=?,updated_at=? WHERE id=?").run(JSON.stringify(steps), now(), now(), r.id);
@@ -260,14 +267,14 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
       })();
       log(tid, r.id, u, 'approve', `${s.name}（最後一關）${comment ? `：${comment}` : ''}；入帳傳票 #${vid}`);
       const accts = peopleOf(tid).filter(x => x.role !== 'company_admin' && acct.canAcct(x) && acct.perms(x).has('company-accounting')).map(x => x.id);
-      notify(tid, u, [r.applicant_id], '請款核准', `✅ 您的請款 ${r.no}（${r.title} $${Number(r.amount).toLocaleString()}）已核准，等待會計付款。`);
-      notify(tid, u, accts, '請款待付款', `💰 請款 ${r.no}（${r.payee} $${Number(r.amount).toLocaleString()}）已核准，付款期限 ${r.due_date}。`);
+      notify(tid, u, [r.applicant_id], '公費款項核准', `✅ 您的公費款項申請 ${r.no}（${r.title} $${Number(r.amount).toLocaleString()}）已通過會計總審核，等待付款。`);
+      notify(tid, u, accts, '公費款項待付款', `💰 公費款項申請 ${r.no}（${r.payee} $${Number(r.amount).toLocaleString()}）已核准，付款期限 ${r.due_date}。`);
     }
     res.json({ success: true, request: out(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(r.id), u, { detail: true }) });
   }));
   app.post(`${B}/requests/:id/void`, requireCompanyAdmin, wrap((req, res) => {
-    const u = getUser(req); const r = getReq(req); if (!out(r, u).can.void) throw err('這張請款單目前不能作廢'); const reason = str(req.body?.reason, 200); if (!reason) throw err('請寫作廢原因');
-    tx(() => { if (r.status === 'approved') acct.voidBySource(r.tenant_id, 'ap', r.id, u, `請款作廢：${reason}`); db.prepare("UPDATE ap_requests SET status='void',void_reason=?,updated_at=? WHERE id=?").run(reason, now(), r.id); })();
+    const u = getUser(req); const r = getReq(req); if (!out(r, u).can.void) throw err('這張申請單目前不能作廢'); const reason = str(req.body?.reason, 200); if (!reason) throw err('請寫作廢原因');
+    tx(() => { if (r.status === 'approved') acct.voidBySource(r.tenant_id, 'ap', r.id, u, `申請作廢：${reason}`); db.prepare("UPDATE ap_requests SET status='void',void_reason=?,updated_at=? WHERE id=?").run(reason, now(), r.id); })();
     log(r.tenant_id, r.id, u, 'void', reason); res.json({ success: true });
   }));
   // 附件（發票、收據照片）
@@ -278,7 +285,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
   }).array('files', 5);
   app.post(`${B}/requests/:id/files`, requireCompanyAdmin, (req, res) => {
     let r; const u = getUser(req); try { r = getReq(req); } catch (e) { return bad(res, e.message, e.status); }
-    if (!(r.applicant_id === u.id || acct.canAcct(u))) return bad(res, '您沒有權限上傳', 403); if (['paid', 'void'].includes(r.status)) return bad(res, '這張請款單已經結案');
+    if (!(r.applicant_id === u.id || acct.canAcct(u))) return bad(res, '您沒有權限上傳', 403); if (['paid', 'void'].includes(r.status)) return bad(res, '這張申請單已經結案');
     upload(req, res, e => {
       if (e) return bad(res, e.code === 'LIMIT_FILE_SIZE' ? '檔案太大了（最多 10MB）' : e.message || '上傳失敗');
       const files = req.files || (req.file ? [req.file] : []); if (!files.length) return bad(res, '請選擇檔案');
@@ -295,9 +302,9 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
 
   // ================= 會計：付款 =================
   app.post(`${B}/payments`, requireCompanyAdmin, needAcct, wrap((req, res) => {
-    const tid = tenantId(req); const u = getUser(req); const b = req.body || {}; const ids = [...new Set((b.request_ids || []).map(Number))]; if (!ids.length) throw err('請選擇要付款的請款單');
-    const rows = ids.map(id => db.prepare('SELECT * FROM ap_requests WHERE id=? AND tenant_id=?').get(id, tid)); if (rows.some(r => !r)) throw err('找不到請款單');
-    if (rows.some(r => r.status !== 'approved')) throw err('只有「待付款」的請款單可以付款'); const eid = rows[0].entity_id; if (rows.some(r => r.entity_id !== eid)) throw err('一次付款只能選同一家公司的請款單');
+    const tid = tenantId(req); const u = getUser(req); const b = req.body || {}; const ids = [...new Set((b.request_ids || []).map(Number))]; if (!ids.length) throw err('請選擇要付款的申請單');
+    const rows = ids.map(id => db.prepare('SELECT * FROM ap_requests WHERE id=? AND tenant_id=?').get(id, tid)); if (rows.some(r => !r)) throw err('找不到申請單');
+    if (rows.some(r => r.status !== 'approved')) throw err('只有「待付款」的申請單可以付款'); const eid = rows[0].entity_id; if (rows.some(r => r.entity_id !== eid)) throw err('一次付款只能選同一家公司的申請單');
     const date = isDate(b.date) ? b.date : todayTW(); const method = METHOD[b.method] ? b.method : 'transfer'; const fee = Math.max(0, r0(b.fee)); const total = rows.reduce((s, r) => s + r.amount, 0);
     let pid;
     tx(() => {
@@ -306,11 +313,11 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
       for (const r of rows) { db.prepare('INSERT INTO ap_payment_items (payment_id,request_id,amount) VALUES (?,?,?)').run(pid, r.id, r.amount); lines.push({ key: r.liability_key || 'ap', debit: r.amount, memo: `付 ${r.no} ${r.payee}`, community_id: r.community_id, party: r.payee, party_tax_id: r.payee_tax_id }); }
       if (fee) lines.push({ key: 'exp_other', debit: fee, memo: '匯款手續費' });
       lines.push({ key: cashKey, credit: total + fee, memo: `${METHOD[method]}付款${b.ref ? ` ${str(b.ref, 40)}` : ''}` });
-      const v = acct.post(tid, { entity_id: eid, date, summary: `付款 ${rows.length === 1 ? `${rows[0].payee} ${rows[0].no}` : `${rows.length} 筆請款`}`, source: 'ap_payment', source_id: pid, lines }, u);
+      const v = acct.post(tid, { entity_id: eid, date, summary: `付款 ${rows.length === 1 ? `${rows[0].payee} ${rows[0].no}` : `${rows.length} 筆申請`}`, source: 'ap_payment', source_id: pid, lines }, u);
       db.prepare('UPDATE ap_payments SET voucher_id=? WHERE id=?').run(v.id, pid);
       for (const r of rows) { db.prepare("UPDATE ap_requests SET status='paid',payment_id=?,paid_at=?,updated_at=? WHERE id=?").run(pid, date, now(), r.id); log(tid, r.id, u, 'pay', `${METHOD[method]} ${date}`); }
     })();
-    for (const r of rows) notify(tid, u, [r.applicant_id], '請款已付款', `💰 您的請款 ${r.no}（${r.title} $${Number(r.amount).toLocaleString()}）已在 ${date} ${METHOD[method]}付款。`);
+    for (const r of rows) notify(tid, u, [r.applicant_id], '公費款項已付款', `💰 您的公費款項申請 ${r.no}（${r.title} $${Number(r.amount).toLocaleString()}）已在 ${date} ${METHOD[method]}付款。`);
     res.json({ success: true, id: pid, total });
   }));
   app.get(`${B}/payments`, requireCompanyAdmin, needAcct, wrap((req, res) => {
@@ -356,7 +363,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     const missing = rows.filter(r => !r.invoice_no || !r.seller_tax_id).map(r => r.no);
     const total = rows.reduce((s, r) => ({ net: s.net + r.net, tax: s.tax + r.tax }), { net: 0, tax: 0 });
     if (q.format === 'csv') {
-      const csv = [['格式代號', '發票日期', '發票號碼', '賣方統編', '賣方', '金額', '稅額', '請款單號', '摘要'], ...rows.map(r => [r.format, r.invoice_date, r.invoice_no, r.seller_tax_id, r.seller, r.net, r.tax, r.no, r.title])].map(x => x.map(v => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')).join('\r\n');
+      const csv = [['格式代號', '發票日期', '發票號碼', '賣方統編', '賣方', '金額', '稅額', '申請單號', '摘要'], ...rows.map(r => [r.format, r.invoice_date, r.invoice_no, r.seller_tax_id, r.seller, r.net, r.tax, r.no, r.title])].map(x => x.map(v => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')).join('\r\n');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`進項明細_${e.short_name || e.name}_${from}_${to}`)}.csv`);
       return res.send(Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(csv + '\r\n', 'utf8')]));
     }
@@ -478,9 +485,12 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
   }));
 
   function dashboard(tid, u) {
-    const todo = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending'").all(tid).filter(r => canDecide(r, u)).length;
+    const pend = db.prepare("SELECT * FROM ap_requests WHERE tenant_id=? AND status='pending' ORDER BY submitted_at, id").all(tid);
+    const mine = pend.filter(r => canDecide(r, u) && !isFinal(r)); const fin = pend.filter(r => isFinal(r) && canDecide(r, u));
+    const days = r => Math.max(0, Math.round((Date.parse(`${todayTW()}T00:00:00Z`) - Date.parse(`${String(r.submitted_at || r.created_at).slice(0, 10)}T00:00:00Z`)) / 864e5));
     const t = todayTW(); const ap = db.prepare("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s, COALESCE(SUM(CASE WHEN due_date<? THEN 1 ELSE 0 END),0) o FROM ap_requests WHERE tenant_id=? AND status='approved'").get(t, tid);
-    return { todo, unpaid: ap.c, unpaid_amount: ap.s, overdue: ap.o };
+    return { todo: mine.length, todo_list: mine.slice(0, 8).map(r => ({ id: r.id, no: r.no, title: r.title, applicant: nameOf(tid, r.applicant_id) || r.created_by, amount: r.amount, step: curStep(r)?.name || '', days: days(r) })),
+      final: fin.length, final_amount: fin.reduce((x, r) => x + r.amount, 0), acct_on: acctOn(tid), unpaid: ap.c, unpaid_amount: ap.s, overdue: ap.o };
   }
   return { dashboard };
 };

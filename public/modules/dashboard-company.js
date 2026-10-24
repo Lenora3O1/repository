@@ -29,8 +29,10 @@
 `;
     document.head.appendChild(s);
   }
+  let refresh=null;
   function go(a){
     if(!a)return;
+    if(a.special==='ap-review'){if(!window.PayablesModule?.review){alert('模組尚未載入，請重新整理頁面');return;}window.PayablesModule.review(a.id,()=>refresh?.());return;}
     if(a.special==='messages'){document.getElementById('messageCenterButton')?.click();return;}
     if(a.special==='payslip'){document.getElementById('myPayslipBtn')?.click();return;}
     document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:a.action,label:a.label,tab:a.tab}}));
@@ -48,6 +50,7 @@
   async function render(el,{tenantName=''}={}){
     injectStyle();
     if(!el)return;
+    refresh=()=>render(el,{tenantName});
     el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
     let d;try{d=await api('/api/company/dashboard');}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;return;}
     const h=d.today.hour;const hello=h<11?'早安':h<14?'午安':h<18?'午安':'晚安';

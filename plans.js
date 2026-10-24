@@ -12,7 +12,7 @@ const CATALOG = {
   interview: { name: '面試人員線上履歷＋職務考核', desc: '面試電腦填寫履歷與考核題目、面試管理、錄取後帶入人事資料', unplanned: false, order: 3 },
   equip_apply: { name: '現場設備雲端借用申請', desc: '現場人員與內勤線上申請借用公司設備、審核流程與借用紀錄', unplanned: true, order: 4 },
 };
-const BASE_FEATURES = ['現場人員工作台全部功能', '人員／組織／社區管理', '交接、工作日誌', '班表、請假、出勤巡邏', '薪資與勞健保', '請款', '公司資源／SOP', '住戶名冊', '社區合約', '總務設備清冊、社區進駐設備'];
+const BASE_FEATURES = ['現場人員工作台全部功能', '人員／組織／社區管理', '交接、工作日誌', '班表、請假、出勤巡邏', '薪資與勞健保', '公費款項申請', '公司資源／SOP', '住戶名冊', '社區合約', '總務設備清冊、社區進駐設備'];
 const BASIS = { staff: { name: '員工規模', unit: '人' }, community: { name: '社區案場規模', unit: '個社區' } };
 const DEFAULT_PRICING = {
   grace_days: 7, warn_ratio: 90, warn_days: 30,
