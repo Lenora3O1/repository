@@ -28,7 +28,7 @@
     const by=s=>`<select data-s="by">${[['perm','有某項權限的人'],['kind','職位類型'],['position','指定職位']].map(([v,l])=>`<option value="${v}" ${s.by===v?'selected':''}>${l}</option>`).join('')}</select>`;
     const val=s=>s.by==='perm'?`<select data-s="value">${Object.entries(PERM).map(([v,l])=>`<option value="${v}" ${s.value===v?'selected':''}>${l}</option>`).join('')}</select>`:s.by==='kind'?`<select data-s="value">${Object.entries(KIND).map(([v,l])=>`<option value="${v}" ${s.value===v?'selected':''}>${l}</option>`).join('')}</select>`:`<select data-s="value">${d.positions.map(p=>`<option value="${esc(p.id)}" ${s.value===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`;
     el.innerHTML=`<div class="panel"><div class="eyebrow">💰 平台設定</div><h1>會計設定（各公司客製化）</h1>
-      <p class="hint">依各公司配合的會計師事務所軟體開通傳票匯出格式；設定發票開立方式與加值中心串接；設定公司應支（請款）的審核關卡與金額上限。</p>
+      <p class="hint">依各公司配合的會計師事務所軟體開通傳票匯出格式；設定發票開立方式與加值中心串接；設定公費款項申請的主管審核關卡與金額門檻。</p>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>公司</b><select id="caT" style="width:auto;margin:0">${L.tenants.map(t=>`<option value="${t.id}" ${t.id===S.tid?'selected':''}>${esc(t.name)}（${esc(t.code)}）${t.customized?' ✎':''}</option>`).join('')}</select><small class="muted">${d.customized?`已客製化，最後更新 ${esc(String(d.updated_at).slice(0,16).replace('T',' '))}`:'目前使用平台預設'}｜簽約公司：${d.entities.map(e=>esc(e.short_name||e.name)+(e.tax_id?`（${e.tax_id}）`:'')).join('、')||'尚未建立'}</small></div>
       <div class="aca-sec">傳票匯出格式</div>
       <p class="hint" style="margin:0 0 8px">勾選這家公司可以使用的格式。各軟體預設欄位是常見的傳票匯入欄位，請依事務所提供的匯入規格按「欄位設定」調整後再開通。${L.big5?'':'<b>（伺服器目前沒有 Big5 轉碼套件，Big5 格式會改用 UTF-8 匯出）</b>'}</p>
@@ -42,10 +42,10 @@
         <label class="aca-chk" style="display:flex;align-self:end"><input type="checkbox" id="ivTest" ${inv.test_mode?'checked':''}> 測試環境（正式上線前請先用測試帳號驗證）</label></div>
         <div class="aca-note">金鑰只會存在伺服器，畫面上只顯示末 4 碼；不修改就保持原值。實際開立電子發票會在「公司應收」上線時啟用。</div></div>
       <div class="aca-sec">公司應支：審核關卡</div>
-      <p class="hint" style="margin:0 0 8px">內勤人員都可以提出請款，依序經過下列關卡。「金額門檻」填 0 表示每張都要審；填金額表示請款金額達到這個數字才需要這一關（例如超過 5 萬才要老闆核准）。</p>
+      <p class="hint" style="margin:0 0 8px">內勤人員都可以提出公費款項申請，依序經過下列主管關卡（主管在首頁直接審核），最後一關固定是「會計總審核」，通過後才進入公司應支。「金額門檻」填 0 表示每張都要審；填金額表示申請金額達到這個數字才需要這一關（例如超過 5 萬才要老闆核准）。</p>
       <table class="aca-t"><thead><tr><th>#</th><th>關卡名稱</th><th>審核對象</th><th>對象</th><th>金額門檻（元）</th><th></th></tr></thead><tbody>${c.ap_flow.map((s,i)=>`<tr data-i="${i}"><td>${i+1}</td><td><input data-s="name" value="${esc(s.name)}"></td><td>${by(s)}</td><td>${val(s)}</td><td><input data-s="min_amount" type="number" min="0" value="${s.min_amount}"></td><td style="white-space:nowrap"><button type="button" class="secondary" data-up="${i}">↑</button> <button type="button" class="secondary" data-rm="${i}">✕</button></td></tr>`).join('')}</tbody></table>
       <div style="margin:8px 0"><button type="button" class="secondary" id="flAdd" style="padding:5px 12px;min-height:0">＋ 新增關卡</button></div>
-      <label class="aca-chk" style="display:flex;font-weight:700;font-size:.88rem"><input type="checkbox" id="apTax" ${c.ap_require_tax_id?'checked':''}> 請款的發票必須有本公司統編（三聯式）</label>
+      <label class="aca-chk" style="display:flex;font-weight:700;font-size:.88rem"><input type="checkbox" id="apTax" ${c.ap_require_tax_id?'checked':''}> 公費款項的發票必須有本公司統編（三聯式）</label>
       <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap"><button type="button" id="caSave">💾 儲存這家公司設定</button>${d.customized?'<button type="button" class="secondary" id="caReset">↩ 恢復平台預設</button>':''}<span id="caMsg" class="muted" style="align-self:center"></span></div></div>`;
     const sync=()=>{
       c.formats.enabled=[...el.querySelectorAll('[data-en]:checked')].map(x=>x.dataset.en);const df=el.querySelector('[name=defFmt]:checked');if(df)c.formats.default=df.value;

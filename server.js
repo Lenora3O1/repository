@@ -600,8 +600,7 @@ function menuPermissionKey(item,scope='staff'){
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
   if(scope==='company' && (String(item?.action||'')==='contracts'||/社區合約/.test(String(item?.label||'')))) return 'company-general-affairs';
-  if(scope==='company' && String(item?.action||'')==='acct-ap') return null; // 公司應支：內勤人員都可以請款
-  if(scope==='company' && (/^acct-(ledger|ar|feedback)$/.test(String(item?.action||''))||/傳票|帳冊|公司應收/.test(String(item?.label||'')))) return 'company-accounting';
+  if(scope==='company' && (/^acct-(ledger|ar|ap|feedback)$/.test(String(item?.action||''))||/傳票|帳冊|公司應收/.test(String(item?.label||'')))) return 'company-accounting';
   if(scope==='company' && String(item?.action||'')==='equip-apply') return null;
   if(scope==='company' && (/^equip-(inventory|requests|sites)$/.test(String(item?.action||''))||/設備清冊|設備申請紀錄|進駐設備/.test(String(item?.label||'')))) return 'company-general-affairs';
   const rules=[

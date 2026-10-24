@@ -60,7 +60,6 @@ module.exports = function registerAccountingRoutes(app, d) {
 
   // ---------- 總後台設定 ----------
   const DEFAULT_FLOW = [
-    { name: '會計', by: 'perm', value: 'company-accounting', min_amount: 0 },
     { name: '總經理', by: 'kind', value: 'gm', min_amount: 0 },
     { name: '老闆', by: 'kind', value: 'owner', min_amount: 50000 },
   ];

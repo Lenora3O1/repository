@@ -144,10 +144,11 @@ module.exports = function registerDashboardRoutes(app, d) {
     // ---------- 面試 ----------
     if (interview) { const iv = safe(() => interview.dashboard(tid, u), null); if (iv && iv.open) cards.push({ id: 'interviews', size: 'sm', icon: '📝', title: '面試待審核', value: iv.open, sub: '位面試人員', tone: 'alert', action: { action: 'interviews', label: '面試管理' } }); }
 
-    // ---------- 請款審核／待付款 ----------
+    // ---------- 公費款項：主管直接在首頁審核；會計總審核；待付款 ----------
     if (ap) {
       const p = safe(() => ap.dashboard(tid, u), null);
-      if (p && p.todo) cards.push({ id: 'ap_todo', size: 'sm', icon: '💸', title: '請款待我審核', value: p.todo, sub: '張請款單', tone: 'alert', action: { action: 'ap-my', label: '請款', tab: 'todo' } });
+      if (p && p.todo) cards.push({ id: 'ap_todo', size: 'md', icon: '💸', title: `公費款項待我審核（${p.todo}）`, tone: 'alert', items: [...p.todo_list.map(x => ({ text: `${x.applicant}｜${x.title}${x.days ? `（等 ${x.days} 天）` : ''}`, value: `$${money(x.amount)} 審核 ›`, tone: x.days >= 3 ? 'alert' : '', action: { special: 'ap-review', id: x.id } })), ...(p.todo > p.todo_list.length ? [{ text: `還有 ${p.todo - p.todo_list.length} 張`, value: '' }] : [])] });
+      if (p && p.final) cards.push({ id: 'ap_final', size: 'sm', icon: '📥', title: '公費款項總審核', value: p.final, sub: `張待總審核｜$${money(p.final_amount)}`, tone: 'alert', action: p.acct_on ? { action: 'acct-ap', label: '公司應支', tab: 'final' } : { action: 'ap-my', label: '公費款項申請', tab: 'final' } });
       if (p && acct && modOn('accounting') && safe(() => acct.canAcct(u), false)) cards.push({ id: 'ap_unpaid', size: 'sm', icon: '💰', title: '公司應支', value: `$${money(p.unpaid_amount)}`, sub: `待付款 ${p.unpaid} 張${p.overdue ? `・逾期 ${p.overdue} 張` : ''}`, tone: p.overdue ? 'alert' : '', action: { action: 'acct-ap', label: '公司應支' } });
     }
 
@@ -199,6 +200,8 @@ module.exports = function registerDashboardRoutes(app, d) {
       }
     }
 
+    // 待我審核的公費款項放在「我的待辦」後面，不要沉在最下面
+    { const pri = cards.filter(c => ['ap_todo', 'ap_final'].includes(c.id)); if (pri.length) { for (const c of pri) cards.splice(cards.indexOf(c), 1); let at = 0; cards.forEach((c, i) => { if (String(c.id).startsWith('me_')) at = i + 1; }); cards.splice(at, 0, ...pri); } }
     // ---------- 方案提醒（公司高層）：用量接近上限、即將到期、寬限期、試用即將結束 ----------
     if (plans) { const pl = safe(() => plans.dashboard(tid, u), null); if (pl) cards.unshift({ id: 'plan', size: 'md', icon: '💳', title: '方案提醒', tone: pl.alert ? 'alert' : '', items: pl.warnings.map(w => ({ text: w.text, value: '', tone: w.tone })), action: { action: 'plan-billing', label: '方案與費用' } }); }
 
