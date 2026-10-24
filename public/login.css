@@ -39,7 +39,9 @@ body:not(.is-authenticated) .topbar{visibility:hidden}
 #loginView .auth-points{list-style:none;margin:0;padding:0;display:grid;gap:14px}
 #loginView .auth-points li{display:flex;gap:12px;align-items:flex-start;color:rgba(252,250,241,.88);font-size:.95rem;line-height:1.6}
 #loginView .auth-points li::before{content:'';flex:0 0 8px;height:8px;margin-top:.55em;border-radius:50%;background:#E9A58C;box-shadow:0 0 0 4px rgba(233,165,140,.15)}
-#loginView .auth-foot{position:relative;font-size:.78rem;color:rgba(252,250,241,.45);letter-spacing:.04em}
+#loginView .auth-foot{position:relative;font-size:.78rem;color:rgba(252,250,241,.5);letter-spacing:.04em;line-height:1.7}
+#loginView .auth-foot span{display:block;color:rgba(252,250,241,.32)}
+#loginView .auth-legal{display:none;margin:28px 0 0;font-size:.76rem;color:#A8948D;text-align:center;letter-spacing:.03em}
 
 /* ---------- 右側登入表單 ---------- */
 #loginView .auth-main{display:flex;align-items:center;justify-content:center;padding:48px 32px}
@@ -88,6 +90,7 @@ body:not(.is-authenticated) .topbar{visibility:hidden}
   #loginView .auth-hero h1{font-size:1.7rem;margin-bottom:8px}
   #loginView .auth-hero p{margin:0;font-size:.92rem}
   #loginView .auth-points,#loginView .auth-foot{display:none}
+  #loginView .auth-legal{display:block}
   #loginView .auth-main{align-items:flex-start;padding:30px 18px 48px}
 }
 @media (max-width:480px){
