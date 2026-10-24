@@ -177,3 +177,9 @@ body.admin-console td .secondary,body.admin-console td .danger{margin:2px 4px 2p
 .ins-rates{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px}
 .ins-rates div{display:flex;justify-content:space-between;border-bottom:1px dashed #ECE8E6;padding:3px 0;font-size:.86rem}
 @media(max-width:800px){.ins-grid{grid-template-columns:1fr}}
+
+/* 企業客製化群組 */
+#navCustomChildren{margin:2px 0 6px;border-left:2px solid #E2D3CC;margin-left:22px}
+#navCustomChildren .menu-child{padding-left:12px!important}
+#navCustomGroup .nav-label::after{content:"  ▸";opacity:.55}
+#navCustomGroup[aria-expanded="true"] .nav-label::after{content:"  ▾"}
