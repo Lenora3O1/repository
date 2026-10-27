@@ -2409,3 +2409,25 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .patrol-manager-panel{margin-top:16px}.patrol-manager-panel .editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.patrol-manager-panel .editor-grid input{width:100%;min-height:42px}.patrol-manager-panel .table-wrap{margin-top:14px}
 @media(max-width:1000px){.patrol-staff-grid{grid-template-columns:1fr 1fr}.patrol-staff-head{flex-direction:column}.patrol-manager-panel .editor-grid{grid-template-columns:1fr}}
 @media(max-width:620px){.patrol-staff-grid{grid-template-columns:1fr}}
+
+/* ===== 首頁：職稱另起一行、社區切換按鈕（v5.42） ===== */
+.home-head-v2{align-items:flex-start!important}
+.home-head-v2 h1{margin-bottom:2px!important}
+.home-head-v2 .home-role{display:block;font-size:.95rem;font-weight:500;color:#7A5F58;letter-spacing:.03em;margin-top:2px}
+.home-site-switch{position:relative;margin-left:auto;align-self:flex-start;flex:none}
+.home-site-switch .home-community-badge{display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:700;cursor:default;margin:0;min-height:0;box-shadow:none}
+.home-site-switch .home-community-badge:disabled{opacity:1;color:#4E322D}
+.home-site-switch .home-community-badge.can-switch{cursor:pointer}
+.home-site-switch .home-community-badge.can-switch:hover{border-color:#A44528;background:#FBF4EF}
+.hss-caret{font-size:.8em;color:#A44528;margin-left:2px}
+.hss-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:200px;background:#fff;border:1px solid #E4DCD9;border-radius:12px;box-shadow:0 12px 30px rgba(60,30,20,.16);padding:6px}
+.hss-title{font-size:.78rem;color:#7A5F58;padding:6px 10px 4px}
+.hss-menu button{display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:10px;margin:0;min-height:0;font:inherit;font-weight:700;color:#4E322D;box-shadow:none;cursor:pointer}
+.hss-menu button:hover,.hss-menu button:focus-visible{background:#F5F2EE}
+@media(max-width:600px){.home-head-v2{flex-wrap:wrap;justify-content:flex-start!important;text-align:left!important}.home-head-v2>div:first-child{width:100%}.home-site-switch{margin-left:0;width:100%;margin-top:12px}.home-site-switch .home-community-badge{display:inline-flex!important;width:100%;justify-content:center}.hss-menu{left:0;right:0}}
+
+/* 工作頁面標題旁的釘選星號 */
+.page-pin-btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:1.6em;height:1.6em;margin-left:.35em;border-radius:8px;font-size:.85em;line-height:1;color:#B9A49D;vertical-align:middle;transition:color .15s,background .15s}
+.page-pin-btn:hover{background:#F5F2EE;color:#C98A1B}
+.page-pin-btn[data-pinned="1"]{color:#E0A526}
+.page-pin-btn:focus-visible{outline:2px solid #A44528;outline-offset:2px}
