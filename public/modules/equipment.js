@@ -117,7 +117,7 @@
     if(!SS.cid||!m.communities.some(c=>c.id===SS.cid))SS.cid=m.communities[0]?.id||null;
     const tabs=m.addon_apply===false?[]:[['apply','🧰 申請借用'],['mine','📋 我的申請']];if(m.is_site_approver&&m.addon_apply!==false)tabs.push(['approve','✅ 待我審核']);tabs.push(['site','🏢 本社區設備']);
     if(!tabs.some(t=>t[0]===SS.tab))SS.tab=tabs[0][0];
-    el.innerHTML=`<div class="${side==='company'?'':'panel'}">${side==='company'?'':`<div class="eyebrow">🧰 設備</div><h1>${esc(label)}</h1>`}<div class="eq-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${SS.tab===k?'':'secondary'}">${l}${k==='approve'&&m.waiting?`<span class="badge">${m.waiting}</span>`:''}</button>`).join('')}</div><div id="eqBody"><div class="profile-loading">讀取中…</div></div></div>`;
+    el.innerHTML=`<div class="${side==='company'?'':'panel'}">${side==='company'?'':`<div class="eyebrow">🧰 設備</div><h1>${esc(label)}</h1>`}<div class="eq-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${SS.tab===k?'':'secondary'}">${l}${k==='approve'&&m.waiting?`<span class="badge">${m.waiting}</span>`:''}</button>`).join('')}</div><div id="eqBody"><div class="profile-loading">正在讀取資料中，請稍候…</div></div></div>`;
     const again=()=>renderStaff(el,{base,label,side});
     el.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{SS.tab=b.dataset.tab;again().catch(e=>alert(e.message));}));
     const body=el.querySelector('#eqBody');
@@ -209,7 +209,7 @@
     const subs=[['inventory','📋 設備清冊'],['apply','🧰 設備申請'],['requests','🗂 設備申請紀錄'],['sites','🏢 社區管理（進駐設備）']].filter(x=>m.addon_apply!==false||!['apply','requests'].includes(x[0]));if(!subs.some(x=>x[0]===CS.view))CS.view='inventory';
     const todo=m.counts.pending_ga+m.counts.approved+m.counts.returning;
     el.innerHTML=`<div class="eyebrow">🧰 總務管理</div><h1>${esc(label||({inventory:'設備清冊',requests:'設備申請紀錄',sites:'社區管理（進駐設備）',apply:'設備申請'})[CS.view])}</h1>
-      <div class="eq-sub">${subs.map(([k,l])=>`<button type="button" data-view="${k}" class="${CS.view===k?'':'secondary'}">${l}${k==='requests'&&todo?`<span class="badge" style="display:inline-block;background:${CS.view===k?'#fff':'#A44528'};color:${CS.view===k?'#A44528':'#fff'};border-radius:999px;font-size:.72rem;padding:0 7px;margin-left:5px">${todo}</span>`:''}</button>`).join('')}</div><div id="eqC"><div class="profile-loading">讀取中…</div></div>`;
+      <div class="eq-sub">${subs.map(([k,l])=>`<button type="button" data-view="${k}" class="${CS.view===k?'':'secondary'}">${l}${k==='requests'&&todo?`<span class="badge" style="display:inline-block;background:${CS.view===k?'#fff':'#A44528'};color:${CS.view===k?'#A44528':'#fff'};border-radius:999px;font-size:.72rem;padding:0 7px;margin-left:5px">${todo}</span>`:''}</button>`).join('')}</div><div id="eqC"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>`;
     el.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{CS.view=b.dataset.view;el.querySelector('h1').textContent=({inventory:'設備清冊',requests:'設備申請紀錄',sites:'社區管理（進駐設備）',apply:'設備申請'})[CS.view];renderCompany(el,CS.view,el.querySelector('h1').textContent).catch(e=>alert(e.message));}));
     const box=el.querySelector('#eqC');const again=()=>renderCompany(el,CS.view,el.querySelector('h1').textContent);
     if(CS.view==='inventory')return inventory(box,m,again);

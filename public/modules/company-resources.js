@@ -3,7 +3,7 @@
   function api(url,opt={}){return fetch(url,{credentials:'same-origin',...opt}).then(async r=>{let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'讀取公司公版失敗');return d;});}
   async function render(mode,label){
     const el=document.getElementById('staffHome'); if(!el)return;
-    el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">公司資源</div><h1>📦 ${esc(label||'公司資源')}</h1><p>正在讀取可提供給您的公版文件…</p></div>`;
+    el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">公司資源</div><h1>📦 ${esc(label||'公司資源')}</h1><p>正在讀取資料中，請稍候…</p></div>`;
     try{
       const d=await api('/api/staff/company-resources'); const rows=d.resources||[];
       const filtered=mode==='government'?rows.filter(x=>x.resource_type==='government'):mode==='company'?rows.filter(x=>x.resource_type==='company'):rows;

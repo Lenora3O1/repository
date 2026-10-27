@@ -76,7 +76,7 @@
     const emb=!!opts.embedded;S.emb=emb;
     el.innerHTML=`<div class="${emb?'':'panel'}">${emb?'':`<div class="eyebrow">📝 請假</div><h1>${esc(S.label)}</h1>`}
       <div class="lv-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${S.tab===k?'':'secondary'}">${l}${k==='approve'&&m.pending_for_me?`<span class="badge">${m.pending_for_me}</span>`:''}</button>`).join('')}</div>
-      <div id="lvBody"><div class="profile-loading">讀取中…</div></div></div>`;
+      <div id="lvBody"><div class="profile-loading">正在讀取資料中，請稍候…</div></div></div>`;
     el.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{S.tab=b.dataset.tab;render(el,{embedded:emb}).catch(e=>alert(e.message));}));
     const body=el.querySelector('#lvBody');
     const fn={apply:renderApply,mine:renderMine,approve:renderApprove,all:renderAll,balance:renderBalance,setup:renderSetup,cover:b=>window.CoverModule.renderCover(b,{base:S.base,refresh}),swap:b=>window.CoverModule.renderSwap(b,{base:S.base,refresh})}[S.tab];

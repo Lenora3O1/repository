@@ -30,3 +30,7 @@ a{color:var(--t-rust)}
 .msg.success{background:var(--t-ok-bg);color:var(--t-ok);border-color:#C9D6B5}
 input:focus,select:focus,textarea:focus{border-color:var(--t-clay)!important;outline-color:var(--t-clay)}
 .shell,body.is-authenticated .shell,#mainView{background:transparent!important}
+
+/* 同時服務多個社區：切換社區 */
+.site-switch{margin:4px 0 0;background:rgba(255,255,255,.14)!important;color:#fff!important;border:1px solid rgba(255,255,255,.35)!important;border-radius:999px!important;padding:3px 12px!important;font-size:.8rem!important;min-height:0!important;line-height:1.5}
+.site-switch:hover{background:rgba(255,255,255,.26)!important}

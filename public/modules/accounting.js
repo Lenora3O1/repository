@@ -41,7 +41,7 @@
     el.innerHTML=`<div class="eyebrow">💰 會計</div><h1>${esc(label||'傳票與帳冊')}</h1>
       <div class="ac-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${S.tab===k?'':'secondary'}">${l}</button>`).join('')}</div>
       ${M.entities.length>1&&!['accounts','entities'].includes(S.tab)?`<div class="ac-bar"><b>公司別</b><select id="acE">${M.entities.map(e=>`<option value="${e.id}" ${e.id===S.eid?'selected':''}>${esc(e.short_name||e.name)}${e.tax_id?`（${e.tax_id}）`:''}</option>`).join('')}</select></div>`:''}
-      <div id="acBody"><div class="profile-loading">讀取中…</div></div>`;
+      <div id="acBody"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>`;
     el.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{S.tab=b.dataset.tab;render(el,label).catch(e=>alert(e.message));}));
     el.querySelector('#acE')?.addEventListener('change',e=>{S.eid=Number(e.target.value);render(el,label);});
     const box=el.querySelector('#acBody');const again=()=>render(el,label);

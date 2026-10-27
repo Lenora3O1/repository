@@ -23,7 +23,7 @@
   }
   function modal(title,body){const box=document.createElement('div');box.className='modal-backdrop';box.innerHTML=`<div class="modal" role="dialog" aria-modal="true" style="max-width:640px;width:min(640px,96vw);max-height:90vh;overflow:auto"><button type="button" class="modal-close">×</button><h2>${title}</h2>${body}</div>`;document.body.appendChild(box);const close=()=>box.remove();box.querySelector('.modal-close').onclick=close;box.addEventListener('click',e=>{if(e.target===box)close();});return {box,close};}
   async function load(el){
-    injectStyle();el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
+    injectStyle();el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
     try{if(!S.tid){const t=await api('/api/admin/leave-policies');S.tid=t.tenants[0]?.id||null;}if(!S.tid){el.innerHTML='<div class="panel"><div class="empty">還沒有公司。</div></div>';return;}await fetchDraw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}
   }
   async function fetchDraw(el,msg=''){S.d=await api(`/api/admin/org/${S.tid}`);S.c=JSON.parse(JSON.stringify(S.d.config));paint(el,msg);}

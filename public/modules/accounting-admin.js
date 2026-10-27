@@ -17,7 +17,7 @@
 .aca-cols{display:flex;flex-wrap:wrap;gap:6px}.aca-cols span{display:inline-flex;gap:4px;align-items:center;border:1px solid #C9B0A8;border-radius:999px;padding:3px 4px 3px 10px;font-size:.82rem;background:#fff}.aca-cols span button{padding:0 6px;min-height:0;margin:0;border-radius:999px;font-size:.75rem}
 .aca-note{background:#fff7e5;border:1px solid #efd99c;border-radius:10px;padding:9px 12px;margin:8px 0;color:#7a5200;font-size:.86rem;line-height:1.6}
 `;document.head.appendChild(s);}
-  async function load(el){style();el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';try{S.list=await api('/api/admin/acct-settings');if(!S.tid)S.tid=S.list.tenants[0]?.id||null;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}}
+  async function load(el){style();el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';try{S.list=await api('/api/admin/acct-settings');if(!S.tid)S.tid=S.list.tenants[0]?.id||null;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}}
   async function draw(el){
     if(!S.tid){el.innerHTML='<div class="panel"><div class="empty">還沒有公司。</div></div>';return;}
     const d=await api(`/api/admin/acct-settings/${S.tid}`);S.d=d;S.c=JSON.parse(JSON.stringify(d.settings));paint(el);

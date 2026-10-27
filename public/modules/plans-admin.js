@@ -22,7 +22,7 @@
     .pa-sec{border:1px solid #E9E3E1;border-radius:12px;padding:12px 14px;margin-top:12px}.pa-sec h3{margin:0 0 8px;font-size:1rem}
   `;document.head.appendChild(s);}
   async function load(el){
-    css();el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
+    css();el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
     let d;try{d=await api('/api/admin/plans');}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;return;}
     el.innerHTML=`<div class="panel"><div class="eyebrow">💳 平台設定</div><h1>方案與計費</h1>
       <p class="hint">每家公司選一種計價依據（員工規模或社區案場規模）與級距；超過上限時，公司無法再新增人員帳號或社區（既有資料不受影響）。到期後有 ${d.pricing.grace_days} 天寬限期，寬限期過後加值功能關閉、基本功能改為唯讀。系統只計算費用，實際帳單與收款請在系統外處理。尚未設定方案的公司不受限制（開發／試用階段）。</p>

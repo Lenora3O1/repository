@@ -372,7 +372,7 @@
     draw();document.body.appendChild(box);box.addEventListener('click',e=>{if(e.target===box)box.remove();});
   }
   async function load(){
-    const el=S.el;el.querySelector('#wjBody').innerHTML='<div class="panel"><div class="profile-loading">正在讀取日誌…</div></div>';
+    const el=S.el;el.querySelector('#wjBody').innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
     if(S.mode==='weekly')S.date=weekStart(S.date);
     await reloadPayload();
     S.readonly=S.payload.journal?.status==='submitted';

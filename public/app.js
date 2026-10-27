@@ -44,6 +44,7 @@ function showLogin(){
   $('loginInternal').style.display='flex';
   setTopbarCompany(LOGIN_SYSTEM_NAME);
   document.body.classList.remove('is-authenticated');
+  document.getElementById('siteSwitch')?.remove();
 }
 function showCompanyHint(user){ location.href='company.html'; }
 function showHome(user){
@@ -58,8 +59,10 @@ function showHome(user){
     profile.onclick=()=>showStaffProfile(user);
     profile.title='查看人職資料';
   }
-  window.refreshWorkspaceMenu?.('staff');loadHome(user); if(Array.isArray(user.site_assignments)&&user.site_assignments.length>1) openSiteContextPicker(user.site_assignments); else if(Array.isArray(user.site_assignments)&&user.site_assignments.length===1) selectSiteContext(user.site_assignments[0].community_id);
+  window.refreshWorkspaceMenu?.('staff');loadHome(user); setSiteSwitch(user); if(Array.isArray(user.site_assignments)&&user.site_assignments.length>1) openSiteContextPicker(user.site_assignments); else if(Array.isArray(user.site_assignments)&&user.site_assignments.length===1) selectSiteContext(user.site_assignments[0].community_id);
 }
+// 同時服務多個社區：頂部列顯示「⇄ 切換社區」，資料只會顯示目前選擇的社區
+function setSiteSwitch(user){const old=document.getElementById('siteSwitch');if(old)old.remove();const list=Array.isArray(user?.site_assignments)?user.site_assignments:[];if(list.length<2)return;const wrap=document.querySelector('.topbar-brand');if(!wrap)return;const b=document.createElement('button');b.type='button';b.id='siteSwitch';b.className='site-switch';b.textContent='⇄ 切換社區';b.title='切換到您服務的其他社區';b.addEventListener('click',()=>openSiteContextPicker(list));wrap.appendChild(b);}
 async function selectSiteContext(communityId){try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(communityId)})});}catch(e){console.warn('site context select failed',e)}}
 function openSiteContextPicker(assignments){const old=document.getElementById('siteContextPicker');if(old)old.remove();const modal=document.createElement('div');modal.id='siteContextPicker';modal.className='modal-backdrop';modal.innerHTML=`<div class="modal community-picker-modal" role="dialog" aria-modal="true"><div class="eyebrow">現場工作台</div><h2>請選擇要進入的案場</h2><p class="modal-note">您同時服務多個案場。進入後只會看到該案場的資料，不會與其他社區混在一起。</p><div class="community-choice-list">${assignments.map(a=>`<button type="button" class="community-choice" data-cid="${a.community_id}"><span>🏠</span><strong>${escapeHtml(a.community_name||'未命名案場')}</strong><span>→</span></button>`).join('')}</div></div>`;document.body.appendChild(modal);document.body.classList.add('modal-open');modal.querySelectorAll('[data-cid]').forEach(btn=>btn.addEventListener('click',async()=>{await selectSiteContext(btn.dataset.cid);modal.remove();document.body.classList.remove('modal-open');setTopbarCompany((assignments.find(a=>String(a.community_id)===String(btn.dataset.cid))||{}).community_name||'（公司名稱）');loadHome();}));}
 async function showStaffProfile(user){
@@ -334,7 +337,7 @@ function showWorkspaceLoading(label){
   const el=$('staffHome');
   if(!el)return;
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
-  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>正在讀取您的社區與交接資料，請稍候…</p></div>`;
+  el.innerHTML=`<div class="panel workspace-loading"><div class="eyebrow">工作項目</div><h1>📋 ${escapeHtml(label||'工作功能')}</h1><p>正在讀取資料中，請稍候…</p></div>`;
 }
 function showWorkspaceError(label,err){
   const el=$('staffHome');
@@ -384,7 +387,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
 // 目錄設定使用的動作代碼與程式內部代碼對照（目錄的 handover-manager 等原本沒有對應，點了只會看到「建置中」）。
 const WORKSPACE_ACTION_ALIASES={'handover':'checklist','handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
 // 企業自訂目錄若沒有設定功能代碼（placeholder），依名稱對應到已上線的功能
-const WORKSPACE_LABEL_ACTIONS=[['設備申請','staff-equipment'],['設備借用','staff-equipment'],['住戶聯繫表','residents-contact'],['區分所有權人','residents-owners'],['所有權人','residents-owners'],['承租人','residents-tenants'],['出勤打卡','staff-attendance-checkin'],['巡邏紀錄','staff-patrol-records'],['巡邏巡檢','staff-patrol'],['出勤與巡邏','staff-attendance'],['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop'],['請假管理','staff-schedule-leave'],['請假申請','staff-schedule-leave'],['請假／代班','staff-schedule-leave'],['加班','staff-schedule-overtime'],['我的休假制度','staff-schedule-rules'],['排班規則','staff-schedule-rules']];
+const WORKSPACE_LABEL_ACTIONS=[['社區資訊','community-info'],['設備申請','staff-equipment'],['設備借用','staff-equipment'],['住戶聯繫表','residents-contact'],['區分所有權人','residents-owners'],['所有權人','residents-owners'],['承租人','residents-tenants'],['出勤打卡','staff-attendance-checkin'],['巡邏紀錄','staff-patrol-records'],['巡邏巡檢','staff-patrol'],['出勤與巡邏','staff-attendance'],['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop'],['請假管理','staff-schedule-leave'],['請假申請','staff-schedule-leave'],['請假／代班','staff-schedule-leave'],['加班','staff-schedule-overtime'],['我的休假制度','staff-schedule-rules'],['排班規則','staff-schedule-rules']];
 function labelWorkspaceAction(label){const t=String(label||'');const hit=WORKSPACE_LABEL_ACTIONS.find(([k])=>t.includes(k));return hit?hit[1]:'';}
 function resolveWorkspaceAction(detail){
   // 舊設定常把連字號存成底線（work_journal），一律轉回平台代碼
@@ -430,6 +433,11 @@ async function handleWorkspaceMenu(e){
   if(action==='checklist'){
     showWorkspaceLoading(label||'交接清冊');
     try{await loadChecklistModule(label||'交接清冊');}catch(err){showWorkspaceError(label||'交接清冊',err);}
+    return;
+  }
+  if(action==='community-info'){
+    showWorkspaceLoading(label||'社區資訊');
+    try{if(!window.CommunityLayout) throw new Error('社區資訊模組尚未載入，請重新整理頁面'); await window.CommunityLayout.renderInfo($('staffHome'),label||'社區資訊');}catch(err){showWorkspaceError(label||'社區資訊',err);}
     return;
   }
   if(['residents-contact','residents-owners','residents-tenants'].includes(action)){

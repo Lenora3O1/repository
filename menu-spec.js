@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 7;
+const VERSION = 8;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -28,6 +28,8 @@ COMPANY.unshift({ parent: null, children: [{ id: 'company-expense', label: '公�
 COMPANY.push({ parent: null, children: [{ id: 'company-plan', label: '方案與費用', action: 'plan-billing', exact: ['方案與費用', '方案與計費', '使用方案'], after: 'company-schedule', icon: '💳' }] });
 COMPANY.push({ parent: null, children: [{ id: 'company-interviews', label: '面試管理', action: 'interviews', exact: ['面試管理', '面試人員', '招募管理'], after: 'company-hr', icon: '📝' }] });
 const STAFF = [
+  // 社區資訊：社區名稱、代表地址、棟別門牌（同時服務多個社區的人，看的是目前選擇的社區）
+  { parent: null, children: [{ id: 'staff-community-info', label: '社區資訊', action: 'community-info', exact: ['社區資訊', '社區基本資料'], after: 'residents', icon: '🏢' }] },
   // 現場「設備借用申請」放在公司資源底下；舊版放在最上層的「設備申請」會合併過來
   { parent: { id: 'company-resources', label: '公司資源', labels: ['公司資源'], icon: '📦', action: 'company-resources' }, keepOrder: true, children: [{ id: 'staff-equipment', label: '設備借用申請', action: 'staff-equipment', match: ['設備借用'], exact: ['設備申請'], anywhere: true }] },
 ];

@@ -23,7 +23,7 @@
     if(!T.some(t=>t[0]===S.tab))S.tab=T[0][0];
     const title=label||({my:'公費款項申請',manage:'公司應支',feedback:'社區回饋金'})[S.view];
     el.innerHTML=`<div class="eyebrow">${S.view==='my'?'💸 公費款項':'💰 會計'}</div><h1>${esc(title)}</h1><div class="ac-tabs">${T.map(([k,l])=>`<button type="button" data-tab="${k}" class="${S.tab===k?'':'secondary'}">${l}${k==='todo'&&M.todo?`<span class="ap-badge">${M.todo}</span>`:''}${k==='final'&&M.final?`<span class="ap-badge">${M.final}</span>`:''}</button>`).join('')}</div>
-      ${S.view!=='my'&&M.entities.length>1&&['all','pay','payments','purchases'].includes(S.tab)?`<div class="ac-bar"><b>公司別</b><select id="apE">${M.entities.map(e=>`<option value="${e.id}" ${e.id===S.eid?'selected':''}>${esc(e.short_name||e.name)}</option>`).join('')}</select></div>`:''}<div id="apBody"><div class="profile-loading">讀取中…</div></div>`;
+      ${S.view!=='my'&&M.entities.length>1&&['all','pay','payments','purchases'].includes(S.tab)?`<div class="ac-bar"><b>公司別</b><select id="apE">${M.entities.map(e=>`<option value="${e.id}" ${e.id===S.eid?'selected':''}>${esc(e.short_name||e.name)}</option>`).join('')}</select></div>`:''}<div id="apBody"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>`;
     const again=()=>render(el,S.view,title).catch(e=>alert(e.message));
     el.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;again();});
     el.querySelector('#apE')?.addEventListener('change',e=>{S.eid=Number(e.target.value);again();});
