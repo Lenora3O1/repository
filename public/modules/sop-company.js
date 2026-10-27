@@ -4,7 +4,7 @@
   function workspace(){const el=document.querySelector('#companyWorkspace');if(!el)throw new Error('找不到公司工作頁面。');['overview','staff','communities','submissions','templates'].forEach(id=>{const x=document.querySelector('#tab-'+id);if(x)x.style.display='none';});el.style.display='block';return el;}
   function shell(title,body){return `<div class="sop-workpage"><div class="sop-page-head"><div><h1>📚 ${esc(title)}</h1><p class="sop-help">公司基本 SOP 與案場 SOP 集中管理；可依社區、職務、來源與狀態快速查看。</p></div></div>${body}</div>`}
   async function render(container,title){
-    container.innerHTML=shell(title,'<div class="sop-loading">正在讀取 SOP…</div>');
+    container.innerHTML=shell(title,'<div class="sop-loading">正在讀取資料中，請稍候…</div>');
     try{
       const [list,ctx]=await Promise.all([api('/api/company/sops'),api('/api/company/sops/upload-context')]);
       const rows=Array.isArray(list.sops)?list.sops:[];

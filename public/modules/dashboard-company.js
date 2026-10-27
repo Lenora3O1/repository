@@ -51,7 +51,7 @@
     injectStyle();
     if(!el)return;
     refresh=()=>render(el,{tenantName});
-    el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
+    el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
     let d;try{d=await api('/api/company/dashboard');}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;return;}
     const h=d.today.hour;const hello=h<11?'早安':h<14?'午安':h<18?'午安':'晚安';
     const [mm,dd]=[Number(d.today.date.slice(5,7)),Number(d.today.date.slice(8,10))];

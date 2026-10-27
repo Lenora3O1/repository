@@ -16,7 +16,7 @@
   const PH={active:['使用中','#3E5328','#EAF1E3'],grace:['寬限期','#8A5A12','#FBF0DC'],expired:['已到期（唯讀）','#A44528','#F8E5DF']};
   const b=(t,c,bg)=>`<span class="pl-b" style="color:${c};background:${bg}">${esc(t)}</span>`;
   async function render(el,label){
-    css();el.innerHTML='<div class="profile-loading">讀取中…</div>';
+    css();el.innerHTML='<div class="profile-loading">正在讀取資料中，請稍候…</div>';
     let d;try{d=await api('/api/company/plan');}catch(e){el.innerHTML=`<div class="msg error">${esc(e.message)}</div>`;return;}
     const s=d.state;const head=`<div class="eyebrow">💳 公司方案</div><h1>${esc(label||'方案與費用')}</h1>`;
     if(!s.configured){el.innerHTML=`${head}<div class="pl-box"><b>尚未設定方案</b><p class="muted" style="margin:6px 0 0">目前為開發／試用階段，功能不受人數與社區數限制。正式使用前，系統服務商會替貴公司設定方案。</p><p class="muted" style="margin:6px 0 0">目前用量：員工 ${s.usage.staff} 人・社區 ${s.usage.community} 個</p></div>`;return;}

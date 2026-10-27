@@ -246,7 +246,7 @@ button.lnk{border:0!important;background:transparent!important;color:#4E312D!imp
   async function renderSlips(el,label,month,tab){
     tab=tab||S.slipTab||'settings';S.slipTab=tab;
     if(tab==='settings'){
-      el.innerHTML=`<div class="eyebrow">📄 會計</div><h1>${esc(label||'人員薪資')}</h1><div class="pr-tabs"><button type="button" data-tab="settings">💰 薪資設定</button><button type="button" class="secondary" data-tab="published">📄 已發布薪資單</button><button type="button" class="secondary" id="psMine" style="margin-left:auto">我的薪資單</button></div><div id="salBox"><div class="profile-loading">讀取中…</div></div>`;
+      el.innerHTML=`<div class="eyebrow">📄 會計</div><h1>${esc(label||'人員薪資')}</h1><div class="pr-tabs"><button type="button" data-tab="settings">💰 薪資設定</button><button type="button" class="secondary" data-tab="published">📄 已發布薪資單</button><button type="button" class="secondary" id="psMine" style="margin-left:auto">我的薪資單</button></div><div id="salBox"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>`;
       el.querySelector('[data-tab=published]').addEventListener('click',()=>renderSlips(el,label,null,'published').catch(err=>alert(err.message)));
       el.querySelector('#psMine').addEventListener('click',()=>openMine().catch(err=>alert(err.message)));
       return renderSalaries(el.querySelector('#salBox'));

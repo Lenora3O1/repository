@@ -23,7 +23,7 @@
     if(!S.rfrom){S.rfrom=`${M.today.slice(0,7)}-01`;S.rto=M.today;}
     const tabs=[['bills','🧾 請款單'],['receipts','💵 收款'],['aging','⏳ 帳齡'],['sales','📑 銷項明細（401）']];
     el.innerHTML=`<div class="eyebrow">💰 會計</div><h1>${esc(label||'公司應收')}</h1><div class="ac-tabs">${tabs.map(([k,l])=>`<button type="button" data-tab="${k}" class="${S.tab===k?'':'secondary'}">${l}</button>`).join('')}</div>
-      ${M.entities.length>1?`<div class="ac-bar"><b>公司別</b><select id="arE">${M.entities.map(e=>`<option value="${e.id}" ${e.id===S.eid?'selected':''}>${esc(e.short_name||e.name)}${e.tax_id?`（${e.tax_id}）`:''}</option>`).join('')}</select></div>`:''}<div id="arBody"><div class="profile-loading">讀取中…</div></div>`;
+      ${M.entities.length>1?`<div class="ac-bar"><b>公司別</b><select id="arE">${M.entities.map(e=>`<option value="${e.id}" ${e.id===S.eid?'selected':''}>${esc(e.short_name||e.name)}${e.tax_id?`（${e.tax_id}）`:''}</option>`).join('')}</select></div>`:''}<div id="arBody"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>`;
     el.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;render(el,label).catch(e=>alert(e.message));});
     el.querySelector('#arE')?.addEventListener('change',e=>{S.eid=Number(e.target.value);render(el,label);});
     const box=el.querySelector('#arBody');return ({bills,receipts,aging,sales})[S.tab](box);

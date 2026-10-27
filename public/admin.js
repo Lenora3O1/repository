@@ -10,7 +10,7 @@ function showMain(){$('loginView').style.display='none';$('mainView').style.disp
 for(const b of document.querySelectorAll('.nav-tabs button[data-tab]'))b.addEventListener('click',async()=>{document.querySelectorAll('.nav-tabs button[data-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');window.__openAdminGroup?.(b);for(const id of ['tenants','submissions','staff','templates','form','branding','customization','platformRules','messageAudit','gifts','stickers','insurance','org','leave','equip','acct','addons','interview','moduleTest'])$(`tab-${id}`).style.display=b.dataset.tab===id?'block':'none';if(b.dataset.tab==='customization'){await loadCustomization();renderCustomization();}if(b.dataset.tab==='platformRules'){await loadPlatformRules();renderPlatformRules();}if(b.dataset.tab==='messageAudit'){await loadMessageAudit();renderMessageAudit();}if(b.dataset.tab==='moduleTest'){renderModuleTest();}if(b.dataset.tab==='gifts'){loadGiftsAdmin();}if(b.dataset.tab==='stickers'){loadStickersAdmin();}if(b.dataset.tab==='insurance'){loadInsuranceAdmin();}if(b.dataset.tab==='leave'&&window.LeaveAdminModule){window.LeaveAdminModule.load($('tab-leave'));}if(b.dataset.tab==='org'&&window.OrgAdminModule){window.OrgAdminModule.load($('tab-org'));}if(b.dataset.tab==='equip'&&window.EquipmentAdminModule){window.EquipmentAdminModule.load($('tab-equip'));}if(b.dataset.tab==='acct'&&window.AccountingAdminModule){window.AccountingAdminModule.load($('tab-acct'));}if(b.dataset.tab==='addons'&&window.PlansAdminModule){window.PlansAdminModule.load($('tab-addons'));}if(b.dataset.tab==='interview'&&window.InterviewAdminModule){window.InterviewAdminModule.load($('tab-interview'));}try{localStorage.setItem('admin-last-tab',b.dataset.tab)}catch{}document.body.classList.remove('sidebar-open');window.scrollTo({top:0});});
 async function loadAll(){
   const jobs=[['tenants',loadTenants,renderTenants],['submissions',loadSubmissions,renderSubmissions],['staff',loadStaff,renderStaff],['templates',loadTemplates,renderTemplates],['form',loadConfig,renderFormDesigner],['branding',loadBranding,renderBranding]];
-  for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料…</div></div>';}
+  for(const [key] of jobs){const el=$(`tab-${key}`);if(el)el.innerHTML='<div class="panel"><div class="hint">⏳ 正在讀取資料中，請稍候…</div></div>';}
   for(const [key,loader,renderer] of jobs){
     try{await loader();renderer()}catch(err){
       const el=$(`tab-${key}`); if(el) el.innerHTML=`<div class="panel"><div class="msg error">${escapeHtml(err.message||'讀取資料失敗')}</div><p class="hint">此區塊讀取失敗，不會影響其他後臺功能。請重新整理後再試。</p></div>`;
@@ -34,7 +34,7 @@ async function loadModulePreviewMenu(){
 }
 async function renderModuleTest(reload=true){
  const el=$('tab-moduleTest');if(!el)return;
- if(reload){el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取公司目錄…</div></div>';await loadModulePreviewMenu();}
+ if(reload){el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';await loadModulePreviewMenu();}
  const tenantOptions=[`<option value="0" ${!modulePreview.tenantId?'selected':''}>🧩 平台預設目錄（不指定公司）</option>`].concat(state.tenants.map(t=>`<option value="${t.id}" ${Number(t.id)===Number(modulePreview.tenantId)?'selected':''}>${t.status==='active'?'🏢':'⏸️'} ${escapeHtml(t.name)}${t.status==='active'?'':'（停用）'}</option>`)).join('');
  const roots=modulePreview.items.filter(x=>!x.parentId);
  const kids=id=>modulePreview.items.filter(x=>String(x.parentId)===String(id));
@@ -767,7 +767,7 @@ function restoreAdminTab(){let t='';try{t=localStorage.getItem('admin-last-tab')
 state.gifts=[];
 async function loadGiftsAdmin(){
  const el=$('tab-gifts');if(!el)return;
- el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取禮品…</div></div>';
+ el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
  try{const d=await api('/api/admin/gifts');state.gifts=d.gifts||[];renderGiftsAdmin();}
  catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${escapeHtml(e.message)}</div></div>`;}
 }
@@ -832,7 +832,7 @@ async function deleteGift(id){const g=state.gifts.find(x=>x.id===id);if(!g)retur
 state.stickers={builtin:[],platform:[],personal_count:0};
 async function loadStickersAdmin(){
  const el=$('tab-stickers');if(!el)return;
- el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取貼圖…</div></div>';
+ el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
  try{state.stickers=await api('/api/admin/stickers');renderStickersAdmin();}
  catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${escapeHtml(e.message)}</div></div>`;}
 }
@@ -857,7 +857,7 @@ function renderStickersAdmin(){
 const INS_LABELS={labor:'勞工保險投保薪資',occupational:'職業災害保險投保薪資',health:'全民健保投保金額',pension:'勞退月提繳工資'};
 const INS_RATES=[['labor_ordinary','勞保普通事故費率'],['employment','就業保險費率'],['labor_employee','勞保勞工負擔比例'],['labor_employer','勞保雇主負擔比例'],['occupational','職災費率（預設，各公司可改）'],['health','健保費率'],['health_employee','健保本人負擔比例'],['health_employer','健保投保單位負擔比例'],['health_avg_dependents','健保平均眷口數'],['pension_employer','勞退雇主提繳率']];
 async function loadInsuranceAdmin(){
- const el=$('tab-insurance');if(!el)return;el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
+ const el=$('tab-insurance');if(!el)return;el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
  try{state.ins=await api('/api/admin/insurance-tables');state.insYear=state.insYear||state.ins.status.current.year;renderInsuranceAdmin();}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${escapeHtml(e.message)}</div></div>`;}
 }
 function renderInsuranceAdmin(){

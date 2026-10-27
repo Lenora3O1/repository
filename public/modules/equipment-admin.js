@@ -5,7 +5,7 @@
   const J=(method,body)=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const S={tid:null};
   async function load(el){
-    el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
+    el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
     try{S.list=await api('/api/admin/equip-settings');if(!S.tid)S.tid=S.list.tenants[0]?.id||null;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}
   }
   async function draw(el){

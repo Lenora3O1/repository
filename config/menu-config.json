@@ -114,6 +114,14 @@
       "enabled": true
     },
     {
+      "id": "staff-community-info",
+      "parentId": null,
+      "icon": "🏢",
+      "label": "社區資訊",
+      "action": "community-info",
+      "enabled": true
+    },
+    {
       "id": "vendors",
       "parentId": null,
       "icon": "🏢",

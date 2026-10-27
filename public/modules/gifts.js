@@ -46,7 +46,7 @@
     injectStyle();
     const el=container||document.getElementById('staffHome');if(!el)return;
     const framed=el.classList.contains('panel');// 內勤工作區本身已是卡片，不再多包一層
-    el.innerHTML=`<div class="${framed?'':'panel '}gifts-module"><div class="profile-loading">正在讀取禮品…</div></div>`;
+    el.innerHTML=`<div class="${framed?'':'panel '}gifts-module"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>`;
     const panel=el.firstElementChild;
     try{
       const d=await api('/api/gifts');const gifts=Array.isArray(d.gifts)?d.gifts:[];

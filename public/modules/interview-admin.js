@@ -7,7 +7,7 @@
   const inp='margin:0;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #D8CECB;border-radius:8px;background:#fff;font:inherit';
   const lab='display:flex;flex-direction:column;gap:5px;font-weight:700;font-size:.86rem;margin:0';
   const TYPE={single:'單選',multi:'複選',text:'情境題（主管評分）'},LEVEL={all:'全部',experienced:'有經驗',novice:'沒經驗'};
-  async function load(el){el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';try{S.list=await api('/api/admin/interview-settings');if(!S.tid)S.tid=S.list.tenants[0]?.id;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}}
+  async function load(el){el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';try{S.list=await api('/api/admin/interview-settings');if(!S.tid)S.tid=S.list.tenants[0]?.id;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}}
   async function draw(el){if(!S.tid){el.innerHTML='<div class="panel"><div class="empty">還沒有公司。</div></div>';return;}const d=await api(`/api/admin/interview-settings/${S.tid}`);S.d=d;S.c=JSON.parse(JSON.stringify(d.settings));S.bank=JSON.parse(JSON.stringify(d.bank));paint(el);}
   function paint(el){
     const c=S.c,d=S.d;const cat=c.categories.find(x=>x.id===S.cat)||c.categories[0];

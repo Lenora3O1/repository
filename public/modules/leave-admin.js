@@ -24,7 +24,7 @@
   }
   async function load(el){
     injectStyle();
-    el.innerHTML='<div class="panel"><div class="profile-loading">讀取中…</div></div>';
+    el.innerHTML='<div class="panel"><div class="profile-loading">正在讀取資料中，請稍候…</div></div>';
     try{S.list=await api('/api/admin/leave-policies');if(!S.tid)S.tid=S.list.tenants[0]?.id||null;await draw(el);}catch(e){el.innerHTML=`<div class="panel"><div class="msg error">${esc(e.message)}</div></div>`;}
   }
   async function draw(el){
