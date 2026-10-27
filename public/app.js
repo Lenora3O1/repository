@@ -59,16 +59,14 @@ function showHome(user){
     profile.onclick=()=>showStaffProfile(user);
     profile.title='查看人職資料';
   }
-  window.refreshWorkspaceMenu?.('staff');setSiteSwitch(user);
+  window.refreshWorkspaceMenu?.('staff');window.__siteChooserUser=user;
   const list=Array.isArray(user.site_assignments)?user.site_assignments:[];
   const active=list.find(a=>Number(a.community_id)===Number(user.active_community_id||window.__activeCommunityId||0));
   if(list.length>1&&!active){window.__siteChooserUser=user;showSiteChooser(user);return;}
-  if(active){window.__activeCommunityId=Number(active.community_id);setTopbarCompany(active.community_name||user.tenant_name);}
+  if(active){window.__activeCommunityId=Number(active.community_id);}
   else if(list.length===1){window.__activeCommunityId=Number(list[0].community_id);selectSiteContext(list[0].community_id);}
   loadHome(user);
 }
-// 同時服務多個社區：頂部列顯示「⇄ 切換社區」，資料只會顯示目前選擇的社區
-function setSiteSwitch(user){const old=document.getElementById('siteSwitch');if(old)old.remove();const list=Array.isArray(user?.site_assignments)?user.site_assignments:[];if(list.length<2)return;const wrap=document.querySelector('.topbar-brand');if(!wrap)return;const b=document.createElement('button');b.type='button';b.id='siteSwitch';b.className='site-switch';b.textContent='⇄ 切換社區';b.title='切換到您服務的其他社區';b.addEventListener('click',()=>showSiteChooser(user,{cancelable:true}));wrap.appendChild(b);}
 async function selectSiteContext(communityId){try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(communityId)})});}catch(e){console.warn('site context select failed',e)}}
 function openSiteContextPicker(assignments){const u=window.__siteChooserUser||{site_assignments:assignments};showSiteChooser({...u,site_assignments:assignments},{cancelable:true});}
 // 同時服務多個社區：登入後先選社區（全畫面，和登入畫面同一套樣式）；之後可以用「⇄ 切換社區」回到這裡
@@ -90,7 +88,7 @@ function showSiteChooser(user,{cancelable=false}={}){
     try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(btn.dataset.cid)})});}
     catch(e){alert(e.message||'無法進入這個社區');box.querySelectorAll('[data-cid]').forEach(x=>x.disabled=false);btn.classList.remove('busy');return;}
     window.__activeCommunityId=Number(btn.dataset.cid);box.remove();
-    const a=list.find(x=>Number(x.community_id)===Number(btn.dataset.cid));setTopbarCompany(a?.community_name||user.tenant_name);
+    setTopbarCompany(user.tenant_name||'');
     document.body.classList.remove('modal-open');loadHome(user);
   }));
   box.querySelector('[data-cancel]')?.addEventListener('click',()=>box.remove());
@@ -202,7 +200,7 @@ async function loadHome(user){
   const jobSummary=staffJobSummary(user);
   el.innerHTML=`<div class="dashboard-layout dashboard-layout-v2">
     <div class="dashboard-left">
-      <div class="panel home-head home-head-v2"><div><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)} <span class="home-role">（${escapeHtml(jobSummary)}）</span></h1><div id="staffCommunityHint" class="home-community"></div></div><div class="home-community-badge">🏢 <span id="staffCommunityBadge">案場</span></div></div>
+      <div class="panel home-head home-head-v2"><div><div class="eyebrow">歡迎回來</div><h1>${escapeHtml(displayName)}</h1>${jobSummary?`<div class="home-role">${escapeHtml(jobSummary)}</div>`:''}<div id="staffCommunityHint" class="home-community"></div></div><div class="home-site-switch" id="homeSiteSwitch"></div></div>
       <div class="panel dashboard-clock"><div class="eyebrow">今天</div><div id="staffDate" class="dashboard-date"></div><div id="staffClock" class="dashboard-time"></div><div class="dashboard-note">本日尚未安排事務</div></div>
     </div>
     <div class="panel dashboard-todo"><div class="section-title"><span>📌</span> 代辦事項 <span id="todoCount" class="home-count-badge">0</span><button type="button" class="todo-add" id="todoAddBtn" aria-label="新增代辦事項">＋</button></div><div id="todoList" class="todo-list"><div class="todo-empty">載入中…</div></div></div>
@@ -216,12 +214,30 @@ async function loadHome(user){
   tick();staffClockTimer=setInterval(tick,1000);
   $('todoAddBtn')?.addEventListener('click',openTodoCreateModal);
   $('importantViewAll')?.addEventListener('click',()=>{ const item=document.querySelector('[data-action="todo"]'); if(item) item.click(); });
-  await Promise.all([loadPinnedWork(),loadHomeTodos(),loadStaffCommunityHint()]);
+  await Promise.all([loadPinnedWork(),loadHomeTodos(),loadStaffCommunityHint(user)]);
 }
-async function loadStaffCommunityHint(){
-  const el=$('staffCommunityHint'); if(!el)return;
-  try{const d=await api('/api/staff/communities'); const list=Array.isArray(d)?d:[]; const text=list.length===1?(list[0].name||''):list.length>1?list.map(x=>x.name).join('、'):''; el.textContent=text; const badge=$('staffCommunityBadge'); if(badge) badge.textContent=list.length===1?(list[0].name||'案場'):(list.length>1?'多案場':'案場');}
-  catch(e){el.textContent='';}
+// 首頁：灰字列出這位人員在本公司服務的所有社區；右側按鈕顯示目前社區，按下去可切換到其他社區的工作平台
+async function loadStaffCommunityHint(user){
+  const el=$('staffCommunityHint'),box=$('homeSiteSwitch'); if(!el||!box)return;
+  let list=(Array.isArray(user?.site_assignments)?user.site_assignments:[]).map(a=>({id:Number(a.community_id),name:a.community_name||'未命名社區'}));
+  if(!list.length){try{const d=await api('/api/staff/communities');list=(Array.isArray(d)?d:[]).map(c=>({id:Number(c.id),name:c.name||''}));}catch{}}
+  const seen=new Set();list=list.filter(c=>c.id&&!seen.has(c.id)&&seen.add(c.id));
+  el.textContent=list.map(c=>c.name).join('；');
+  if(!list.length){box.innerHTML='';return;}
+  const cur=list.find(c=>c.id===Number(window.__activeCommunityId||0))||list[0];
+  const others=list.filter(c=>c.id!==cur.id);
+  box.innerHTML=`<button type="button" class="home-community-badge${others.length?' can-switch':''}" ${others.length?'aria-haspopup="true" aria-expanded="false"':'disabled'} title="${others.length?'切換到您服務的其他社區':'目前服務的社區'}">🏢 <span>${escapeHtml(cur.name)}</span>${others.length?'<span class="hss-caret" aria-hidden="true">▾</span>':''}</button>${others.length?`<div class="hss-menu" role="menu" hidden><div class="hss-title">切換社區</div>${others.map(c=>`<button type="button" role="menuitem" data-cid="${c.id}">🏢 ${escapeHtml(c.name)}</button>`).join('')}</div>`:''}`;
+  if(!others.length)return;
+  const btn=box.querySelector('.home-community-badge'),menu=box.querySelector('.hss-menu');
+  const close=()=>{menu.hidden=true;btn.setAttribute('aria-expanded','false');document.removeEventListener('click',outside,true);};
+  const outside=e=>{if(!box.contains(e.target))close();};
+  btn.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;btn.setAttribute('aria-expanded','true');document.addEventListener('click',outside,true);}else close();});
+  menu.querySelectorAll('[data-cid]').forEach(b=>b.addEventListener('click',async()=>{
+    menu.querySelectorAll('[data-cid]').forEach(x=>x.disabled=true);b.textContent='切換中…';
+    try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(b.dataset.cid)})});}
+    catch(e){alert(e.message||'無法切換到這個社區');close();loadStaffCommunityHint(user);return;}
+    window.__activeCommunityId=Number(b.dataset.cid);close();loadHome(user);
+  }));
 }
 function todoTime(s){if(!s)return '—';const d=new Date(s);return d.toLocaleString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 async function loadHomeTodos(){
@@ -270,7 +286,7 @@ async function loadPinnedWork(){
   try{
     const d=await api('/api/staff/dashboard-pins');
     const pins=Array.isArray(d.pins)?d.pins:[];
-    if(!pins.length){list.innerHTML=`<div class="pinned-empty"><div class="pinned-empty-icon">☆</div><strong>還沒有釘選工作</strong><span>請從左側工作目錄找到常用功能，點一下右側的 ☆，就會出現在這裡。</span></div>`;return;}
+    if(!pins.length){list.innerHTML=`<div class="pinned-empty"><div class="pinned-empty-icon">☆</div><strong>還沒有釘選工作</strong><span>打開常用的工作頁面，點一下標題旁的 ☆，就會出現在這裡。</span></div>`;return;}
     list.innerHTML=pins.map(p=>{const item=p.item||{};return `<button type="button" class="pinned-work-card" data-pinned-action="${escapeHtml(item.action||'placeholder')}" data-pinned-id="${escapeHtml(item.id||'')}" data-pinned-label="${escapeHtml(item.label||'')}" title="開啟${escapeHtml(item.label||'工作項目')}"><span class="pinned-work-icon">${escapeHtml(item.icon||'•')}</span><span class="pinned-work-body"><strong>${escapeHtml(item.label||'未命名功能')}</strong><small>點一下直接開啟</small></span><span class="pinned-work-arrow">→</span></button>`}).join('');
     list.querySelectorAll('[data-pinned-action]').forEach(btn=>btn.addEventListener('click',()=>document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:btn.dataset.pinnedAction,id:btn.dataset.pinnedId,label:btn.dataset.pinnedLabel}}))));
   }catch(e){list.innerHTML=`<div class="empty">暫時無法載入釘選工作。</div>`;console.warn(e)}
