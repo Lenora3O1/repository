@@ -1768,7 +1768,9 @@ const RESIDENT_HEADER_ALIASES={
   relation:['身分','身份','關係','住戶身分','relation','role'],
   lease_start:['租約起日','租約起始日','租約開始','租約開始日','起租日','租期起','租期開始','租賃起日','lease_start','start_date'],
   lease_end:['租約迄日','租約到期','租約到期日','到期日','租約結束','租約結束日','租期迄','租期結束','租賃迄日','退租日','lease_end','end_date'],
-  lease_range:['租期','租約期間','租賃期間','租約起訖','lease_period']
+  lease_range:['租期','租約期間','租賃期間','租約起訖','lease_period'],
+  emergency_name:['緊急聯絡人','緊急聯絡人姓名','緊急連絡人','緊急聯絡人及電話','緊急聯絡人電話姓名'],
+  emergency_phone:['緊急聯絡電話','緊急聯絡人電話','緊急電話','緊急連絡電話']
 };
 // 同一份檔案可能同時有「所有權人」與「承租人」欄，依名冊類型決定「姓名」優先用哪一欄
 const RESIDENT_NAME_PRIORITY={'residents-owners':['所有權人','區分所有權人','屋主','業主','姓名','住戶姓名'],'residents-tenants':['承租人','租客','房客','承租人姓名','姓名','住戶姓名']};
@@ -1794,7 +1796,7 @@ function residentNormalizeRow(row,map){
   const known=new Set(Object.values(map));const extra=Object.entries(row).filter(([k,v])=>v!==undefined&&v!==null&&String(v).trim()!==''&&!known.has(k)).map(([k,v])=>`${k}：${String(v).trim()}`).join('；');
   let lease_start=residentLease.normalizeDate(residentCell(row,map.lease_start)),lease_end=residentLease.normalizeDate(residentCell(row,map.lease_end));
   if((!lease_start||!lease_end)&&map.lease_range){const [a,b]=residentLease.splitLeaseRange(residentCell(row,map.lease_range));lease_start=lease_start||a;lease_end=lease_end||b;}
-  return {building,unit,floor,name,phone,address,extra,relation,lease_start,lease_end,raw:row};
+  return {building,unit,floor,name,phone,address,extra,relation,lease_start,lease_end,emergency_name:residentCell(row,map.emergency_name),emergency_phone:residentCell(row,map.emergency_phone),raw:row};
 }
 const residentLease=require('./resident-routes');
 function residentLooksLikeMatrixUnit(v){

@@ -75,7 +75,7 @@ function showRecipientPicker(fromSearch=false){
   const el=$('chatPane');if(!el)return;stopChatPolling();
   modal?.querySelector('.chat-layout')?.classList.add('chat-show-pane');
   const q=String($('chatSearch')?.value||'').trim();
-  el.innerHTML=`<div class="chat-recipient-picker"><div class="picker-head"><button type="button" class="chat-icon-btn chat-back" id="pickerBack" aria-label="返回">‹</button><div><h3>找同事聊天</h3><p>可搜尋姓名、員編、職務或社區名稱</p></div></div><div class="recipient-search-inline"><span aria-hidden="true">🔍</span><input id="recipientSearch" value="${esc(q)}" placeholder="例如：綠景莊園、王小明、A001" autocomplete="off"></div><div class="recipient-grid"></div></div>`;
+  el.innerHTML=`<div class="chat-recipient-picker"><div class="picker-head"><button type="button" class="chat-icon-btn chat-back" id="pickerBack" aria-label="返回">‹</button><div><h3>找同事聊天</h3><p>可搜尋姓名、員編、職務或社區名稱</p></div></div><div class="recipient-search-inline"><span aria-hidden="true">🔍</span><input id="recipientSearch" value="${esc(q)}" placeholder="例如：幸福花園、王小明、A001" autocomplete="off"></div><div class="recipient-grid"></div></div>`;
   $('pickerBack').addEventListener('click',()=>{activePartnerId?openChat(activePartnerId):showEmpty()});
   const input=$('recipientSearch');
   input.addEventListener('input',e=>{const value=e.target.value;clearTimeout(searchDebounceTimer);searchDebounceTimer=setTimeout(async()=>{try{await loadLists(value.trim());renderRecipientResults(value);}catch(err){const grid=$('chatPane')?.querySelector('.recipient-grid');if(grid)grid.innerHTML=`<div class="chat-list-empty">搜尋失敗：${esc(err.message)}</div>`;}},300);});

@@ -1,6 +1,6 @@
 // 社區棟別門牌設定與戶別清單
 // - 社區第一次使用住戶名冊時，由經理或秘書設定：共同地址前段、戶別代號格式、每一棟的門牌／位置（前棟、後棟）／樓層／每層戶號；店面等特殊戶別可逐戶指定門牌。
-// - 系統依設定產生全社區的戶別清單（例如 2A1 = A 棟 2 樓之 1 = 僑興路 109 號二樓之 1），住戶聯繫表、區分所有權人、承租人都對到這份清單。
+// - 系統依設定產生全社區的戶別清單（例如 2A1 = A 棟 2 樓之 1 = 和平路 100 號二樓之 1），住戶聯繫表、區分所有權人、承租人都對到這份清單。
 // - 汽車位、機車位跟著「戶」：換聯絡人、換承租人都不用重填。
 'use strict';
 
@@ -30,7 +30,7 @@ function expandList(text) {
   }
   return [...new Set(out)];
 }
-// 門牌「僑興路109號」→ 比對用的 key（去掉空白、全形）
+// 門牌「和平路100號」→ 比對用的 key（去掉空白、全形）
 const doorKey = s => half(s).replace(/之/g, '-').replace(/號號+/g, '號');
 // 從完整地址拆出 門牌（…號）、樓層、之幾
 function parseAddress(addr) {
@@ -95,7 +95,7 @@ module.exports = function registerCommunityLayout(d) {
   }
   function save(tid, cid, body, by) {
     const L = cleanLayout(body); if (!L.buildings.length) throw Object.assign(new Error('請至少設定一棟'), { status: 400 });
-    for (const b of L.buildings) if (!b.door && b.type === 'tower') throw Object.assign(new Error(`請填寫「${b.name}」的門牌（例如：僑興路109號）`), { status: 400 });
+    for (const b of L.buildings) if (!b.door && b.type === 'tower') throw Object.assign(new Error(`請填寫「${b.name}」的門牌（例如：和平路100號）`), { status: 400 });
     const units = generate(L); const codes = new Set();
     for (const u of units) { if (codes.has(u.code)) throw Object.assign(new Error(`戶別代號重複：${u.code}，請調整代號格式或棟別代號`), { status: 400 }); codes.add(u.code); }
     if (units.length > 5000) throw Object.assign(new Error('戶數太多（上限 5000 戶）'), { status: 400 });

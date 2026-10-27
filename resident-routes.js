@@ -7,7 +7,7 @@
 'use strict';
 
 const LABELS = { 'residents-contact': '住戶聯繫表', 'residents-owners': '區分所有權人', 'residents-tenants': '承租人' };
-const FIELDS = ['building', 'unit', 'floor', 'name', 'phone', 'address', 'extra'];
+const FIELDS = ['building', 'unit', 'floor', 'name', 'phone', 'address', 'extra', 'emergency_name', 'emergency_phone'];
 
 function todayTW() { return new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); }
 function addDays(iso, n) { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
@@ -46,7 +46,7 @@ module.exports = function registerResidentRoutes(app, d) {
 
   // ---------- 資料表 ----------
   const cols = db.prepare('PRAGMA table_info(resident_records)').all().map(c => c.name);
-  for (const [c, def] of [['lease_start', "TEXT DEFAULT ''"], ['lease_end', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'active'"], ['source', "TEXT DEFAULT 'import'"], ['updated_at', "TEXT DEFAULT ''"], ['updated_by', "TEXT DEFAULT ''"]]) {
+  for (const [c, def] of [['lease_start', "TEXT DEFAULT ''"], ['lease_end', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'active'"], ['source', "TEXT DEFAULT 'import'"], ['updated_at', "TEXT DEFAULT ''"], ['updated_by', "TEXT DEFAULT ''"], ['emergency_name', "TEXT DEFAULT ''"], ['emergency_phone', "TEXT DEFAULT ''"]]) {
     if (!cols.includes(c)) db.exec(`ALTER TABLE resident_records ADD COLUMN ${c} ${def}`);
   }
   db.exec(`
@@ -96,7 +96,7 @@ module.exports = function registerResidentRoutes(app, d) {
   }
   function records(tid, cid, category, { includeEnded = true } = {}) {
     const imp = activeImport(tid, cid, category); if (!imp) return [];
-    const rows = db.prepare('SELECT id,building,unit,floor,name,phone,address,extra,lease_start,lease_end,status,source,updated_at,updated_by FROM resident_records WHERE import_id=? ORDER BY id').all(imp.id);
+    const rows = db.prepare('SELECT id,building,unit,floor,name,phone,address,extra,lease_start,lease_end,status,source,updated_at,updated_by,emergency_name,emergency_phone FROM resident_records WHERE import_id=? ORDER BY id').all(imp.id);
     return rows.map(r => ({ ...r, status: r.status || 'active', source: r.source || 'import' })).filter(r => includeEnded || r.status !== 'ended');
   }
   function log(t, { category, record_id = null, unit = '', action, summary, before = null, after = null }) {
@@ -121,7 +121,9 @@ module.exports = function registerResidentRoutes(app, d) {
         if (MOTO_RE.test(k)) { motos.push(...CL.splitSpaces(val)); drop(); } else if (CAR_RE.test(k)) { cars.push(...CL.splitSpaces(val)); drop(); } else if (SEQ_RE.test(String(k).trim())) drop();
       }
       const fromText = CL.parseParking(extra); if (!cars.length) cars.push(...fromText.cars); if (!motos.length) motos.push(...fromText.motos);
-      const x = resolve(r); const row = { ...r, extra };
+      let en = String(r.emergency_name || '').trim(), ep = String(r.emergency_phone || '').trim();
+      if (en && !ep) { const m = en.match(/^(.*?)[\s:：,，]*((?:\+?886|0)[\d\-\s()]{7,})$/); if (m) { en = m[1].trim(); ep = m[2].trim(); } }
+      const x = resolve(r); const row = { ...r, extra, emergency_name: en, emergency_phone: ep };
       if (x.unit) { matched++; row.unit = x.unit.code; row.building = x.unit.building; row.floor = String(x.unit.floor); row.address = x.unit.address; if (x.note && !extra.includes(x.note)) row.extra = [x.note, extra].filter(Boolean).join('；');
         if (cars.length || motos.length) { const p = parking.get(x.unit.code) || { cars: [], motos: [] }; p.cars = [...new Set([...p.cars, ...cars])]; p.motos = [...new Set([...p.motos, ...motos])]; parking.set(x.unit.code, p); } }
       for (const w of x.warn) warnings.push({ row: i + 1, name: r.name || '', msg: w });
@@ -143,7 +145,7 @@ module.exports = function registerResidentRoutes(app, d) {
     return CL.setParking(t.tid, t.cid, code, CL.splitSpaces(Array.isArray(p.cars) ? p.cars.join(',') : p.cars), CL.splitSpaces(Array.isArray(p.motos) ? p.motos.join(',') : p.motos), t.by);
   }
   const unitMap = (tid, cid) => new Map(CL.units(tid, cid).map(u => [u.code, u]));
-  const withUnit = (r, M) => { const u = M.get(r.unit); return u ? { ...r, u: { code: u.code, building: u.building, building_name: u.building_name, zone: u.zone, short: u.short, address: u.address, cars: u.cars, motos: u.motos, sort: u.sort } } : r; };
+  const withUnit = (r, M) => { const u = M.get(r.unit); return u ? { ...r, u: { code: u.code, building: u.building, building_name: u.building_name, zone: u.zone, floor: u.floor, short: u.short, address: u.address, cars: u.cars, motos: u.motos, sort: u.sort } } : r; };
 
   // 租約狀態：active（有效）、expiring（30 天內到期）、expired（已過期但還沒辦退租）、ended（已退租）
   function leaseState(r, today = todayTW()) {
@@ -263,8 +265,8 @@ module.exports = function registerResidentRoutes(app, d) {
       const info = db.prepare('INSERT INTO resident_imports(tenant_id,community_id,category,original_filename,imported_at,imported_by,imported_by_name,row_count,detected_fields_json,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)').run(t.tid, t.cid, t.category, req.file.originalname, at, t.u.id, t.by, parsed.rows.length, JSON.stringify(parsed.detected));
       const importId = Number(info.lastInsertRowid);
       db.prepare('UPDATE resident_imports SET is_active=0 WHERE tenant_id=? AND community_id=? AND category=? AND id<>?').run(t.tid, t.cid, t.category, importId);
-      const ins = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-      tx(rows => { for (const r of rows) ins.run(importId, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, [r.relation, r.extra].filter(Boolean).join('；'), JSON.stringify(r.raw), r.lease_start || '', r.lease_end || '', 'active', 'import', at, t.by); })(parsed.rows);
+      const ins = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by,emergency_name,emergency_phone) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+      tx(rows => { for (const r of rows) ins.run(importId, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, [r.relation, r.extra].filter(Boolean).join('；'), JSON.stringify(r.raw), r.lease_start || '', r.lease_end || '', 'active', 'import', at, t.by, r.emergency_name || '', r.emergency_phone || ''); })(parsed.rows);
       for (const [code, p] of N.parking) CL.setParking(t.tid, t.cid, code, p.cars, p.motos, t.by);
       log(t, { category: t.category, action: 'import', summary: `上傳檔案「${req.file.originalname}」，共 ${parsed.rows.length} 筆（取代原本資料）${N.parking.size ? `，更新 ${N.parking.size} 戶車位` : ''}${N.warnings.length ? `，${N.warnings.length} 個提醒` : ''}` });
       let synced = 0;
@@ -280,8 +282,8 @@ module.exports = function registerResidentRoutes(app, d) {
     { const e = fixUnit(t, r); if (e) return res.status(400).json({ error: e }); }
     if (t.category === 'residents-tenants' && r.lease_start && r.lease_end && r.lease_end < r.lease_start) return res.status(400).json({ error: '租約到期日不能早於起租日' });
     const imp = ensureImport(t.tid, t.cid, t.category, t.by, t.u.id);
-    const info = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(imp.id, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, r.extra, '{}', r.lease_start || '', r.lease_end || '', 'active', 'manual', now(), t.by);
+    const info = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by,emergency_name,emergency_phone) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(imp.id, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, r.extra, '{}', r.lease_start || '', r.lease_end || '', 'active', 'manual', now(), t.by, r.emergency_name || '', r.emergency_phone || '');
     db.prepare('UPDATE resident_imports SET row_count=row_count+1 WHERE id=?').run(imp.id);
     const id = Number(info.lastInsertRowid); if (saveParking(t, r.unit, req.body?.parking)) log(t, { category: t.category, record_id: id, unit: unitLabel(r), action: 'parking', summary: `更新車位：${r.unit}` });
     const summary = t.category === 'residents-tenants' ? `登錄租約：${r.name}${r.lease_start || r.lease_end ? `（${r.lease_start || '—'}～${r.lease_end || '—'}）` : ''}` : t.category === 'residents-owners' ? `新增所有權人：${r.name}` : `新增聯繫人：${r.name}`;
@@ -300,10 +302,10 @@ module.exports = function registerResidentRoutes(app, d) {
     if (t.category === 'residents-tenants' && r.lease_start && r.lease_end && r.lease_end < r.lease_start) return res.status(400).json({ error: '租約到期日不能早於起租日' });
     const transfer = t.category === 'residents-owners' && req.body?.transfer && r.name !== cur.name;
     const status = req.body?.status === 'ended' ? 'ended' : req.body?.status === 'active' ? 'active' : (cur.status || 'active');
-    db.prepare('UPDATE resident_records SET building=?,unit=?,floor=?,name=?,phone=?,address=?,extra=?,lease_start=?,lease_end=?,status=?,source=?,updated_at=?,updated_by=? WHERE id=?')
-      .run(r.building, r.unit, r.floor, r.name, r.phone, r.address, r.extra, r.lease_start ?? cur.lease_start ?? '', r.lease_end ?? cur.lease_end ?? '', status, cur.source === 'import' ? 'import-edited' : (cur.source || 'manual'), now(), t.by, cur.id);
+    db.prepare('UPDATE resident_records SET building=?,unit=?,floor=?,name=?,phone=?,address=?,extra=?,lease_start=?,lease_end=?,status=?,source=?,updated_at=?,updated_by=?,emergency_name=?,emergency_phone=? WHERE id=?')
+      .run(r.building, r.unit, r.floor, r.name, r.phone, r.address, r.extra, r.lease_start ?? cur.lease_start ?? '', r.lease_end ?? cur.lease_end ?? '', status, cur.source === 'import' ? 'import-edited' : (cur.source || 'manual'), now(), t.by, r.emergency_name || '', r.emergency_phone || '', cur.id);
     const changes = FIELDS.concat(t.category === 'residents-tenants' ? ['lease_start', 'lease_end'] : []).filter(f => String(cur[f] || '') !== String(r[f] || ''));
-    const names = { building: '棟別', unit: '戶號', floor: '樓層', name: '姓名', phone: '電話', address: '門牌', extra: '其他資料', lease_start: '起租日', lease_end: '租約到期日' };
+    const names = { building: '棟別', unit: '戶號', floor: '樓層', name: '姓名', phone: '電話', address: '門牌', extra: '其他資料', lease_start: '起租日', lease_end: '租約到期日', emergency_name: '緊急聯絡人', emergency_phone: '緊急聯絡電話' };
     let action = 'update', summary;
     if (transfer) { action = 'transfer'; summary = `過戶：${cur.name || '—'} → ${r.name}${req.body.transfer_date ? `（${normalizeDate(req.body.transfer_date) || req.body.transfer_date}）` : ''}`; }
     else if (status === 'ended' && cur.status !== 'ended') { action = 'end'; summary = `退租：${cur.name || '—'}${req.body?.end_date ? `（${normalizeDate(req.body.end_date)}）` : ''}`; if (req.body?.end_date) db.prepare('UPDATE resident_records SET lease_end=? WHERE id=?').run(normalizeDate(req.body.end_date) || r.lease_end || '', cur.id); }
@@ -361,14 +363,15 @@ module.exports = function registerResidentRoutes(app, d) {
     if (!ackOf(t.tid, t.u.id)) return res.status(403).json({ error: '請先同意住戶個資保密聲明', ack_required: true });
     if (!CL.layout(t.tid, t.cid).configured) return res.status(400).json({ error: '請先完成「社區棟別門牌設定」', need_layout: true });
     const lease = t.category === 'residents-tenants'; const blank = req.query.blank === '1';
-    const head = ['戶別', '姓名', '電話', ...(lease ? ['起租日', '租約到期日'] : []), '汽車位', '機車位', '其他資料'];
+    const contact = t.category === 'residents-contact';
+    const head = ['戶別', '姓名', '電話', ...(contact ? ['緊急聯絡人', '緊急聯絡電話'] : []), ...(lease ? ['起租日', '租約到期日'] : []), '汽車位', '機車位', contact ? '備註' : '其他資料（居住人、寵物等）'];
     const byUnit = new Map(); if (!blank) for (const r of records(t.tid, t.cid, t.category, { includeEnded: false })) { if (!byUnit.has(r.unit)) byUnit.set(r.unit, []); byUnit.get(r.unit).push(r); }
     const rows = []; for (const u of CL.units(t.tid, t.cid)) {
       const list = byUnit.get(u.code) || [null];
-      for (const r of list) rows.push([u.code, r?.name || '', r?.phone || '', ...(lease ? [r?.lease_start || '', r?.lease_end || ''] : []), u.cars.join('、'), u.motos.join('、'), r?.extra || '']);
+      for (const r of list) rows.push([u.code, r?.name || '', r?.phone || '', ...(contact ? [r?.emergency_name || '', r?.emergency_phone || ''] : []), ...(lease ? [r?.lease_start || '', r?.lease_end || ''] : []), u.cars.join('、'), u.motos.join('、'), r?.extra || '']);
     }
     const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
-    ws['!cols'] = head.map(h => ({ wch: h === '其他資料' ? 36 : ['電話', '汽車位'].includes(h) ? 18 : 10 }));
+    ws['!cols'] = head.map(h => ({ wch: /其他資料|備註/.test(h) ? 36 : ['電話', '汽車位', '緊急聯絡電話'].includes(h) ? 18 : 10 }));
     XLSX.utils.book_append_sheet(wb, ws, LABELS[t.category].slice(0, 31));
     const help = XLSX.utils.aoa_to_sheet([['填寫說明'], ['1. 「戶別」請不要修改，系統用戶別對到社區的棟別、樓層與門牌地址（完整地址會自動帶入）。'], ['2. 同一戶有多位' + (lease ? '承租人' : '所有權人／聯絡人') + '時，複製一列、戶別相同即可。'], ['3. 汽車位可以填多個，用頓號或逗號分開，例如：B1-313、B1-313-1。'], ['4. 機車位填號碼即可，例如：143。'], ...(lease ? [['5. 日期格式：2026/1/31 或 115/1/31 都可以。']] : []), ['上傳後會先顯示檢查結果（找不到的戶別、地址對不起來的資料），確認後才匯入。']]);
     help['!cols'] = [{ wch: 90 }]; XLSX.utils.book_append_sheet(wb, help, '填寫說明');
@@ -377,6 +380,27 @@ module.exports = function registerResidentRoutes(app, d) {
     const fn = `${t.community.name}-${LABELS[t.category]}-上傳範本.xlsx`;
     res.set('Cache-Control', 'no-store'); res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.set('Content-Disposition', `attachment; filename="template.xlsx"; filename*=UTF-8''${encodeURIComponent(fn)}`); res.send(buf);
+  });
+  // 住戶聯繫一覽表（列印／PDF）：給櫃檯、保全電話聯繫用，不含門牌地址
+  app.get('/api/staff/residents/contact-sheet', requireStaffFiller, (req, res) => {
+    req.query.category = 'residents-contact'; const t = ctx(req, res, { edit: true }); if (!t) return;
+    if (!ackOf(t.tid, t.u.id)) return res.status(403).json({ error: '請先同意住戶個資保密聲明', ack_required: true });
+    const recs = records(t.tid, t.cid, 'residents-contact', { includeEnded: false }); const byUnit = new Map();
+    for (const r of recs) { const k = r.unit || ''; if (!byUnit.has(k)) byUnit.set(k, []); byUnit.get(k).push(r); }
+    const join = (list, f) => [...new Set(list.map(x => String(x[f] || '').trim()).filter(Boolean))].join('、');
+    const emer = list => list.map(x => [x.emergency_name, x.emergency_phone].filter(Boolean).join(' ')).filter(Boolean).join('、');
+    const U = CL.units(t.tid, t.cid); const groups = []; const used = new Set();
+    if (U.length) {
+      for (const u of U) { let g = groups[groups.length - 1]; if (!g || g.code !== u.building) { g = { code: u.building, name: u.building_name, zone: u.zone, rows: [] }; groups.push(g); }
+        const list = byUnit.get(u.code) || []; used.add(u.code);
+        g.rows.push({ code: u.code, floor: u.floor, no: u.no, name: join(list, 'name'), phone: join(list, 'phone'), emergency: emer(list), cars: u.cars, motos: u.motos }); }
+    }
+    const rest = recs.filter(r => !used.has(r.unit || ''));
+    if (rest.length) { const map = new Map(); for (const r of rest) { const b = r.building || '其他'; if (!map.has(b)) map.set(b, []); map.get(b).push(r); }
+      for (const [b, list] of map) groups.push({ code: b, name: U.length ? `${b}（未對應戶別）` : b, zone: '', rows: list.map(r => ({ code: r.unit || '', floor: r.floor || '', no: '', name: r.name || '', phone: r.phone || '', emergency: emer([r]), cars: [], motos: [] })) }); }
+    log(t, { category: 'residents-contact', action: 'export', summary: `列印住戶聯繫一覽表（${groups.reduce((s, g) => s + g.rows.length, 0)} 戶）` });
+    res.set('Cache-Control', 'no-store');
+    res.json({ community: t.community.name, printed_at: now(), printed_by: t.by, groups });
   });
   // 社區棟別門牌設定（經理、秘書）
   app.get('/api/staff/residents/layout', requireStaffFiller, (req, res) => {
@@ -424,9 +448,10 @@ module.exports = function registerResidentRoutes(app, d) {
     if (!ackOf(t.tid, t.u.id)) return res.status(403).json({ error: '請先同意住戶個資保密聲明', ack_required: true });
     if (!XLSX) return res.status(500).json({ error: '伺服器沒有安裝 Excel 元件' });
     const lease = t.category === 'residents-tenants'; const today = todayTW(); const UM = unitMap(t.tid, t.cid);
-    const head = ['戶別', '棟別', '位置', '樓層', '姓名', '電話', ...(lease ? ['起租日', '租約到期日', '狀態'] : []), '汽車位', '機車位', '門牌地址', '其他資料'];
+    const contact = t.category === 'residents-contact';
+    const head = ['戶別', '棟別', '位置', '樓層', '姓名', '電話', ...(contact ? ['緊急聯絡人', '緊急聯絡電話'] : []), ...(lease ? ['起租日', '租約到期日', '狀態'] : []), '汽車位', '機車位', '門牌地址', '其他資料'];
     const recs = records(t.tid, t.cid, t.category, { includeEnded: false }).map(r => withUnit(r, UM)).sort((x, y) => (x.u?.sort ?? 1e9) - (y.u?.sort ?? 1e9));
-    const rows = recs.map(r => [r.unit || '', r.u?.building_name || r.building || '', r.u?.zone || '', r.floor || '', r.name || '', r.phone || '',
+    const rows = recs.map(r => [r.unit || '', r.u?.building_name || r.building || '', r.u?.zone || '', r.floor || '', r.name || '', r.phone || '', ...(contact ? [r.emergency_name || '', r.emergency_phone || ''] : []),
       ...(lease ? [r.lease_start || '', r.lease_end || '', { active: '有效', expiring: '30 天內到期', expired: '已到期', upcoming: '尚未起租', ended: '已退租' }[leaseState(r, today)] || ''] : []),
       (r.u?.cars || []).join('、'), (r.u?.motos || []).join('、'), r.u?.address || r.address || '', r.extra || '']);
     const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
