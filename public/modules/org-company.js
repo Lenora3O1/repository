@@ -52,9 +52,10 @@
     const isAdminAcc=m?.role==='company_admin';
     const catalog=typeof loadPermissionCatalog==='function'?await loadPermissionCatalog():{company:[],site:[]};
     const pid0=m?.position_id||m?.suggestion?.position_id||'';
+    const mobileMode=o.login_mode==='mobile';
     const {box,close}=modal(staffId?`👤 ${esc(m.name)}｜職位與工作設定`:'👤 開通人員',`<form class="og-form" id="ogForm">
-      ${staffId?`<label>員編<input value="${esc(m.employee_id)}" disabled></label><label>姓名<input name="name" value="${esc(m.name)}" ${isAdminAcc?'disabled':''}></label>`:`<label>員編<input name="employee_id" required placeholder="例如 A002"></label><label>姓名<input name="name" required placeholder="例如 王小明"></label>`}
-      <label>手機<input name="mobile" inputmode="tel" value="${esc(m?.mobile||'')}" placeholder="0912345678"><small class="muted" style="font-weight:400">可以用手機號碼登入</small></label>
+      ${staffId?`<label>員編<input value="${esc(m.employee_id)}" disabled></label><label>姓名<input name="name" value="${esc(m.name)}" ${isAdminAcc?'disabled':''}></label>`:(mobileMode?`<label>員編（可不填）<input name="employee_id" placeholder="不填會自動編號"></label>`:`<label>員編<input name="employee_id" required placeholder="例如 A002"></label>`)+`<label>姓名<input name="name" required placeholder="例如 王小明"></label>`}
+      <label>手機${mobileMode?'（登入帳號）':''}<input name="mobile" inputmode="tel" value="${esc(m?.mobile||'')}" placeholder="0912345678" ${mobileMode?'required':''}><small class="muted" style="font-weight:400">${mobileMode?'本公司以手機號碼登入':'可以用手機號碼登入'}</small></label>
       ${staffId?'':`<label>初始密碼<span style="display:flex;gap:6px"><input name="password" required minlength="4" placeholder="至少 4 碼"><button type="button" class="secondary" id="ogGen" style="padding:6px 10px;min-height:0;margin:0;white-space:nowrap">產生</button></span><small class="muted" style="font-weight:400">第一次登入時會要求本人改密碼</small></label>`}
       <label class="wide">職位<select name="position_id" required>${posOptions(o,pid0)}</select></label>
       ${m&&!m.position_id&&m.suggestion?`<div class="wide og-warn" style="margin:0">原本的設定：${esc(m.legacy_position||'未設定')}，系統建議對應為「${esc(m.suggestion.position_name)}」，請確認。</div>`:''}
@@ -91,8 +92,8 @@
       const body={name:f.elements.name?.value,mobile:f.elements.mobile.value,position_id:f.elements.position_id.value,community_ids:cids,region_ids:[...where.querySelectorAll('[name=rid]:checked')].map(x=>Number(x.value)),shift:where.querySelector('[name=shift]:checked')?.value||''};
       if(!isAdminAcc)body.permissions=[...box.querySelectorAll('[data-org-perm]:checked')].map(x=>x.dataset.orgPerm);
       if(!staffId){body.employee_id=f.elements.employee_id.value;body.password=f.elements.password.value;}
-      try{await api(staffId?`/api/company/org/staff/${staffId}`:'/api/company/org/staff',J(staffId?'PUT':'POST',body));close();
-        if(!staffId)alert(`已開通 ${body.name}。\n登入帳號：員編 ${body.employee_id}${body.mobile?` 或手機 ${body.mobile}`:''}\n初始密碼：${body.password}\n第一次登入會要求本人修改密碼。`);
+      try{const r=await api(staffId?`/api/company/org/staff/${staffId}`:'/api/company/org/staff',J(staffId?'PUT':'POST',body));close();
+        if(!staffId)alert(`已開通 ${body.name}。\n登入帳號：${mobileMode?`手機 ${body.mobile}`:`員編 ${r.employee_id||body.employee_id}${body.mobile?` 或手機 ${body.mobile}`:''}`}\n初始密碼：${body.password}\n第一次登入會要求本人修改密碼。`);
         onDone&&onDone();}catch(err){msg.innerHTML=`<div class="msg error">${esc(err.message)}</div>`;}});
   }
 
