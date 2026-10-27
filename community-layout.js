@@ -45,8 +45,12 @@ function parseParking(text) {
   const s = half(text); const cars = [], motos = [];
   for (const m of s.matchAll(/(?<![A-Za-z0-9])(B\d{1,2}-\d{1,4}(?:-\d{1,2})?)/gi)) cars.push(m[1].toUpperCase());
   for (const m of s.matchAll(/機(?:車)?(?:位)?[:：]?\s*([A-Za-z]?\d{1,4}(?:-\d{1,3})?)/g)) motos.push(m[1].toUpperCase());
-  return { cars: [...new Set(cars)], motos: [...new Set(motos)] };
+  // 車牌：AYH-3739、1331-ZF、327-MPT（車位 B1-330 不算）
+  const plates = []; for (const m of s.toUpperCase().matchAll(/(?<![A-Z0-9-])([A-Z]{2,3}-\d{3,4}|\d{3,4}-[A-Z]{2,3})(?![A-Z0-9])/g)) plates.push(m[1]);
+  let occupancy = ''; if (/未交屋/.test(s)) occupancy = 'undelivered'; else if (/未入住|空屋|空戶/.test(s)) occupancy = 'vacant';
+  return { cars: [...new Set(cars)], motos: [...new Set(motos)], plates: [...new Set(plates)], occupancy };
 }
+const OCC = { '': '已入住', vacant: '未入住', undelivered: '未交屋' };
 const splitSpaces = v => [...new Set(half(v).toUpperCase().split(/[,，、;；/／]+/).map(x => x.trim()).filter(Boolean))].slice(0, 10);
 
 module.exports = function registerCommunityLayout(d) {
@@ -54,6 +58,7 @@ module.exports = function registerCommunityLayout(d) {
   { const cols = db.prepare('PRAGMA table_info(communities)').all().map(c => c.name); if (!cols.includes('main_address')) db.exec("ALTER TABLE communities ADD COLUMN main_address TEXT DEFAULT ''"); }
   db.exec(`CREATE TABLE IF NOT EXISTS community_layouts (tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, prefix TEXT DEFAULT '', code_format TEXT DEFAULT 'FBN', buildings_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT, updated_by TEXT DEFAULT '', PRIMARY KEY (tenant_id,community_id));
     CREATE TABLE IF NOT EXISTS resident_units (tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, code TEXT NOT NULL, building TEXT DEFAULT '', building_name TEXT DEFAULT '', zone TEXT DEFAULT '', floor INTEGER, no TEXT DEFAULT '', door TEXT DEFAULT '', address TEXT DEFAULT '', short TEXT DEFAULT '', sort INTEGER DEFAULT 0, active INTEGER DEFAULT 1, cars_json TEXT DEFAULT '[]', motos_json TEXT DEFAULT '[]', parking_updated_at TEXT, parking_updated_by TEXT DEFAULT '', PRIMARY KEY (tenant_id,community_id,code));`);
+  { const cols = db.prepare('PRAGMA table_info(resident_units)').all().map(c => c.name); if (!cols.includes('plates_json')) db.exec("ALTER TABLE resident_units ADD COLUMN plates_json TEXT DEFAULT '[]'"); if (!cols.includes('occupancy')) db.exec("ALTER TABLE resident_units ADD COLUMN occupancy TEXT DEFAULT ''"); }
   const parse = (s, f) => { try { return JSON.parse(s); } catch { return f; } };
 
   function cleanLayout(b) {
@@ -108,11 +113,13 @@ module.exports = function registerCommunityLayout(d) {
     })();
     return { layout: layout(tid, cid), units: units.length };
   }
-  const unitOut = r => ({ code: r.code, building: r.building, building_name: r.building_name, zone: r.zone, floor: r.floor, no: r.no, door: r.door, address: r.address, short: r.short, sort: r.sort, cars: parse(r.cars_json, []), motos: parse(r.motos_json, []) });
+  const unitOut = r => ({ code: r.code, building: r.building, building_name: r.building_name, zone: r.zone, floor: r.floor, no: r.no, door: r.door, address: r.address, short: r.short, sort: r.sort, cars: parse(r.cars_json, []), motos: parse(r.motos_json, []), plates: parse(r.plates_json, []), occupancy: r.occupancy || '' });
   function units(tid, cid) { return db.prepare('SELECT * FROM resident_units WHERE tenant_id=? AND community_id=? AND active=1 ORDER BY sort').all(tid, cid).map(unitOut); }
-  function setParking(tid, cid, code, cars, motos, by) {
-    const r = db.prepare('SELECT code FROM resident_units WHERE tenant_id=? AND community_id=? AND code=? AND active=1').get(tid, cid, code); if (!r) return false;
-    db.prepare('UPDATE resident_units SET cars_json=?,motos_json=?,parking_updated_at=?,parking_updated_by=? WHERE tenant_id=? AND community_id=? AND code=?').run(JSON.stringify(cars), JSON.stringify(motos), now(), by, tid, cid, code); return true;
+  // 戶的車位／車牌／戶況（未入住、未交屋）；沒有給的欄位維持原值
+  function setParking(tid, cid, code, cars, motos, by, extra = {}) {
+    const r = db.prepare('SELECT * FROM resident_units WHERE tenant_id=? AND community_id=? AND code=? AND active=1').get(tid, cid, code); if (!r) return false;
+    const plates = Array.isArray(extra.plates) ? extra.plates : parse(r.plates_json, []); const occ = extra.occupancy !== undefined && OCC[extra.occupancy] !== undefined ? extra.occupancy : (r.occupancy || '');
+    db.prepare('UPDATE resident_units SET cars_json=?,motos_json=?,plates_json=?,occupancy=?,parking_updated_at=?,parking_updated_by=? WHERE tenant_id=? AND community_id=? AND code=?').run(JSON.stringify(cars ?? parse(r.cars_json, [])), JSON.stringify(motos ?? parse(r.motos_json, [])), JSON.stringify(plates), occ, now(), by, tid, cid, code); return true;
   }
 
   // 解析一筆資料對到哪一戶：戶別代號、完整地址、橫向表格的「1-1-0101」都可以
@@ -149,6 +156,6 @@ module.exports = function registerCommunityLayout(d) {
       return { unit: u, note, warn };
     };
   }
-  return { FORMATS, clean: cleanLayout, layout, save, generate, units, setParking, resolver, parseParking, splitSpaces, parseAddress, cnNum };
+  return { OCC, FORMATS, clean: cleanLayout, layout, save, generate, units, setParking, resolver, parseParking, splitSpaces, parseAddress, cnNum };
 };
 Object.assign(module.exports, { parseParking, parseAddress, expandList, cnNum, fromCn, FORMATS });
