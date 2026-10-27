@@ -58,7 +58,7 @@
 .r-hist li{display:grid;grid-template-columns:110px 110px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:1px dashed #E9E3E1;font-size:.9rem}
 .r-hist ul{list-style:none;margin:0;padding:0}
 .r-diff td{padding:6px 8px;border-top:1px solid #F2EFEE;font-size:.88rem}.r-diff th{text-align:left;padding:6px 8px;background:#F8F6F4;font-size:.82rem}
-.r-code{font-size:1.02rem;letter-spacing:.02em}.r-zone{margin-top:3px;background:#F3E7E1!important;color:#7E331D!important}.r-park{display:inline-block;padding:1px 8px;margin:1px 0;border-radius:6px;background:#EEF2F7;color:#2F4A6B;font-size:.8rem;font-weight:700;white-space:nowrap}.r-plate{color:#6B5A55;font-size:.78rem}.r-park.m{background:#F1EEE6;color:#6B5A2E}
+.r-code{font-size:1.02rem;letter-spacing:.02em}.r-zone{margin-top:3px;background:#F3E7E1!important;color:#7E331D!important}.r-park{display:inline-block;padding:1px 8px;margin:1px 0;border-radius:6px;background:#EEF2F7;color:#2F4A6B;font-size:.8rem;font-weight:700;white-space:nowrap}.r-plate{color:#4A3B37;font-size:.8rem;margin-left:5px;white-space:nowrap}.r-veh{white-space:nowrap;line-height:1.7}.r-park.m{background:#F1EEE6;color:#6B5A2E}
 .r-zones{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}.r-zones button{padding:5px 12px;min-height:0;border-radius:999px;font-size:.85rem}
 .r-setup{border:1.5px dashed #D9C7C0;border-radius:14px;padding:14px 16px;margin:6px 0 14px;background:#FBF8F6;display:flex;gap:14px;align-items:center;flex-wrap:wrap}.r-setup div{flex:1;min-width:260px;line-height:1.7}
 .r-pv-list{max-height:45vh;overflow:auto;border:1px solid #EFE7E3;border-radius:10px;padding:6px 10px;margin:8px 0;font-size:.88rem}.r-pv-list div{padding:4px 0;border-bottom:1px dashed #EFE7E3}
@@ -85,7 +85,7 @@
       if(S.category==='residents-tenants'){if(f.lease){if(r.lease_state!==f.lease)return false;}else if(r.lease_state==='ended')return false;}
       if(f.building&&String(r.building||'')!==f.building)return false;
       if(f.zone&&String(r.u?.zone||'')!==f.zone)return false;
-      if(!q)return true;const qq=q.replace(/[\s-]/g,'');return [r.building,r.unit,r.floor,r.name,r.phone,r.address,r.extra,r.lease_start,r.lease_end,r.emergency_name,r.emergency_phone,...(r.u?.plates||[]),r.u?.short,r.u?.address,r.u?.building_name,...(r.u?.cars||[]),...(r.u?.motos||[])].some(v=>{const t=String(v??'').toLowerCase();return t.includes(q)||(qq&&t.replace(/[\s-]/g,'').includes(qq));});
+      if(!q)return true;const qq=q.replace(/[\s-]/g,'');return [r.building,r.unit,r.floor,r.name,r.phone,r.address,r.extra,r.lease_start,r.lease_end,r.emergency_name,r.emergency_phone,...(r.u?.plates||[]),...(r.u?.moto_plates||[]),...(r.pk?.cars||[]),...(r.pk?.motos||[]),...(r.pk?.plates||[]),...(r.pk?.moto_plates||[]),r.u?.short,r.u?.address,r.u?.building_name,...(r.u?.cars||[]),...(r.u?.motos||[])].some(v=>{const t=String(v??'').toLowerCase();return t.includes(q)||(qq&&t.replace(/[\s-]/g,'').includes(qq));});
     });
   }
   function table(rows){
@@ -93,12 +93,15 @@
     if(!rows.length)return `<div class="empty">${(d.records||[]).length?'沒有符合條件的資料。':`目前還沒有${labels[cat]}資料。${edit?'可以上傳 Excel，或按「＋ 新增」逐筆建立。':''}`}</div>`;
     const lease=cat==='residents-tenants',contact=cat==='residents-contact',src=contact;
     const smart=!!d.layout?.configured;
-    const park=r=>`<td>${(r.u?.cars||[]).map(c=>`<span class="r-park">${esc(c)}</span>`).join(' ')}${(r.u?.plates||[]).length?`<br><small class="r-plate">🚗 ${r.u.plates.map(esc).join('、')}</small>`:''}</td><td>${(r.u?.motos||[]).map(c=>`<span class="r-park m">${esc(c)}</span>`).join(' ')}</td>`;
-    const emer=r=>`<td>${r.emergency_name||r.emergency_phone?`${esc(r.emergency_name||'')}${r.emergency_phone?`<br><small>${esc(r.emergency_phone)}</small>`:''}`:''}</td>`;
+    // 汽車位／機車位：車位號碼＋車牌號碼（沒有車輛就留空）；還沒設定棟別門牌時從其他資料解析
+    const pkOf=r=>r.u||r.pk||{};
+    const vehicle=(spaces,plates,moto)=>{const sp=spaces||[],pl=plates||[];if(!sp.length&&!pl.length)return '';const n=Math.max(sp.length,pl.length);return Array.from({length:n},(_,k)=>`<div class="r-veh">${sp[k]?`<span class="r-park${moto?' m':''}">${moto?'機':''}${esc(sp[k])}</span>`:''}${pl[k]?`<span class="r-plate">${esc(pl[k])}</span>`:''}</div>`).join('');};
+    const park=r=>{const p=pkOf(r);return `<td>${vehicle(p.cars,p.plates,false)}</td><td>${vehicle(p.motos,p.moto_plates,true)}</td>`;};
+    const emer=r=>`<td>${r.emergency_name||r.emergency_phone?`${esc(r.emergency_name||'')}${r.emergency_phone?` <span style="white-space:nowrap">${esc(r.emergency_phone)}</span>`:''}`:''}</td>`;
     const miss=r=>`<br><span class="r-tag bad" title="這筆資料的戶別不在社區戶別清單裡，請編輯修正">未對應</span>`;
     // 住戶聯繫表：櫃檯、保全聯繫用（棟別、樓層、戶號、姓名、電話、車位、緊急聯絡人）；門牌與其他資料放在所有權人、承租人
     const head=contact
-      ?`<th>棟別</th><th>樓層</th><th>戶號</th><th>姓名</th><th>電話</th>${smart?'<th>汽車位</th><th>機車位</th>':''}<th>緊急聯絡人</th>`
+      ?`<th>棟別</th><th>樓層</th><th>戶號</th><th>姓名</th><th>電話</th><th>汽車位（車牌）</th><th>機車位（車牌）</th><th>緊急聯絡人及電話</th>`
       :`${smart?'<th>戶別</th><th>棟／位置</th><th>門牌</th>':'<th>棟別</th><th>戶號</th><th>樓層</th>'}<th>姓名</th><th>電話</th>${lease?'<th>租約期間</th><th>狀態</th>':''}${smart?'':'<th>門牌／地址</th>'}<th>其他資料（居住人、寵物等）</th>`;
     return `<div class="resident-table-wrap"><table class="resident-table"><thead><tr>${head}${src?'<th>來源</th>':''}${edit?'<th></th>':''}</tr></thead><tbody>${rows.map(r=>{
       const st=LEASE[r.lease_state]||LEASE.active;const so=SOURCE[r.source]||SOURCE.import;
@@ -109,7 +112,7 @@
       if(contact){
         cells=smart&&r.u?`<td>${esc(r.u.building_name)}${r.u.zone?`<br><span class="r-tag r-zone">${esc(r.u.zone)}</span>`:''}</td><td>${esc(r.u.floor<0?`B${-r.u.floor}`:`${r.u.floor}F`)}</td><td><b class="r-code">${esc(r.u.code)}</b>${r.u.occupancy==='vacant'?'<br><span class="r-tag warn">未入住</span>':r.u.occupancy==='undelivered'?'<br><span class="r-tag bad">未交屋</span>':''}</td>`
           :`<td>${esc(r.building)}</td><td>${esc(r.floor)}</td><td><b>${esc(r.unit)}</b>${smart?miss(r):''}</td>`;
-        cells+=`<td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone)}</td>${smart?park(r):''}${emer(r)}`;
+        cells+=`<td><strong>${esc(r.name)}</strong></td><td class="wrap">${esc(r.phone)}</td>${park(r)}${emer(r)}`;
       }else{
         cells=(smart?(r.u?`<td><b class="r-code">${esc(r.u.code)}</b></td><td>${esc(r.u.building_name)}${r.u.zone?`<br><span class="r-tag r-zone">${esc(r.u.zone)}</span>`:''}</td><td title="${esc(r.u.address)}">${esc(r.u.short)}</td>`:`<td><b>${esc(r.unit)}</b>${miss(r)}</td><td>${esc(r.building)}</td><td class="wrap">${esc(r.address)}</td>`):`<td>${esc(r.building)}</td><td>${esc(r.unit)}</td><td>${esc(r.floor)}</td>`)
           +`<td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone)}</td>${lease?`<td style="white-space:nowrap">${esc(r.lease_start||'—')}<br>～ ${esc(r.lease_end||'—')}</td><td><span class="r-tag ${st[1]}">${st[0]}</span></td>`:''}${smart?'':`<td class="wrap">${esc(r.address)}</td>`}<td class="wrap">${esc(r.extra||'')}</td>`;
@@ -140,7 +143,7 @@
       <label>姓名 *<input name="name" value="${esc(r.name)}"></label>
       <label>電話<input name="phone" value="${esc(r.phone)}" inputmode="tel"></label>
       ${cat==='residents-contact'?`<label>緊急聯絡人<input name="emergency_name" value="${esc(r.emergency_name)}"></label><label>緊急聯絡電話<input name="emergency_phone" value="${esc(r.emergency_phone)}" inputmode="tel"></label>`:''}
-      ${smart?`<label>汽車位<input name="p_cars" value="${esc((r.u?.cars||[]).join('、'))}" placeholder="例如 B1-313、B1-313-1"></label><label>機車位<input name="p_motos" value="${esc((r.u?.motos||[]).join('、'))}" placeholder="例如 143"></label><label>車牌<input name="p_plates" value="${esc((r.u?.plates||[]).join('、'))}" placeholder="例如 ABC-1234、123-XYZ"></label><label>戶況<select name="p_occ"><option value="" ${!r.u?.occupancy?'selected':''}>已入住</option><option value="vacant" ${r.u?.occupancy==='vacant'?'selected':''}>未入住（一覽表黃底）</option><option value="undelivered" ${r.u?.occupancy==='undelivered'?'selected':''}>未交屋（一覽表紅字）</option></select></label>`:`<label>門牌／地址<input name="address" value="${esc(r.address)}"></label>`}
+      ${smart?`<label>汽車位<input name="p_cars" value="${esc((r.u?.cars||[]).join('、'))}" placeholder="例如 B1-313、B1-313-1"></label><label>機車位<input name="p_motos" value="${esc((r.u?.motos||[]).join('、'))}" placeholder="例如 143"></label><label>汽車車牌<input name="p_plates" value="${esc((r.u?.plates||[]).join('、'))}" placeholder="例如 ABC-1234（沒有車輛留空）"></label><label>機車車牌<input name="p_mplates" value="${esc((r.u?.moto_plates||[]).join('、'))}" placeholder="例如 MAB-1234（沒有車輛留空）"></label><label>戶況<select name="p_occ"><option value="" ${!r.u?.occupancy?'selected':''}>已入住</option><option value="vacant" ${r.u?.occupancy==='vacant'?'selected':''}>未入住（一覽表黃底）</option><option value="undelivered" ${r.u?.occupancy==='undelivered'?'selected':''}>未交屋（一覽表紅字）</option></select></label>`:`<label>門牌／地址<input name="address" value="${esc(r.address)}"></label>`}
       ${lease?`<div class="r-owner-hint" id="rOwnerHint" ${S.d.units?.length?'':'hidden'}></div><label>起租日<input type="date" name="lease_start" value="${esc(r.lease_start)}"></label><label>租約到期日<input type="date" name="lease_end" value="${esc(r.lease_end)}"></label>`:''}
       <label class="wide">${cat==='residents-contact'?'備註':'其他資料（居住人、寵物、備註等）'}<textarea name="extra" rows="${cat==='residents-contact'?2:3}">${esc(r.extra)}</textarea></label>
       <div class="wide modal-actions"><button type="button" class="secondary" data-cancel>取消</button><button type="submit">💾 儲存</button></div></form>`);
@@ -154,7 +157,7 @@
     if(renew&&f.lease_end){f.lease_end.focus();if(r.lease_end){const d=new Date(`${r.lease_end}T00:00:00`);d.setFullYear(d.getFullYear()+1);f.lease_end.value=d.toISOString().slice(0,10);}}else f.unit.focus();
     box.querySelector('[data-cancel]').onclick=close;
     f.addEventListener('submit',async e=>{e.preventDefault();const record=Object.fromEntries(new FormData(f).entries());if(!record.unit.trim()||!record.name.trim()){alert(smart?'請填寫戶別與姓名':'請填寫戶號與姓名');return;}
-      let parking;if(smart){parking={cars:record.p_cars||'',motos:record.p_motos||'',plates:record.p_plates||'',occupancy:record.p_occ||''};delete record.p_cars;delete record.p_motos;delete record.p_plates;delete record.p_occ;record.unit=record.unit.trim().toUpperCase();}
+      let parking;if(smart){parking={cars:record.p_cars||'',motos:record.p_motos||'',plates:record.p_plates||'',moto_plates:record.p_mplates||'',occupancy:record.p_occ||''};delete record.p_cars;delete record.p_motos;delete record.p_plates;delete record.p_mplates;delete record.p_occ;record.unit=record.unit.trim().toUpperCase();}
       try{const res=isNew?await api('/api/staff/residents/records',J('POST',{category:cat,record,parking})):await api(`/api/staff/residents/records/${r.id}`,J('PUT',{category:cat,record,parking}));close();if(res.synced)alert(`已儲存。${synced(res.synced)}`);await reload();}catch(err){alert(err.message);}});
   }
   function openTransfer(r){
@@ -241,7 +244,7 @@
   // ---------- 住戶聯繫一覽表（A4，各棟「樓層 × 戶號」對照表，列印或另存 PDF）----------
   // 戶數多的棟：一棟一頁（樓層太多才分頁，由高樓層往下）；戶數少的棟：多棟合併在同一頁。不含門牌地址。
   const PAGE_MM=246,LINE_MM=3.55;
-  function cellLines(u){return 1+Math.max(1,Math.ceil((u.names||[]).length/2))+Math.max(1,(u.phones||[]).length)+(u.emergency||[]).length+Math.max(1,(u.cars||[]).length+((u.motos||[]).length?1:0),(u.plates||[]).length);}
+  function cellLines(u){return 1+Math.max(1,Math.ceil((u.names||[]).length/2))+Math.max(1,(u.phones||[]).length)+(u.emergency||[]).length+Math.max(1,Math.max((u.cars||[]).length,(u.plates||[]).length)+Math.max((u.motos||[]).length,(u.moto_plates||[]).length));}
   function sheetBlocks(groups){
     // 每棟拆成「列」：住宅棟一列 = 一個樓層；逐戶指定（店面）每 6 戶一列
     const blocks=[];
@@ -264,13 +267,15 @@
     }
     return pages;
   }
+  // 車位與車牌同一行：左邊車位、右邊車牌（汽車在上、機車在下）
+  function vehRows(u){const row=(sp,pl,m)=>Array.from({length:Math.max((sp||[]).length,(pl||[]).length)},(_,k)=>`<div class="pk"><span>${sp?.[k]?`${m?'機':''}${esc(sp[k])}`:''}</span><span class="pl">${pl?.[k]?esc(pl[k]):''}</span></div>`).join('');return row(u.cars,u.plates,false)+row(u.motos,u.moto_plates,true);}
   async function printContactSheet(){
     const d=await api('/api/staff/residents/contact-sheet');const pages=sheetBlocks(d.groups);const when=String(d.printed_at||'').slice(0,10);
     const cellHtml=u=>{if(!u)return '<td class="x"></td>';const cls=[u.tenant?'ten':'',u.occupancy==='vacant'?'vac':'',u.occupancy==='undelivered'?'und':''].filter(Boolean).join(' ');
       const names=[];for(let i=0;i<(u.names||[]).length;i+=2)names.push(u.names.slice(i,i+2).map(esc).join('　'));
-      return `<td class="${cls}"><div class="cd">${esc(u.code)}${u.tenant?'<i>(租)</i>':''}${u.occupancy==='vacant'?'<i>未入住</i>':u.occupancy==='undelivered'?'<i>未交屋</i>':''}</div>
+      return `<td class="${cls}"><div class="cd">${esc(u.code)}${u.tenant&&!/租/.test(u.code)?'<i>(租)</i>':''}${u.occupancy==='vacant'?'<i>未入住</i>':u.occupancy==='undelivered'?'<i>未交屋</i>':''}</div>
         <div class="nm">${names.join('<br>')||'&nbsp;'}</div><div class="ph">${(u.phones||[]).map(esc).join('<br>')||'&nbsp;'}</div>${(u.emergency||[]).length?`<div class="em">緊急 ${u.emergency.map(esc).join('<br>緊急 ')}</div>`:''}
-        <div class="pk"><span>${[...(u.cars||[]).map(esc),...((u.motos||[]).length?[`機${u.motos.map(esc).join('、')}`]:[])].join('<br>')}</span><span class="pl">${(u.plates||[]).map(esc).join('<br>')}</span></div></td>`;};
+        ${vehRows(u)}</td>`;};
     const blockHtml=blk=>`<div class="blk"><div class="bt"><b>${esc(blk.g.name)}</b>${blk.g.zone?`<small>（${esc(blk.g.zone)}）</small>`:''}${blk.cont?'<small>（續）</small>':''}<small>共 ${blk.g.units.length} 戶</small></div>
       <table><colgroup>${blk.heads?'<col style="width:6mm">':''}${Array.from({length:blk.ncol},()=>'<col>').join('')}</colgroup>${blk.heads?`<thead><tr><th></th>${blk.heads.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>`:''}
       <tbody>${blk.rows.map(r=>`<tr>${blk.heads?`<th class="fl">${esc(r.label)}</th>`:''}${r.cells.map(cellHtml).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -282,7 +287,7 @@
       table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#EEE7E3;font-size:8pt;padding:.8mm;border:.5pt solid #9C8C86;text-align:center}th.fl{font-size:9pt}
       td{border:.5pt solid #9C8C86;vertical-align:top;padding:.8mm 1.1mm;overflow:hidden;word-break:break-all}td.x{background:repeating-linear-gradient(45deg,#fff 0 2mm,#F4F0EE 2mm 4mm)}
       .cd{font-weight:700;font-size:8.2pt;border-bottom:.4pt dotted #B9AAA4;margin-bottom:.5mm}.cd i{font-style:normal;font-weight:400;margin-left:1mm;font-size:7.4pt}
-      .nm{font-size:8.4pt;font-weight:600}.ph{font-size:7.6pt}.em{font-size:7pt;color:#6B5A55}.pk{display:flex;justify-content:space-between;gap:1mm;font-size:7.1pt;margin-top:.6mm;color:#333}.pk .pl{text-align:right;color:#555}
+      .nm{font-size:8.4pt;font-weight:600}.ph{font-size:7.6pt}.em{font-size:7pt;color:#6B5A55}.pk{display:flex;justify-content:space-between;gap:1mm;font-size:7.1pt;color:#333}.pk:first-of-type{margin-top:.6mm}.pk .pl{text-align:right;color:#555}
       td.ten,td.ten .nm,td.ten .ph,td.ten .cd{color:#1E56A0}td.vac{background:#FFF0B3}td.und,td.und .nm,td.und .ph,td.und .cd{color:#C0392B}
       .ft{margin-top:auto;display:flex;justify-content:space-between;font-size:7.4pt;color:#777;border-top:.5pt solid #ccc;padding-top:1.3mm}
     </style></head><body>${pages.map((p,pi)=>`<section class="pg"><div class="hd"><b>${esc(d.community)}｜住戶聯繫一覽表</b><span class="lg"><i class="t">藍字：承租戶</i><i class="v">黃底：未入住</i><i class="u">紅字：未交屋</i><small>列印 ${esc(when)}</small></span></div>
