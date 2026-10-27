@@ -17,7 +17,7 @@
   const iso=(dOffset=0,h=9,m=0)=>{const d=new Date(today);d.setDate(d.getDate()+dOffset);d.setHours(h,m,0,0);return d.toISOString();};
   const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const month=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
-  const COMMUNITIES=[{id:901,name:'示意社區・綠景莊園',status:'active'},{id:902,name:'示意社區・翠堤大廈',status:'active'}];
+  const COMMUNITIES=[{id:901,name:'示意社區・幸福花園',status:'active'},{id:902,name:'示意社區・翠堤大廈',status:'active'}];
   const PEOPLE=[
     {id:801,employee_id:'D001',name:'王小明',job_level:'經理',job_category:'社區管理',work_type:'site',position:'經理｜社區管理'},
     {id:802,employee_id:'D002',name:'林雅婷',job_level:'秘書',job_category:'秘書',work_type:'site',position:'秘書｜秘書'},

@@ -42,7 +42,7 @@
     const bg=document.createElement('div');bg.className='modal-backdrop';
     bg.innerHTML=`<div class="modal cl-ed" role="dialog" aria-modal="true" style="max-width:1100px;width:min(1100px,96vw);max-height:92vh;overflow:auto"><button type="button" class="modal-close" aria-label="關閉">×</button>
       <h2>🏗 社區棟別門牌設定</h2><p class="hint" style="margin-top:-4px">${esc(d.community?.name||'')}。每一棟填一行；店面這類每戶門牌不同的，類型選「逐戶指定」，一行一戶：<code>店1 117號</code>。</p>
-      <div class="cl-top"><label class="f">共同地址前段（每一戶都一樣的部分）<input id="clPre" value="${esc(L.prefix)}" placeholder="例如：台中市潭子區福仁里30鄰"></label>
+      <div class="cl-top"><label class="f">共同地址前段（每一戶都一樣的部分）<input id="clPre" value="${esc(L.prefix)}" placeholder="例如：範例市幸福區和平里1鄰"></label>
       <label class="f">戶別代號格式<select id="clFmt">${Object.entries(d.formats).map(([k,v])=>`<option value="${k}" ${L.code_format===k?'selected':''}>${esc(v)}</option>`).join('')}</select></label></div>
       <div class="cl-row h"><span>代號</span><span>名稱</span><span>位置</span><span>類型</span><span>門牌</span><span>樓層</span><span>每層戶號／逐戶清單</span><span></span></div>
       <div id="clRows"></div><button type="button" class="secondary" id="clAdd" style="margin-top:8px">＋ 新增一棟</button>
@@ -54,7 +54,7 @@
     const rowsEl=bg.querySelector('#clRows');
     const read=()=>({prefix:bg.querySelector('#clPre').value,code_format:bg.querySelector('#clFmt').value,buildings:[...rowsEl.querySelectorAll('.cl-row')].map(r=>{const v=k=>r.querySelector(`[data-k="${k}"]`)?.value??'';return {code:v('code'),name:v('name'),zone:v('zone'),type:v('type'),door:v('door'),floor_from:v('floor_from'),floor_to:v('floor_to'),units:v('units'),list:v('list')};})});
     function draw(){rowsEl.innerHTML=L.buildings.map((b,i)=>`<div class="cl-row" data-i="${i}"><input data-k="code" value="${esc(b.code)}" placeholder="A"><input data-k="name" value="${esc(b.name)}" placeholder="A棟"><input data-k="zone" value="${esc(b.zone)}" list="clZones" placeholder="前棟"><select data-k="type"><option value="tower" ${b.type!=='list'?'selected':''}>住宅棟</option><option value="list" ${b.type==='list'?'selected':''}>逐戶指定</option></select>
-      <input data-k="door" value="${esc(b.door)}" placeholder="${b.type==='list'?'路名，例如：僑興路':'例如：僑興路109號'}">
+      <input data-k="door" value="${esc(b.door)}" placeholder="${b.type==='list'?'路名，例如：和平路':'例如：和平路100號'}">
       ${b.type==='list'?'<span class="hint" style="padding-top:8px">—</span>':`<div class="cl-fl"><input data-k="floor_from" type="number" value="${esc(b.floor_from??1)}">～<input data-k="floor_to" type="number" value="${esc(b.floor_to??1)}"></div>`}
       ${b.type==='list'?`<textarea data-k="list" rows="4" placeholder="店1 117號&#10;店2 115號">${esc(b.list||'')}</textarea>`:`<input data-k="units" value="${esc(b.units||'')}" placeholder="例如：1-3,5-7（跳過 4）">`}
       <button type="button" class="secondary cl-del" data-del="${i}" title="刪除這一棟">✕</button></div>`).join('');

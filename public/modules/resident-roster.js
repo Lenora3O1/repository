@@ -85,22 +85,37 @@
       if(S.category==='residents-tenants'){if(f.lease){if(r.lease_state!==f.lease)return false;}else if(r.lease_state==='ended')return false;}
       if(f.building&&String(r.building||'')!==f.building)return false;
       if(f.zone&&String(r.u?.zone||'')!==f.zone)return false;
-      if(!q)return true;const qq=q.replace(/[\s-]/g,'');return [r.building,r.unit,r.floor,r.name,r.phone,r.address,r.extra,r.lease_start,r.lease_end,r.u?.short,r.u?.address,r.u?.building_name,...(r.u?.cars||[]),...(r.u?.motos||[])].some(v=>{const t=String(v??'').toLowerCase();return t.includes(q)||(qq&&t.replace(/[\s-]/g,'').includes(qq));});
+      if(!q)return true;const qq=q.replace(/[\s-]/g,'');return [r.building,r.unit,r.floor,r.name,r.phone,r.address,r.extra,r.lease_start,r.lease_end,r.emergency_name,r.emergency_phone,r.u?.short,r.u?.address,r.u?.building_name,...(r.u?.cars||[]),...(r.u?.motos||[])].some(v=>{const t=String(v??'').toLowerCase();return t.includes(q)||(qq&&t.replace(/[\s-]/g,'').includes(qq));});
     });
   }
   function table(rows){
     const d=S.d,edit=!!d.viewer?.can_edit,cat=S.category;
     if(!rows.length)return `<div class="empty">${(d.records||[]).length?'沒有符合條件的資料。':`目前還沒有${labels[cat]}資料。${edit?'可以上傳 Excel，或按「＋ 新增」逐筆建立。':''}`}</div>`;
-    const lease=cat==='residents-tenants',src=cat==='residents-contact';
+    const lease=cat==='residents-tenants',contact=cat==='residents-contact',src=contact;
     const smart=!!d.layout?.configured;
-    return `<div class="resident-table-wrap"><table class="resident-table"><thead><tr>${smart?'<th>戶別</th><th>棟／位置</th><th>門牌</th>':'<th>棟別</th><th>戶號</th><th>樓層</th>'}<th>姓名</th><th>電話</th>${lease?'<th>租約期間</th><th>狀態</th>':''}${smart?'<th>汽車位</th><th>機車位</th>':'<th>門牌／地址</th>'}<th>其他資料</th>${src?'<th>來源</th>':''}${edit?'<th></th>':''}</tr></thead><tbody>${rows.map(r=>{
+    const park=r=>`<td>${(r.u?.cars||[]).map(c=>`<span class="r-park">${esc(c)}</span>`).join(' ')}</td><td>${(r.u?.motos||[]).map(c=>`<span class="r-park m">${esc(c)}</span>`).join(' ')}</td>`;
+    const emer=r=>`<td>${r.emergency_name||r.emergency_phone?`${esc(r.emergency_name||'')}${r.emergency_phone?`<br><small>${esc(r.emergency_phone)}</small>`:''}`:''}</td>`;
+    const miss=r=>`<br><span class="r-tag bad" title="這筆資料的戶別不在社區戶別清單裡，請編輯修正">未對應</span>`;
+    // 住戶聯繫表：櫃檯、保全聯繫用（棟別、樓層、戶號、姓名、電話、車位、緊急聯絡人）；門牌與其他資料放在所有權人、承租人
+    const head=contact
+      ?`<th>棟別</th><th>樓層</th><th>戶號</th><th>姓名</th><th>電話</th>${smart?'<th>汽車位</th><th>機車位</th>':''}<th>緊急聯絡人</th>`
+      :`${smart?'<th>戶別</th><th>棟／位置</th><th>門牌</th>':'<th>棟別</th><th>戶號</th><th>樓層</th>'}<th>姓名</th><th>電話</th>${lease?'<th>租約期間</th><th>狀態</th>':''}${smart?'':'<th>門牌／地址</th>'}<th>其他資料（居住人、寵物等）</th>`;
+    return `<div class="resident-table-wrap"><table class="resident-table"><thead><tr>${head}${src?'<th>來源</th>':''}${edit?'<th></th>':''}</tr></thead><tbody>${rows.map(r=>{
       const st=LEASE[r.lease_state]||LEASE.active;const so=SOURCE[r.source]||SOURCE.import;
       const acts=!edit?'':cat==='residents-owners'?`<button type="button" class="secondary" data-edit="${r.id}">編輯</button><button type="button" class="secondary" data-transfer="${r.id}">過戶</button><button type="button" class="danger" data-del="${r.id}">刪除</button>`
         :cat==='residents-tenants'?(r.lease_state==='ended'?`<button type="button" class="secondary" data-edit="${r.id}">編輯</button><button type="button" class="danger" data-del="${r.id}">刪除</button>`:`<button type="button" class="secondary" data-edit="${r.id}">編輯</button><button type="button" class="secondary" data-renew="${r.id}">續約</button><button type="button" class="secondary" data-end="${r.id}">退租</button>`)
         :`<button type="button" class="secondary" data-edit="${r.id}">編輯</button><button type="button" class="danger" data-del="${r.id}">刪除</button>`;
-      const unitCells=smart?(r.u?`<td><b class="r-code">${esc(r.u.code)}</b></td><td>${esc(r.u.building_name)}${r.u.zone?`<br><span class="r-tag r-zone">${esc(r.u.zone)}</span>`:''}</td><td title="${esc(r.u.address)}">${esc(r.u.short)}</td>`:`<td><b>${esc(r.unit)}</b><br><span class="r-tag bad" title="這筆資料的戶別不在社區戶別清單裡，請編輯修正">未對應</span></td><td>${esc(r.building)}</td><td class="wrap">${esc(r.address)}</td>`):`<td>${esc(r.building)}</td><td>${esc(r.unit)}</td><td>${esc(r.floor)}</td>`;
-      const park=smart?`<td>${(r.u?.cars||[]).map(c=>`<span class="r-park">${esc(c)}</span>`).join(' ')}</td><td>${(r.u?.motos||[]).map(c=>`<span class="r-park m">${esc(c)}</span>`).join(' ')}</td>`:`<td class="wrap">${esc(r.address)}</td>`;
-      return `<tr class="${r.lease_state==='ended'?'is-ended':''}">${unitCells}<td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone)}</td>${lease?`<td style="white-space:nowrap">${esc(r.lease_start||'—')}<br>～ ${esc(r.lease_end||'—')}</td><td><span class="r-tag ${st[1]}">${st[0]}</span></td>`:''}${park}<td class="wrap">${esc(r.extra||'')}</td>${src?`<td><span class="r-tag" title="${esc(r.updated_by?`${r.updated_by} 更新`:'')}">${so[0]} ${so[1]}</span></td>`:''}${edit?`<td class="r-act">${acts}</td>`:''}</tr>`;}).join('')}</tbody></table></div>`;
+      let cells;
+      if(contact){
+        cells=smart&&r.u?`<td>${esc(r.u.building_name)}${r.u.zone?`<br><span class="r-tag r-zone">${esc(r.u.zone)}</span>`:''}</td><td>${esc(r.u.floor<0?`B${-r.u.floor}`:`${r.u.floor}F`)}</td><td><b class="r-code">${esc(r.u.code)}</b></td>`
+          :`<td>${esc(r.building)}</td><td>${esc(r.floor)}</td><td><b>${esc(r.unit)}</b>${smart?miss(r):''}</td>`;
+        cells+=`<td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone)}</td>${smart?park(r):''}${emer(r)}`;
+      }else{
+        cells=(smart?(r.u?`<td><b class="r-code">${esc(r.u.code)}</b></td><td>${esc(r.u.building_name)}${r.u.zone?`<br><span class="r-tag r-zone">${esc(r.u.zone)}</span>`:''}</td><td title="${esc(r.u.address)}">${esc(r.u.short)}</td>`:`<td><b>${esc(r.unit)}</b>${miss(r)}</td><td>${esc(r.building)}</td><td class="wrap">${esc(r.address)}</td>`):`<td>${esc(r.building)}</td><td>${esc(r.unit)}</td><td>${esc(r.floor)}</td>`)
+          +`<td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone)}</td>${lease?`<td style="white-space:nowrap">${esc(r.lease_start||'—')}<br>～ ${esc(r.lease_end||'—')}</td><td><span class="r-tag ${st[1]}">${st[0]}</span></td>`:''}${smart?'':`<td class="wrap">${esc(r.address)}</td>`}<td class="wrap">${esc(r.extra||'')}</td>`;
+      }
+      return `<tr class="${r.lease_state==='ended'?'is-ended':''}">${cells}${src?`<td><span class="r-tag" title="${esc(r.updated_by?`${r.updated_by} 更新`:'')}">${so[0]} ${so[1]}</span></td>`:''}${edit?`<td class="r-act">${acts}</td>`:''}</tr>`;
+    }).join('')}</tbody></table></div>`;
   }
   function drawTable(){
     const rows=rowsFiltered();const el=document.getElementById('residentTable');if(el)el.innerHTML=table(rows);
@@ -124,9 +139,10 @@
       <label>樓層<input name="floor" value="${esc(r.floor)}"></label>`}
       <label>姓名 *<input name="name" value="${esc(r.name)}"></label>
       <label>電話<input name="phone" value="${esc(r.phone)}" inputmode="tel"></label>
+      ${cat==='residents-contact'?`<label>緊急聯絡人<input name="emergency_name" value="${esc(r.emergency_name)}"></label><label>緊急聯絡電話<input name="emergency_phone" value="${esc(r.emergency_phone)}" inputmode="tel"></label>`:''}
       ${smart?`<label>汽車位<input name="p_cars" value="${esc((r.u?.cars||[]).join('、'))}" placeholder="例如 B1-313、B1-313-1"></label><label>機車位<input name="p_motos" value="${esc((r.u?.motos||[]).join('、'))}" placeholder="例如 143"></label>`:`<label>門牌／地址<input name="address" value="${esc(r.address)}"></label>`}
       ${lease?`<div class="r-owner-hint" id="rOwnerHint" ${S.d.units?.length?'':'hidden'}></div><label>起租日<input type="date" name="lease_start" value="${esc(r.lease_start)}"></label><label>租約到期日<input type="date" name="lease_end" value="${esc(r.lease_end)}"></label>`:''}
-      <label class="wide">其他資料<textarea name="extra" rows="2">${esc(r.extra)}</textarea></label>
+      <label class="wide">${cat==='residents-contact'?'備註':'其他資料（居住人、寵物、備註等）'}<textarea name="extra" rows="${cat==='residents-contact'?2:3}">${esc(r.extra)}</textarea></label>
       <div class="wide modal-actions"><button type="button" class="secondary" data-cancel>取消</button><button type="submit">💾 儲存</button></div></form>`);
     const f=box.querySelector('#rForm');
     const hint=()=>{if(smart){const ui=box.querySelector('#rUnitInfo');const code=f.unit.value.trim().toUpperCase();const x=(S.d.layout.units||[]).find(u=>u.code===code);if(ui){ui.hidden=!code;ui.innerHTML=x?`📍 ${esc(x.building_name)}｜${esc(x.short)}`:'⚠ 這個戶別不在社區戶別清單裡';}
@@ -222,6 +238,43 @@
     cb.addEventListener('change',()=>{btn.disabled=!cb.checked;});
     btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('/api/staff/residents/ack',J('POST',{category:d.category,version:d.notice?.version}));await reload();}catch(err){alert(err.message);btn.disabled=false;}});
   }
+  // ---------- 住戶聯繫一覽表（A4 智慧排版，列印或另存 PDF）----------
+  // 戶數多：一棟一頁（超過一頁接續）；戶數少：多棟合併在同一頁。只有戶別、姓名、電話、緊急聯絡人、車位，不含門牌地址。
+  const ROWS_PER_PAGE=44;
+  // 排版：一棟放得進一頁（44 戶內）就整棟放一起，剩下空間夠就接著放下一棟；超過一頁的大棟改用左右雙欄（一頁約 84 戶），還放不下才接續下一頁
+  function paginate(groups){
+    const pages=[];let cur=null,left=0;const newPage=()=>{cur=[];pages.push(cur);left=ROWS_PER_PAGE;};
+    for(const g of groups){
+      const n=g.rows.length;
+      if(n+2<=ROWS_PER_PAGE){if(!cur||n+2>left)newPage();cur.push({g,rows:g.rows,cont:false,cols:1});left-=n+2;continue;}
+      const per=2*(ROWS_PER_PAGE-2);
+      for(let i=0;i<n;i+=per){newPage();const rows=g.rows.slice(i,i+per);cur.push({g,rows,cont:i>0,cols:2});left=ROWS_PER_PAGE-(Math.ceil(rows.length/2)+2)-1;}
+    }
+    return pages;
+  }
+  async function printContactSheet(){
+    const d=await api('/api/staff/residents/contact-sheet');const pages=paginate(d.groups);const when=String(d.printed_at||'').slice(0,10);
+    const park=r=>[(r.cars||[]).join('、'),(r.motos||[]).length?`機${(r.motos||[]).join('、')}`:''].filter(Boolean).join('／');
+    const wide=rows=>`<table><colgroup><col style="width:11%"><col style="width:6%"><col style="width:16%"><col style="width:20%"><col style="width:23%"><col style="width:15%"><col style="width:9%"></colgroup><thead><tr><th>戶別</th><th>樓層</th><th>姓名</th><th>電話</th><th>緊急聯絡人／電話</th><th>汽車位</th><th>機車位</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="c">${esc(r.code)}</td><td>${fl(r.floor)}</td><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${esc(r.emergency)}</td><td>${esc((r.cars||[]).join('、'))}</td><td>${esc((r.motos||[]).join('、'))}</td></tr>`).join('')}</tbody></table>`;
+    const narrow=rows=>`<table class="n"><colgroup><col style="width:13%"><col style="width:16%"><col style="width:23%"><col style="width:23%"><col style="width:25%"></colgroup><thead><tr><th>戶別</th><th>姓名</th><th>電話</th><th>緊急聯絡</th><th>車位</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="c">${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${esc(r.emergency)}</td><td>${esc(park(r))}</td></tr>`).join('')}</tbody></table>`;
+    const fl=f=>{const n=Number(f);return Number.isFinite(n)&&String(f)!==''?(n<0?`B${-n}`:`${n}F`):esc(f);};
+    const html=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>${esc(d.community)}-住戶聯繫一覽表-${when}</title><style>
+      @page{size:A4 portrait;margin:10mm 9mm}*{box-sizing:border-box}body{margin:0;font-family:'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif;color:#1D0D0C;font-size:9.4pt}
+      .pg{page-break-after:always;height:277mm;display:flex;flex-direction:column}.pg:last-child{page-break-after:auto}
+      .hd{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1.6pt solid #1D0D0C;padding-bottom:2mm;margin-bottom:2.5mm}.hd b{font-size:14pt}.hd span{font-size:8.5pt;color:#555}
+      h2{font-size:10.5pt;margin:2.2mm 0 1mm;display:flex;gap:2mm;align-items:center}h2 small{font-weight:400;color:#7A5F58;font-size:8.5pt}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#EEE7E3;font-size:8.4pt;text-align:left;padding:1.1mm 1.6mm;border:.5pt solid #B9AAA4}td{padding:.9mm 1.6mm;border:.5pt solid #CFC4BF;height:5.2mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      td.c{font-weight:700}.two{display:flex;gap:3mm}.two table{flex:1}table.n td,table.n th{font-size:8.2pt;padding:.8mm 1.2mm}tr:nth-child(even) td{background:#FAF7F5}.ft{margin-top:auto;display:flex;justify-content:space-between;font-size:7.8pt;color:#777;border-top:.5pt solid #ccc;padding-top:1.5mm}
+    </style></head><body>${pages.map((p,pi)=>`<section class="pg"><div class="hd"><b>${esc(d.community)}｜住戶聯繫一覽表</b><span>列印日期 ${esc(when)}</span></div>
+      ${p.map(blk=>`<h2>${esc(blk.g.name)}${blk.g.zone?`<small>（${esc(blk.g.zone)}）</small>`:''}${blk.cont?'<small>（續）</small>':''}<small>共 ${blk.g.rows.length} 戶</small></h2>${blk.cols===1?wide(blk.rows):`<div class="two">${narrow(blk.rows.slice(0,Math.ceil(blk.rows.length/2)))}${narrow(blk.rows.slice(Math.ceil(blk.rows.length/2)))}</div>`}`).join('')}
+      <div class="ft"><span>內部資料：僅供本社區櫃檯、保全聯繫住戶使用，請妥善保管，勿外流。</span><span>第 ${pi+1} 頁／共 ${pages.length} 頁</span></div></section>`).join('')}</body></html>`;
+    const fr=document.createElement('iframe');fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(fr);
+    fr.contentDocument.open();fr.contentDocument.write(html);fr.contentDocument.close();
+    alert(`已排版完成：共 ${pages.length} 頁 A4。\n接下來會開啟列印視窗，要存成 PDF 請在「目的地／印表機」選擇「另存為 PDF」。`);
+    setTimeout(()=>{try{fr.contentWindow.focus();fr.contentWindow.print();}catch(e){alert('無法開啟列印視窗：'+e.message);}setTimeout(()=>fr.remove(),60000);},300);
+    window.__lastContactSheet={pages:pages.length,html};
+  }
+
   // ---------- 頁面 ----------
   async function loadTemplate(){try{const d=await api('/api/staff/platform-resources?category='+encodeURIComponent('住戶名冊'));return (d.platformResources||[])[0]||null;}catch{return null;}}
   async function render(action,label){
@@ -243,10 +296,10 @@
     if(category==='residents-tenants'&&d.lease_summary){const L=d.lease_summary;banner=(L.expired?`<div class="r-alert bad">⚠ 有 ${L.expired} 筆租約已經到期，請確認是續約還是退租。</div>`:'')+(L.expiring?`<div class="r-alert warn">⏰ 有 ${L.expiring} 筆租約將在 30 天內到期。</div>`:'')+`<div class="r-chips">${[['','目前租約',(L.active||0)+(L.expiring||0)+(L.expired||0)+(L.upcoming||0)],['expiring','30 天內到期',L.expiring||0],['expired','已到期',L.expired||0],['upcoming','尚未起租',L.upcoming||0],['ended','已退租',L.ended||0]].map(([k,t,n])=>`<button type="button" class="${S.filter.lease===k?'':'secondary'}" data-lease="${k}">${t}（${n}）</button>`).join('')}</div>`;}
     el.innerHTML=`<div class="panel resident-module"><div class="eyebrow">🏠 住戶名冊</div><h1>${esc(label||labels[category])}</h1><p>目前案場：<strong>${esc(c.name||'尚未選擇案場')}</strong>。${intro}</p>
       <div class="resident-toolbar"><label>排序方式<select id="residentSort"><option value="building" ${sort==='building'?'selected':''}>${smart?'戶別順序（棟別 → 樓層 → 戶號）':'棟別 → 戶號'}</option><option value="unit" ${sort==='unit'?'selected':''}>戶號 → 棟別</option><option value="floor" ${sort==='floor'?'selected':''}>樓層 → 棟別 → 戶號</option></select></label>
-      <div class="resident-actions">${edit?`<button type="button" id="rAdd">${category==='residents-tenants'?'🔑 登錄租約':'＋ 新增'}</button>`:''}${canUpload?`<button type="button" class="secondary" id="residentUploadBtn">📤 上傳 Excel 更新</button><input id="residentFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden>`:''}${canUpload&&smart?`<a href="/api/staff/residents/template?category=${encodeURIComponent(category)}" title="依社區戶別清單產生，已有的資料會一起帶出來">📥 上傳範本</a>`:''}${edit?`<a href="/api/staff/residents/export?category=${encodeURIComponent(category)}" id="rExport">📥 下載 Excel</a>`:''}<button type="button" class="secondary" id="rHist">📜 異動紀錄</button></div></div>
+      <div class="resident-actions">${edit?`<button type="button" id="rAdd">${category==='residents-tenants'?'🔑 登錄租約':'＋ 新增'}</button>`:''}${canUpload?`<button type="button" class="secondary" id="residentUploadBtn">📤 上傳 Excel 更新</button><input id="residentFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden>`:''}${edit&&category==='residents-contact'?`<button type="button" class="secondary" id="rSheet" title="給櫃檯、保全電話聯繫用的一覽表（不含門牌地址），依戶數自動排版成 A4">🖨 聯繫一覽表 PDF</button>`:''}${canUpload&&smart?`<a href="/api/staff/residents/template?category=${encodeURIComponent(category)}" title="依社區戶別清單產生，已有的資料會一起帶出來">📥 上傳範本</a>`:''}${edit?`<a href="/api/staff/residents/export?category=${encodeURIComponent(category)}" id="rExport">📥 下載 Excel</a>`:''}<button type="button" class="secondary" id="rHist">📜 異動紀錄</button></div></div>
       ${smart?'':`<div class="r-setup"><div><b>🏗 先完成「社區棟別門牌設定」</b><br><span class="hint">設定每一棟的門牌、位置（前棟／後棟）、樓層和每層戶號後，系統會產生全社區的戶別清單：上傳名冊只要填戶別，門牌地址會自動帶入，也會檢查戶別和地址有沒有對錯。${edit?'':'請經理或秘書設定。'}</span></div>${edit?'<button type="button" id="rSetup">開始設定</button>':''}</div>`}
       ${banner}
-      <div class="resident-searchbar"><label>🔎 搜尋<input id="residentSearch" type="search" value="${esc(S.filter.q)}" placeholder="姓名、戶號、電話、門牌、備註"></label><label>🏢 棟別<select id="residentBuilding"><option value="">全部棟別</option>${buildings.map(([v,l])=>`<option value="${esc(v)}" ${S.filter.building===v?'selected':''}>${esc(l)}</option>`).join('')}</select></label><button type="button" class="secondary" id="residentClear" style="padding:9px 13px;min-height:0">清除</button><span class="resident-search-count" id="residentSearchCount"></span></div>${zones.length>1?`<div class="r-zones">${[['','全部'],...zones.map(z=>[z,z])].map(([k,l])=>`<button type="button" class="${(S.filter.zone||'')===k?'':'secondary'}" data-zone="${esc(k)}">${esc(l)}</button>`).join('')}</div>`:''}
+      <div class="resident-searchbar"><label>🔎 搜尋<input id="residentSearch" type="search" value="${esc(S.filter.q)}" placeholder="${category==='residents-contact'?'姓名、戶號、電話、車位、緊急聯絡人':'姓名、戶號、電話、門牌、備註'}"></label><label>🏢 棟別<select id="residentBuilding"><option value="">全部棟別</option>${buildings.map(([v,l])=>`<option value="${esc(v)}" ${S.filter.building===v?'selected':''}>${esc(l)}</option>`).join('')}</select></label><button type="button" class="secondary" id="residentClear" style="padding:9px 13px;min-height:0">清除</button><span class="resident-search-count" id="residentSearchCount"></span></div>${zones.length>1?`<div class="r-zones">${[['','全部'],...zones.map(z=>[z,z])].map(([k,l])=>`<button type="button" class="${(S.filter.zone||'')===k?'':'secondary'}" data-zone="${esc(k)}">${esc(l)}</button>`).join('')}</div>`:''}
       <div class="resident-meta"><span class="r-protect-tag" title="畫面顯示您的姓名與時間；離開視窗會自動遮住；不提供列印與複製">🔒 防截圖模式</span><span>資料共 ${(d.records||[]).length} 筆</span>${d.last_import?`<span>最近整批更新：${esc(d.last_import.original_filename||'')}${d.last_import.imported_by_name?`（${esc(d.last_import.imported_by_name)}）`:''}</span>`:''}${!edit?'<span>僅供查詢，修改請洽經理或秘書</span>':''}</div>
       <div id="residentTable"></div></div>`;
     drawTable();
@@ -258,6 +311,7 @@
     $('residentClear')?.addEventListener('click',()=>{S.filter.q='';S.filter.building='';$('residentSearch').value='';$('residentBuilding').value='';drawTable();});
     el.querySelectorAll('[data-lease]').forEach(b=>b.addEventListener('click',()=>{S.filter.lease=b.dataset.lease;el.querySelectorAll('[data-lease]').forEach(x=>x.className=x===b?'':'secondary');drawTable();}));
     $('rAdd')?.addEventListener('click',()=>openForm(null));
+    $('rSheet')?.addEventListener('click',()=>printContactSheet().catch(err=>alert(err.message)));
     $('rSetup')?.addEventListener('click',()=>{if(!window.CommunityLayout){alert('模組尚未載入，請重新整理頁面');return;}window.CommunityLayout.openEditor({onSaved:reload});});
     el.querySelectorAll('[data-zone]').forEach(b=>b.addEventListener('click',()=>{S.filter.zone=b.dataset.zone;el.querySelectorAll('[data-zone]').forEach(x=>x.className=x===b?'':'secondary');drawTable();}));
     $('rHist')?.addEventListener('click',()=>openHistory().catch(err=>alert(err.message)));
