@@ -110,22 +110,22 @@ module.exports = function registerResidentRoutes(app, d) {
     return out;
   }
   // ---------- 戶別清單（社區棟別門牌設定）----------
-  const CAR_RE = /^(?!.*機).*(車位|停車)/; const MOTO_RE = /機車/; const SEQ_RE = /^(序|序號|編號|no\.?|#)$/i;
+  const PLATE_RE = /車牌|車號/; const OCC_RE = /戶況|入住狀態|交屋/; const CAR_RE = /^(?!.*機).*(車位|停車)/; const MOTO_RE = /機車(?!.*(牌|號))/; const SEQ_RE = /^(序|序號|編號|no\.?|#)$/i;
   // 上傳的一列資料：對到戶別、整理車位欄、把（租蝦皮）這類註記留在其他資料
   function normalizeRows(t, rows) {
     const resolve = CL.resolver(t.tid, t.cid); const warnings = []; const parking = new Map(); let matched = 0;
     const out = rows.map((r, i) => {
-      const raw = r.raw && typeof r.raw === 'object' ? r.raw : {}; let extra = String(r.extra || ''); const cars = [], motos = [];
+      const raw = r.raw && typeof r.raw === 'object' ? r.raw : {}; let extra = String(r.extra || ''); const cars = [], motos = [], plates = []; let occ;
       for (const [k, v] of Object.entries(raw)) {
         const val = String(v ?? '').trim(); if (!val) continue; const drop = () => { extra = extra.split('；').filter(x => x !== `${k}：${val}`).join('；'); };
-        if (MOTO_RE.test(k)) { motos.push(...CL.splitSpaces(val)); drop(); } else if (CAR_RE.test(k)) { cars.push(...CL.splitSpaces(val)); drop(); } else if (SEQ_RE.test(String(k).trim())) drop();
+        if (PLATE_RE.test(k)) { plates.push(...CL.splitSpaces(val)); drop(); } else if (OCC_RE.test(k)) { occ = /未交屋/.test(val) ? 'undelivered' : /未入住|空/.test(val) ? 'vacant' : ''; drop(); } else if (MOTO_RE.test(k)) { motos.push(...CL.splitSpaces(val)); drop(); } else if (CAR_RE.test(k)) { cars.push(...CL.splitSpaces(val)); drop(); } else if (SEQ_RE.test(String(k).trim())) drop();
       }
-      const fromText = CL.parseParking(extra); if (!cars.length) cars.push(...fromText.cars); if (!motos.length) motos.push(...fromText.motos);
+      const fromText = CL.parseParking(`${extra}；${r.unit || ''}`); if (!cars.length) cars.push(...fromText.cars); if (!motos.length) motos.push(...fromText.motos); if (!plates.length) plates.push(...fromText.plates); if (occ === undefined && fromText.occupancy) occ = fromText.occupancy;
       let en = String(r.emergency_name || '').trim(), ep = String(r.emergency_phone || '').trim();
       if (en && !ep) { const m = en.match(/^(.*?)[\s:：,，]*((?:\+?886|0)[\d\-\s()]{7,})$/); if (m) { en = m[1].trim(); ep = m[2].trim(); } }
       const x = resolve(r); const row = { ...r, extra, emergency_name: en, emergency_phone: ep };
       if (x.unit) { matched++; row.unit = x.unit.code; row.building = x.unit.building; row.floor = String(x.unit.floor); row.address = x.unit.address; if (x.note && !extra.includes(x.note)) row.extra = [x.note, extra].filter(Boolean).join('；');
-        if (cars.length || motos.length) { const p = parking.get(x.unit.code) || { cars: [], motos: [] }; p.cars = [...new Set([...p.cars, ...cars])]; p.motos = [...new Set([...p.motos, ...motos])]; parking.set(x.unit.code, p); } }
+        if (cars.length || motos.length || plates.length || occ !== undefined) { const p = parking.get(x.unit.code) || { cars: [], motos: [], plates: [] }; p.cars = [...new Set([...p.cars, ...cars])]; p.motos = [...new Set([...p.motos, ...motos])]; p.plates = [...new Set([...p.plates, ...plates])]; if (occ !== undefined && !p.occupancy) p.occupancy = occ; parking.set(x.unit.code, p); } }
       for (const w of x.warn) warnings.push({ row: i + 1, name: r.name || '', msg: w });
       return row;
     });
@@ -142,10 +142,11 @@ module.exports = function registerResidentRoutes(app, d) {
   }
   function saveParking(t, code, p) {
     if (!p || typeof p !== 'object' || !code) return false;
-    return CL.setParking(t.tid, t.cid, code, CL.splitSpaces(Array.isArray(p.cars) ? p.cars.join(',') : p.cars), CL.splitSpaces(Array.isArray(p.motos) ? p.motos.join(',') : p.motos), t.by);
+    const list = v => v === undefined ? undefined : CL.splitSpaces(Array.isArray(v) ? v.join(',') : v);
+    return CL.setParking(t.tid, t.cid, code, list(p.cars), list(p.motos), t.by, { plates: list(p.plates), occupancy: p.occupancy });
   }
   const unitMap = (tid, cid) => new Map(CL.units(tid, cid).map(u => [u.code, u]));
-  const withUnit = (r, M) => { const u = M.get(r.unit); return u ? { ...r, u: { code: u.code, building: u.building, building_name: u.building_name, zone: u.zone, floor: u.floor, short: u.short, address: u.address, cars: u.cars, motos: u.motos, sort: u.sort } } : r; };
+  const withUnit = (r, M) => { const u = M.get(r.unit); return u ? { ...r, u: { code: u.code, building: u.building, building_name: u.building_name, zone: u.zone, floor: u.floor, short: u.short, address: u.address, cars: u.cars, motos: u.motos, plates: u.plates, occupancy: u.occupancy, sort: u.sort } } : r; };
 
   // 租約狀態：active（有效）、expiring（30 天內到期）、expired（已過期但還沒辦退租）、ended（已退租）
   function leaseState(r, today = todayTW()) {
@@ -267,7 +268,8 @@ module.exports = function registerResidentRoutes(app, d) {
       db.prepare('UPDATE resident_imports SET is_active=0 WHERE tenant_id=? AND community_id=? AND category=? AND id<>?').run(t.tid, t.cid, t.category, importId);
       const ins = db.prepare('INSERT INTO resident_records(import_id,tenant_id,community_id,category,building,unit,floor,name,phone,address,extra,raw_json,lease_start,lease_end,status,source,updated_at,updated_by,emergency_name,emergency_phone) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
       tx(rows => { for (const r of rows) ins.run(importId, t.tid, t.cid, t.category, r.building, r.unit, r.floor, r.name, r.phone, r.address, [r.relation, r.extra].filter(Boolean).join('；'), JSON.stringify(r.raw), r.lease_start || '', r.lease_end || '', 'active', 'import', at, t.by, r.emergency_name || '', r.emergency_phone || ''); })(parsed.rows);
-      for (const [code, p] of N.parking) CL.setParking(t.tid, t.cid, code, p.cars, p.motos, t.by);
+      const or = v => (v && v.length ? v : undefined);
+      for (const [code, p] of N.parking) CL.setParking(t.tid, t.cid, code, or(p.cars), or(p.motos), t.by, { plates: or(p.plates), occupancy: p.occupancy });
       log(t, { category: t.category, action: 'import', summary: `上傳檔案「${req.file.originalname}」，共 ${parsed.rows.length} 筆（取代原本資料）${N.parking.size ? `，更新 ${N.parking.size} 戶車位` : ''}${N.warnings.length ? `，${N.warnings.length} 個提醒` : ''}` });
       let synced = 0;
       if (t.category !== 'residents-contact') synced = autoSync(t, new Set(desiredContacts(t.tid, t.cid).keys()), `${LABELS[t.category]}上傳更新`);
@@ -364,16 +366,16 @@ module.exports = function registerResidentRoutes(app, d) {
     if (!CL.layout(t.tid, t.cid).configured) return res.status(400).json({ error: '請先完成「社區棟別門牌設定」', need_layout: true });
     const lease = t.category === 'residents-tenants'; const blank = req.query.blank === '1';
     const contact = t.category === 'residents-contact';
-    const head = ['戶別', '姓名', '電話', ...(contact ? ['緊急聯絡人', '緊急聯絡電話'] : []), ...(lease ? ['起租日', '租約到期日'] : []), '汽車位', '機車位', contact ? '備註' : '其他資料（居住人、寵物等）'];
+    const head = ['戶別', '姓名', '電話', ...(contact ? ['緊急聯絡人', '緊急聯絡電話'] : []), ...(lease ? ['起租日', '租約到期日'] : []), '汽車位', '機車位', ...(contact ? ['車牌', '戶況'] : []), contact ? '備註' : '其他資料（居住人、寵物等）'];
     const byUnit = new Map(); if (!blank) for (const r of records(t.tid, t.cid, t.category, { includeEnded: false })) { if (!byUnit.has(r.unit)) byUnit.set(r.unit, []); byUnit.get(r.unit).push(r); }
     const rows = []; for (const u of CL.units(t.tid, t.cid)) {
       const list = byUnit.get(u.code) || [null];
-      for (const r of list) rows.push([u.code, r?.name || '', r?.phone || '', ...(contact ? [r?.emergency_name || '', r?.emergency_phone || ''] : []), ...(lease ? [r?.lease_start || '', r?.lease_end || ''] : []), u.cars.join('、'), u.motos.join('、'), r?.extra || '']);
+      for (const r of list) rows.push([u.code, r?.name || '', r?.phone || '', ...(contact ? [r?.emergency_name || '', r?.emergency_phone || ''] : []), ...(lease ? [r?.lease_start || '', r?.lease_end || ''] : []), u.cars.join('、'), u.motos.join('、'), ...(contact ? [u.plates.join('、'), CL.OCC[u.occupancy] || ''] : []), r?.extra || '']);
     }
     const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
     ws['!cols'] = head.map(h => ({ wch: /其他資料|備註/.test(h) ? 36 : ['電話', '汽車位', '緊急聯絡電話'].includes(h) ? 18 : 10 }));
     XLSX.utils.book_append_sheet(wb, ws, LABELS[t.category].slice(0, 31));
-    const help = XLSX.utils.aoa_to_sheet([['填寫說明'], ['1. 「戶別」請不要修改，系統用戶別對到社區的棟別、樓層與門牌地址（完整地址會自動帶入）。'], ['2. 同一戶有多位' + (lease ? '承租人' : '所有權人／聯絡人') + '時，複製一列、戶別相同即可。'], ['3. 汽車位可以填多個，用頓號或逗號分開，例如：B1-313、B1-313-1。'], ['4. 機車位填號碼即可，例如：143。'], ...(lease ? [['5. 日期格式：2026/1/31 或 115/1/31 都可以。']] : []), ['上傳後會先顯示檢查結果（找不到的戶別、地址對不起來的資料），確認後才匯入。']]);
+    const help = XLSX.utils.aoa_to_sheet([['填寫說明'], ['1. 「戶別」請不要修改，系統用戶別對到社區的棟別、樓層與門牌地址（完整地址會自動帶入）。'], ['2. 同一戶有多位' + (lease ? '承租人' : '所有權人／聯絡人') + '時，複製一列、戶別相同即可。'], ['3. 汽車位可以填多個，用頓號或逗號分開，例如：B1-313、B1-313-1。'], ...(contact ? [['   車牌可以填多個（汽車、機車都可以）；戶況填「已入住」「未入住」或「未交屋」，聯繫一覽表會用黃底、紅字標示。']] : []), ['4. 機車位填號碼即可，例如：143。'], ...(lease ? [['5. 日期格式：2026/1/31 或 115/1/31 都可以。']] : []), ['上傳後會先顯示檢查結果（找不到的戶別、地址對不起來的資料），確認後才匯入。']]);
     help['!cols'] = [{ wch: 90 }]; XLSX.utils.book_append_sheet(wb, help, '填寫說明');
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     log(t, { category: t.category, action: 'export', summary: blank ? '下載空白上傳範本' : `下載上傳範本（含目前資料 ${byUnit.size} 戶）` });
@@ -381,24 +383,36 @@ module.exports = function registerResidentRoutes(app, d) {
     res.set('Cache-Control', 'no-store'); res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.set('Content-Disposition', `attachment; filename="template.xlsx"; filename*=UTF-8''${encodeURIComponent(fn)}`); res.send(buf);
   });
-  // 住戶聯繫一覽表（列印／PDF）：給櫃檯、保全電話聯繫用，不含門牌地址
+  // 住戶聯繫一覽表（列印／PDF）：像櫃檯常用的「各棟樓層 × 戶號」對照表；給櫃檯、保全電話聯繫用，不含門牌地址
   app.get('/api/staff/residents/contact-sheet', requireStaffFiller, (req, res) => {
     req.query.category = 'residents-contact'; const t = ctx(req, res, { edit: true }); if (!t) return;
     if (!ackOf(t.tid, t.u.id)) return res.status(403).json({ error: '請先同意住戶個資保密聲明', ack_required: true });
     const recs = records(t.tid, t.cid, 'residents-contact', { includeEnded: false }); const byUnit = new Map();
     for (const r of recs) { const k = r.unit || ''; if (!byUnit.has(k)) byUnit.set(k, []); byUnit.get(k).push(r); }
-    const join = (list, f) => [...new Set(list.map(x => String(x[f] || '').trim()).filter(Boolean))].join('、');
-    const emer = list => list.map(x => [x.emergency_name, x.emergency_phone].filter(Boolean).join(' ')).filter(Boolean).join('、');
-    const U = CL.units(t.tid, t.cid); const groups = []; const used = new Set();
-    if (U.length) {
-      for (const u of U) { let g = groups[groups.length - 1]; if (!g || g.code !== u.building) { g = { code: u.building, name: u.building_name, zone: u.zone, rows: [] }; groups.push(g); }
-        const list = byUnit.get(u.code) || []; used.add(u.code);
-        g.rows.push({ code: u.code, floor: u.floor, no: u.no, name: join(list, 'name'), phone: join(list, 'phone'), emergency: emer(list), cars: u.cars, motos: u.motos }); }
+    const today = todayTW(); const tenantUnits = new Set(records(t.tid, t.cid, 'residents-tenants', { includeEnded: false }).filter(r => ['active', 'expiring'].includes(leaseState(r, today))).map(r => r.unit));
+    const split = v => String(v || '').split(/[；;、\n]+|\s{2,}/).map(x => x.trim()).filter(Boolean);
+    function cell(code, list) {
+      const names = [], phones = [], emergency = [];
+      for (const r of list) {
+        if (r.name) names.push(...split(r.name));
+        const other = (String(r.extra || '').match(/其他聯絡人[:：]\s*([^；;]+)/) || [])[1]; if (other) names.push(...split(other));
+        phones.push(...split(r.phone)); const e = [r.emergency_name, r.emergency_phone].filter(Boolean).join(' '); if (e) emergency.push(e);
+      }
+      const tenant = tenantUnits.has(code) || list.some(r => /(^|[；;（(])租|承租/.test(String(r.extra || '')) || r.source === 'sync-tenant');
+      return { names: [...new Set(names)].slice(0, 4), phones: [...new Set(phones)].slice(0, 5), emergency: emergency.slice(0, 2), tenant };
+    }
+    const L = CL.layout(t.tid, t.cid); const U = CL.units(t.tid, t.cid); const used = new Set(); const groups = [];
+    for (const b of L.buildings) {
+      const list = U.filter(u => u.building === b.code); if (!list.length) continue;
+      const units = list.map(u => { used.add(u.code); return { code: u.code, floor: u.floor, no: u.no, cars: u.cars, motos: u.motos, plates: u.plates, occupancy: u.occupancy, ...cell(u.code, byUnit.get(u.code) || []) }; });
+      const g = { code: b.code, name: b.name, zone: b.zone, type: b.type === 'list' ? 'list' : 'tower', units };
+      if (g.type === 'tower') { g.cols = [...new Set(units.map(u => String(u.no)))].sort((x, y) => Number(x) - Number(y)); g.floors = [...new Set(units.map(u => u.floor))].sort((x, y) => y - x); }
+      groups.push(g);
     }
     const rest = recs.filter(r => !used.has(r.unit || ''));
-    if (rest.length) { const map = new Map(); for (const r of rest) { const b = r.building || '其他'; if (!map.has(b)) map.set(b, []); map.get(b).push(r); }
-      for (const [b, list] of map) groups.push({ code: b, name: U.length ? `${b}（未對應戶別）` : b, zone: '', rows: list.map(r => ({ code: r.unit || '', floor: r.floor || '', no: '', name: r.name || '', phone: r.phone || '', emergency: emer([r]), cars: [], motos: [] })) }); }
-    log(t, { category: 'residents-contact', action: 'export', summary: `列印住戶聯繫一覽表（${groups.reduce((s, g) => s + g.rows.length, 0)} 戶）` });
+    if (rest.length) { const m = new Map(); for (const r of rest) { const k = r.unit || `#${r.id}`; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+      groups.push({ code: '_', name: U.length ? '未對應戶別' : '住戶', zone: '', type: 'list', units: [...m.entries()].map(([k, list]) => ({ code: list[0].unit || '', floor: list[0].floor || '', no: '', cars: [], motos: [], plates: [], occupancy: '', ...cell(k, list) })) }); }
+    log(t, { category: 'residents-contact', action: 'export', summary: `列印住戶聯繫一覽表（${groups.reduce((s, g) => s + g.units.length, 0)} 戶）` });
     res.set('Cache-Control', 'no-store');
     res.json({ community: t.community.name, printed_at: now(), printed_by: t.by, groups });
   });
