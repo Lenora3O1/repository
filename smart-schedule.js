@@ -55,7 +55,9 @@ module.exports = function registerSmartSchedule(app, d) {
       else if (role === 'security') group = (p.default_shift || m?.shift) === 'night' ? 'guard_night' : 'guard_day';
       else { const mgr = m ? (m.kind === 'site_manager' || (m.kind === 'site_deputy' && m.dept !== 'secretary')) : String(u.job_level || '').includes('經理'); group = mgr ? 'manager' : 'secretary'; }
       const mobileKind = role === 'mobile' ? ((m?.dept === 'secretary') ? 'secretary' : 'guard') : '';
-      out.push({ id: u.id, name: u.name, employee_id: u.employee_id, position: m?.position?.name || u.position || '', role, group, sites, home: sites[0], mobileKind, profile: p });
+      // 機動保全也分日班／夜班：夜班機動只補夜班缺口、日班機動只補日班缺口（沒有設定班別的兩邊都可以）
+      const shift = role === 'mobile' ? String(m?.shift || p.default_shift || '') : '';
+      out.push({ id: u.id, name: u.name, employee_id: u.employee_id, position: m?.position?.name || u.position || '', role, group, sites, home: sites[0], mobileKind, shift, profile: p });
     }
     return out;
   }
@@ -145,9 +147,10 @@ module.exports = function registerSmartSchedule(app, d) {
         if (streak.length > max) { const cand = streak.slice(-(max + 1)).filter(x => !mp.get(x).locked).sort((a, b) => ((workingCount(p.home, p.group, b) - needOf(p.home, p.group, b)) - (workingCount(p.home, p.group, a) - needOf(p.home, p.group, a))) || b.localeCompare(a))[0]; if (cand) { mp.set(cand, { code: 'off', cid: p.home, locked: false }); extraOff.push({ staff_id: p.id, date: cand }); streak = streak.slice(streak.indexOf(cand) + 1); } }
       }
     }
+    const shiftOK = (p, g) => !p.shift || (g === 'guard_day' ? p.shift !== 'night' : g === 'guard_night' ? p.shift !== 'day' : true);
     // 3) 機動人員：一天一天排，哪裡缺人就去哪裡（缺口越少人能補的越先補）；不缺人的日子排休；不超過連續上班上限
     const mobiles = ppl.filter(p => p.group === 'mobile');
-    const fitG = (p, g) => p.mobileKind === 'secretary' ? g === 'secretary' : g.startsWith('guard');
+    const fitG = (p, g) => p.mobileKind === 'secretary' ? g === 'secretary' : (g.startsWith('guard') && shiftOK(p, g));
     const offsLeft = new Map(mobiles.map(p => [p.id, Math.max(0, p.rest.target - offCount(p))])); const streak = new Map(mobiles.map(p => [p.id, 0])); const rTotal = new Map(offsLeft);
     days.forEach((dt, di) => {
       const free = mobiles.filter(p => !plan.get(p.id).has(dt));
@@ -212,12 +215,13 @@ module.exports = function registerSmartSchedule(app, d) {
         // 連續上班檢查
         let n = 1; for (let x = addDays(dt, -1); m.get(x) && WORK(m.get(x).shift_code); x = addDays(x, -1)) n++; for (let x = addDays(dt, 1); m.get(x) && WORK(m.get(x).shift_code); x = addDays(x, 1)) n++;
         if (n > max) continue;
-        const kind = p.group === 'mobile' ? (e?.note === '機動待命' ? 'mobile' : 'mobile_off') : (p.home === c.id ? 'overtime' : 'transfer');
+        const cross = p.group === 'mobile' && p.mobileKind !== 'secretary' && p.shift && !(g === 'guard_day' ? p.shift !== 'night' : p.shift !== 'day');
+        const kind = p.group === 'mobile' ? (cross ? 'mobile_cross' : e?.note === '機動待命' ? 'mobile' : 'mobile_off') : (p.home === c.id ? 'overtime' : 'transfer');
         if (kind === 'transfer' && !(comms.find(x => x.id === p.home)?.region_id && comms.find(x => x.id === p.home)?.region_id === c.region_id)) continue;
         if (!near && p.group === 'mobile') continue;
-        sug.push({ staff_id: p.id, name: p.name, kind, label: { mobile: '機動待命，可直接支援', mobile_off: '機動人員（當天休假，算加班）', overtime: '同社區同班別，當天休假（算休假日加班）', transfer: `同區域其他社區（${comms.find(x => x.id === p.home)?.name || ''}）調派，當天休假` }[kind] });
+        sug.push({ staff_id: p.id, name: p.name, kind, label: { mobile: '機動待命，可直接支援', mobile_off: '機動人員（當天休假，算加班）', overtime: '同社區同班別，當天休假（算休假日加班）', transfer: `同區域其他社區（${comms.find(x => x.id === p.home)?.name || ''}）調派，當天休假`, mobile_cross: `機動人員（${p.shift === 'night' ? '夜班' : '日班'}，跨班別支援）` }[kind] });
       }
-      const order = { mobile: 0, overtime: 1, mobile_off: 2, transfer: 3 }; sug.sort((a, b) => order[a.kind] - order[b.kind]);
+      const order = { mobile: 0, overtime: 1, mobile_off: 2, transfer: 3, mobile_cross: 4 }; sug.sort((a, b) => order[a.kind] - order[b.kind]);
       shortages.push({ date: dt, group: g, group_label: GROUP_LABEL[g], need: cv.need, have: cv.have, short: cv.need - cv.have, suggestions: sug.slice(0, 6) });
     }
     const pub = db.prepare('SELECT * FROM schedule_publish WHERE tenant_id=? AND month=?').get(tid, month);
