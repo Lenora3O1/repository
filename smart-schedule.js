@@ -46,7 +46,9 @@ module.exports = function registerSmartSchedule(app, d) {
       const p = S.getProfile(tid, u.id) || {}; const m = mi(u);
       const role = m ? (m.schedule === 'office' ? '' : m.schedule) : (p.schedule_role || '');
       if (!role) continue;
-      const sites = (m && m.kind !== 'region' ? m.sites : null) || (p.community_ids?.length ? p.community_ids.map(Number) : getSiteAssignments(u).map(a => Number(a.community_id)));
+      // 只排實際派駐的案場（舊的班表身分可能留著已經調離的社區，例如改當內勤的人）
+      const real = getSiteAssignments(u).map(a => Number(a.community_id));
+      const sites = (m && m.kind !== 'region' ? m.sites : null) || (p.community_ids?.length ? p.community_ids.map(Number).filter(c => real.includes(c)) : real);
       if (!sites.length) continue;
       let group;
       if (role === 'mobile') group = 'mobile';
