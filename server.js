@@ -377,19 +377,21 @@ const PLATFORM_STAFF_ATTENDANCE_MENU = [
   {id:'staff-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'staff-attendance',enabled:true},
   {id:'staff-attendance-checkin',parentId:'staff-attendance',icon:'↳',label:'出勤打卡',action:'staff-attendance-checkin',enabled:true},
   {id:'staff-patrol',parentId:'staff-attendance',icon:'↳',label:'巡邏巡檢',action:'staff-patrol',enabled:true},
-  {id:'staff-patrol-records',parentId:'staff-attendance',icon:'↳',label:'巡邏紀錄',action:'staff-patrol-records',enabled:true}
+  {id:'staff-patrol-records',parentId:'staff-attendance',icon:'↳',label:'巡邏紀錄',action:'staff-patrol-records',enabled:true},
+  {id:'staff-punch-fix',parentId:'staff-attendance',icon:'↳',label:'補打卡',action:'staff-punch-fix',enabled:true}
 ];
 const PLATFORM_COMPANY_ATTENDANCE_MENU = [
   {id:'company-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'attendance',enabled:true},
   {id:'company-attendance-locations',parentId:'company-attendance',icon:'↳',label:'出勤打卡',action:'attendance-locations',enabled:true},
   {id:'company-attendance-records',parentId:'company-attendance',icon:'↳',label:'出勤紀錄',action:'attendance-records',enabled:true},
   {id:'company-patrol-management',parentId:'company-attendance',icon:'↳',label:'巡邏管理',action:'patrol-management',enabled:true},
-  {id:'company-patrol-records',parentId:'company-attendance',icon:'↳',label:'巡邏紀錄',action:'patrol-records',enabled:true}
+  {id:'company-patrol-records',parentId:'company-attendance',icon:'↳',label:'巡邏紀錄',action:'patrol-records',enabled:true},
+  {id:'company-punch-fix',parentId:'company-attendance',icon:'↳',label:'補打卡審核',action:'punch-fix',enabled:true}
 ];
 function isAttendanceMenuItem(item, scope){
   const id=String(item?.id||'').trim(), action=String(item?.action||'').trim(), label=String(item?.label||'').trim();
-  if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||['出勤與巡邏','出勤打卡','出勤紀錄','巡邏管理','巡邏紀錄'].includes(label);
-  return id==='staff-attendance'||/^staff-(?:attendance|patrol)(?:-|$)/.test(id)||['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records'].includes(action)||['出勤與巡邏','出勤打卡','巡邏巡檢','巡邏紀錄'].includes(label);
+  if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||action==='punch-fix'||['出勤與巡邏','出勤打卡','出勤紀錄','巡邏管理','巡邏紀錄','補打卡審核'].includes(label);
+  return id==='staff-attendance'||/^staff-(?:attendance|patrol)(?:-|$)/.test(id)||['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records','staff-punch-fix'].includes(action)||id==='staff-punch-fix'||['出勤與巡邏','出勤打卡','巡邏巡檢','巡邏紀錄','補打卡'].includes(label);
 }
 function normalizeAttendanceMenu(items, scope){
   const source=Array.isArray(items)?items:[];
@@ -2725,6 +2727,7 @@ orgApi=require('./org-routes')(app,{db,LI,getUser,tenantId,now,requireCompanyAdm
 require('./account-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireCompanyPermission,requireSuperAdmin});
 // ===== 請假（多層審核、證明補交、連動班表／特休／薪資）=====
 const leaveApi=require('./leave-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,payroll,org:orgApi,redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));if(!c)scheduleTaiwanHolidayDates(Number(y)).catch(()=>{});return c||scheduleFallbackRedDates(y);}});
+const punchFixApi=require('./punch-fix-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,effectivePermissions});
 // ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
 handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
