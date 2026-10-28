@@ -2617,7 +2617,10 @@ app.get('/api/staff/schedule/community-view',requireStaffFiller,(req,res)=>{
   const rule=(()=>{try{return coverApi?coverApi.myRule(getUser(req),month):null;}catch{return null;}})();
   const draft=(()=>{try{return !!smartApi?.isDraft(tenantId(req),month);}catch{return false;}})();
   // 來代班但不是本案場編制的人員（例如機動）也列進來，排在最後
-  { const have=new Set(staff.map(x=>x.id)); const extra=[...new Set(entries.map(e=>e.staff_id).filter(id=>!have.has(id)))]; if(extra.length){ const more=db.prepare(`SELECT id,name,employee_id,position,job_level FROM staff_users WHERE tenant_id=? AND id IN (${extra.map(()=>'?').join(',')})`).all(tenantId(req),...extra); staff.push(...scheduleSortStaff(tenantId(req),more).map(x=>({...x,visiting:true}))); } }
+  // 不排班的人（會計、人事等內勤）不列入案場班表；來代班的只列機動或代班紀錄
+  for(let i=staff.length-1;i>=0;i--) if(!['admin','security','mobile'].includes(staff[i].schedule_role)) staff.splice(i,1);
+  { const have=new Set(staff.map(x=>x.id)); const extra=[...new Set(entries.filter(e=>!have.has(e.staff_id)).map(e=>e.staff_id))]; if(extra.length){ const more=db.prepare(`SELECT id,name,employee_id,position,job_level FROM staff_users WHERE tenant_id=? AND is_active=1 AND id IN (${extra.map(()=>'?').join(',')})`).all(tenantId(req),...extra); staff.push(...scheduleSortStaff(tenantId(req),more).filter(x=>x.schedule_role==='mobile'||entries.some(e=>e.staff_id===x.id&&e.source==='cover')).map(x=>({...x,visiting:true}))); } }
+  { const keep=new Set(staff.map(x=>x.id)); for(let i=entries.length-1;i>=0;i--) if(!keep.has(entries[i].staff_id)) entries.splice(i,1); }
   const selfAllowed=scheduleSelfAllowed(getUser(req),profile,rule);
   const blocked={}; if(selfAllowed&&profile){ for(const day of scheduleWorkdays(month)){ const why=scheduleSelfBlock(tenantId(req),selected,day,u.id,profile.schedule_role); if(why)blocked[day]=why; } }
   res.json({month,communities,selected_community_id:selected,staff,entries:draft?entries.filter(e=>e.source==='self-select'):entries,draft,profile,self_off_dates:selfOffDates,off_conflicts:conflicts,rule,self_allowed:selfAllowed,self_blocked:blocked,self_deadline:scheduleSelfDeadline(tenantId(req),month)});
