@@ -67,7 +67,7 @@
     const f=box.querySelector('#ogForm');box.querySelector('[data-cancel]').onclick=close;
     box.querySelector('#ogGen')?.addEventListener('click',()=>{const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';f.elements.password.value=Array.from(crypto.getRandomValues(new Uint8Array(8)),b=>a[b%a.length]).join('');f.elements.password.type='text';});
     let lastPid=null;
-    const setPerms=list=>{const set=new Set(list);box.querySelectorAll('[data-org-perm]').forEach(c=>{if(!c.disabled||['hr-records','payroll'].includes(c.dataset.orgPerm))c.checked=set.has(c.dataset.orgPerm);});};
+    const setPerms=list=>{const set=new Set(list);box.querySelectorAll('[data-org-perm]').forEach(c=>{if(!c.disabled||['hr-records','payroll'].includes(c.dataset.orgPerm))c.checked=set.has(c.dataset.orgPerm);});syncSubPerms(box,list);};
     function draw(){
       const p=o.config.positions.find(x=>x.id===f.elements.position_id.value);const where=box.querySelector('#ogWhere');const info=box.querySelector('#ogInfo');
       if(!p){info.innerHTML='選擇職位後，系統會自動帶入工作地點、排班方式與預設權限。';where.innerHTML='';return;}
@@ -90,7 +90,7 @@
     f.addEventListener('submit',async e=>{e.preventDefault();const msg=box.querySelector('#ogMsg');
       const where=box.querySelector('#ogWhere');const cids=[...where.querySelectorAll('select[name=cid]')].map(s=>Number(s.value)).filter(Boolean).concat([...where.querySelectorAll('input[name=cid]:checked')].map(x=>Number(x.value)));
       const body={name:f.elements.name?.value,mobile:f.elements.mobile.value,position_id:f.elements.position_id.value,community_ids:cids,region_ids:[...where.querySelectorAll('[name=rid]:checked')].map(x=>Number(x.value)),shift:where.querySelector('[name=shift]:checked')?.value||''};
-      if(!isAdminAcc)body.permissions=[...box.querySelectorAll('[data-org-perm]:checked')].map(x=>x.dataset.orgPerm);
+      if(!isAdminAcc)body.permissions=withSubPerms(box,[...box.querySelectorAll('[data-org-perm]:checked')].map(x=>x.dataset.orgPerm));
       if(!staffId){body.employee_id=f.elements.employee_id.value;body.password=f.elements.password.value;}
       try{const r=await api(staffId?`/api/company/org/staff/${staffId}`:'/api/company/org/staff',J(staffId?'PUT':'POST',body));close();
         if(!staffId)alert(`已開通 ${body.name}。\n登入帳號：${mobileMode?`手機 ${body.mobile}`:`員編 ${r.employee_id||body.employee_id}${body.mobile?` 或手機 ${body.mobile}`:''}`}\n初始密碼：${body.password}\n第一次登入會要求本人修改密碼。`);

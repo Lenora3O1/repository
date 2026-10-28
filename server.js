@@ -30,6 +30,7 @@ multer.MulterError=multerLib.MulterError;
 const XLSX = require('xlsx');
 const db = require('./db');
 const LI = require('./login-identity')(db);
+try{db.prepare('ALTER TABLE tenants ADD COLUMN self_select_deadline INTEGER DEFAULT 0').run();}catch{}
 const { generateDocx } = require('./generate');
 const { analyzeTemplate } = require('./template-analyzer');
 
@@ -743,12 +744,21 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
       // 經理不論內勤或駐點，都可以進入案場 SOP；上傳權限由 SOP API 再次驗證。
       if(scope==='staff' && key==='sop' && isSiteManager(staffUser)) return true;
       if(scope==='staff' && key==='attendance' && hasSiteAccess(staffUser)) return true;
-      if(scope==='staff' && key==='residents') return true;
       // 設備清冊等總務功能：只看「總務管理」權限，不沿用母目錄（公司資源）的權限
       if(scope==='company' && (String(item.action||'')==='contracts'||/社區合約/.test(String(item.label||'')))) return selected.has('company-general-affairs')||selected.has('company-accounting')||selected.has('company-finance');
       if(scope==='company' && key==='company-general-affairs') return selected.has(key);
       return selected.has(key) || (item.parentId && selected.has(menuPermissionKey(items.find(x=>String(x.id)===String(item.parentId)),scope)||''));
     });
+    // 細項開關（公司內勤在人員設定裡逐項勾選）：
+    // nosub:<子目錄id> 隱藏該子項；nomenu:<目錄id> 隱藏沒有對應權限代碼的目錄（例如社區資訊、禮品推放）。
+    // 沒有這些設定的舊帳號維持原狀（整組顯示）。
+    if(scope==='staff'){
+      const hideSub=new Set(),hideMenu=new Set();
+      for(const k of selected){if(k.startsWith('nosub:'))hideSub.add(k.slice(6));else if(k.startsWith('nomenu:'))hideMenu.add(k.slice(7));}
+      if(hideSub.size||hideMenu.size){
+        items=items.filter(x=>!(x.parentId&&hideSub.has(String(x.id)))&&!hideMenu.has(String(x.id))&&!(x.parentId&&hideMenu.has(String(x.parentId))));
+      }
+    }
     if(scope==='staff'){
       const role=scheduleDefaultRole(staffUser);
       // 請假／代班、加班、我的休假制度：所有排班人員都可以使用（舊版只開放給經理／秘書）
@@ -840,7 +850,9 @@ app.get('/api/staff/menu-config',requireStaff,(req,res)=>{
   res.json({scope:'staff',items});
 });
 app.get('/api/company/menu-config',requireCompanyAdmin,(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.json({scope:'company',items:resolveMenu('company',tenantId(req),getUser(req))});});
-app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null)});});
+app.get('/api/company/site-menu-config',requireCompanyAdmin,(req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.json({scope:'staff',items:resolveMenu('staff',tenantId(req),null).map(x=>({...x,perm_key:menuPermissionKey(x,'staff')}))});});
+// 現場目錄是否開放某個功能（用於 API 端再次把關，例如住戶名冊的各分類）
+function staffMenuAllows(u,action){try{const all=resolveMenu('staff',u.tenant_id,null);if(!all.some(x=>String(x.action||'')===action))return true;return resolveMenu('staff',u.tenant_id,u).some(x=>String(x.action||'')===action);}catch{return true;}}
 app.get('/admin', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/admin.html', (req,res)=>{res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');res.set('Pragma','no-cache');res.set('Expires','0');res.sendFile(path.join(__dirname,'public','admin.html'));});
 app.get('/api/admin/menu-config',requireSuperAdmin,(req,res)=>{
@@ -1504,7 +1516,7 @@ app.post('/api/admin/tenants',requireSuperAdmin,(req,res)=>{
   });
   try{res.json({success:true,...tx()});}catch(e){res.status(500).json({error:'建立公司失敗，請確認資料是否重複'});}
 });
-app.put('/api/admin/tenants/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!t)return res.status(404).json({error:'找不到公司'});const name=String(req.body?.name||t.name).trim();const status=req.body?.status===undefined?t.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'公司名稱不可空白'});const mode=LI.MODES.includes(req.body?.login_mode)?req.body.login_mode:LI.loginMode(id);db.prepare('UPDATE tenants SET name=?,status=?,login_mode=?,updated_at=? WHERE id=?').run(name,status,mode,now(),id);let missing=0;if(mode==='mobile'){missing=db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND is_active=1').all(id).filter(u=>!LI.isMobile(LI.mobileOf(u.id))).length;}res.json({success:true,login_mode:mode,missing_mobile:missing});});
+app.put('/api/admin/tenants/:id',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const t=db.prepare('SELECT * FROM tenants WHERE id=?').get(id);if(!t)return res.status(404).json({error:'找不到公司'});const name=String(req.body?.name||t.name).trim();const status=req.body?.status===undefined?t.status:(req.body.status?'active':'inactive');if(!name)return res.status(400).json({error:'公司名稱不可空白'});const mode=LI.MODES.includes(req.body?.login_mode)?req.body.login_mode:LI.loginMode(id);const ddl=req.body?.self_select_deadline===undefined?Number(t.self_select_deadline||0):Math.max(0,Math.min(28,Math.floor(Number(req.body.self_select_deadline)||0)));db.prepare('UPDATE tenants SET name=?,status=?,login_mode=?,self_select_deadline=?,updated_at=? WHERE id=?').run(name,status,mode,ddl,now(),id);let missing=0;if(mode==='mobile'){missing=db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND is_active=1').all(id).filter(u=>!LI.isMobile(LI.mobileOf(u.id))).length;}res.json({success:true,login_mode:mode,missing_mobile:missing});});
 app.get('/api/admin/tenants/:id/admin',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT id,employee_id,name,is_active,last_login_at,created_at,admin_level FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(id);if(!u)return res.status(404).json({error:'找不到公司負責人'});res.json({admin:u,password_viewable:false});});
 app.get('/api/admin/tenants/:id/admins',requireSuperAdmin,(req,res)=>{const id=Number(req.params.id);const rows=db.prepare("SELECT id,employee_id,name,is_active,last_login_at,created_at,updated_at,admin_level FROM staff_users WHERE tenant_id=? AND role='company_admin' ORDER BY admin_level='owner' DESC,id").all(id);res.json(rows);});
 app.post('/api/admin/tenants/:id/admins',requireSuperAdmin,(req,res)=>{const tenantIdValue=Number(req.params.id);const tenant=db.prepare('SELECT id,status FROM tenants WHERE id=?').get(tenantIdValue);if(!tenant)return res.status(404).json({error:'找不到公司'});let employeeId=String(req.body?.employee_id||'').trim();if(!employeeId&&LI.loginMode(tenantIdValue)==='mobile')employeeId=LI.autoEmployeeId(tenantIdValue);const name=String(req.body?.name||'').trim();const password=String(req.body?.password||'');if(!employeeId||!name||password.length<4)return res.status(400).json({error:'請填寫員編、姓名，且密碼至少 4 碼'});const mchk=LI.checkForAccount(tenantIdValue,req.body?.mobile,req.body,{requireForMode:true});if(mchk)return res.status(mchk.status).json(mchk.body);if(db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tenantIdValue,employeeId))return res.status(400).json({error:'這家公司已經有相同員編'});const p=db.makePassword(password);const t=now();const info=db.prepare('INSERT INTO staff_users (employee_id,name,password_hash,password_salt,is_active,created_at,updated_at,role,tenant_id,admin_level) VALUES (?,?,?,?,1,?,?,?,?,?)').run(employeeId,name,p.hash,p.salt,t,t,'company_admin',tenantIdValue,'admin');LI.saveMobile(tenantIdValue,Number(info.lastInsertRowid),req.body?.mobile);res.json({success:true,id:info.lastInsertRowid,employee_id:employeeId});});
@@ -1926,7 +1938,7 @@ app.put('/api/staff/residents/preference',requireStaffFiller,(req,res)=>{try{con
 // 住戶名冊讀取／上傳／逐筆編輯／聯繫表自動更新：resident-routes.js
 function residentCanEdit(u){if(!u||u.role==='company_admin')return false;if(residentCanUpload(u))return true;const vals=[u.job_level,u.job_category,u.position,...getJobCategories(u)];return vals.some(v=>String(v||'').includes('秘書'));}
 const layoutApi=require('./community-layout')({db,now});
-require('./resident-routes')(app,{db,getUser,tenantId,now,requireStaffFiller,residentCategory,residentActiveCommunity,residentCanEdit,residentParseFile,residentUpload,RESIDENT_IMPORTS_DIR,path,XLSX,layoutApi,fs});
+require('./resident-routes')(app,{db,staffMenuAllows,getUser,tenantId,now,requireStaffFiller,residentCategory,residentActiveCommunity,residentCanEdit,residentParseFile,residentUpload,RESIDENT_IMPORTS_DIR,path,XLSX,layoutApi,fs});
 
 
 
@@ -2597,18 +2609,52 @@ app.get('/api/staff/schedule/community-view',requireStaffFiller,(req,res)=>{
   const requested=Number(req.query?.community_id||0);
   const selected=communities.some(c=>Number(c.id)===requested)?requested:Number(communities[0]?.id||0);
   if(!selected)return res.json({month,communities,selected_community_id:null,staff:[],entries:[],profile:scheduleGetProfile(tenantId(req),u.id)});
-  const staff=db.prepare(`SELECT DISTINCT u.id,u.name,u.employee_id,u.position,u.job_level FROM staff_users u WHERE u.tenant_id=? AND u.is_active=1 AND (EXISTS (SELECT 1 FROM staff_work_assignments a WHERE a.staff_id=u.id AND a.tenant_id=u.tenant_id AND a.scope_type='site' AND a.community_id=?) OR EXISTS (SELECT 1 FROM staff_communities sc WHERE sc.staff_id=u.id AND sc.community_id=?)) ORDER BY u.name`).all(tenantId(req),selected,selected);
+  const staff=scheduleSortStaff(tenantId(req),db.prepare(`SELECT DISTINCT u.id,u.name,u.employee_id,u.position,u.job_level FROM staff_users u WHERE u.tenant_id=? AND u.is_active=1 AND (EXISTS (SELECT 1 FROM staff_work_assignments a WHERE a.staff_id=u.id AND a.tenant_id=u.tenant_id AND a.scope_type='site' AND a.community_id=?) OR EXISTS (SELECT 1 FROM staff_communities sc WHERE sc.staff_id=u.id AND sc.community_id=?)) ORDER BY u.name`).all(tenantId(req),selected,selected));
   const entries=db.prepare(`SELECT e.*,u.name staff_name,u.employee_id,c.name community_name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id LEFT JOIN communities c ON c.id=e.community_id AND c.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.month=? AND e.community_id=? ORDER BY e.work_date,u.name`).all(tenantId(req),month,selected);
   const profile=scheduleGetProfile(tenantId(req),u.id);
   const selfOffDates=db.prepare("SELECT work_date FROM schedule_entries WHERE tenant_id=? AND month=? AND staff_id=? AND shift_code='off' AND source='self-select'").all(tenantId(req),month,u.id).map(x=>x.work_date);
   const conflicts=db.prepare("SELECT work_date,COUNT(DISTINCT staff_id) count,GROUP_CONCAT(DISTINCT staff_id) staff_ids FROM schedule_entries WHERE tenant_id=? AND month=? AND community_id=? AND shift_code='off' AND staff_id<>? GROUP BY work_date").all(tenantId(req),month,selected,u.id);
   const rule=(()=>{try{return coverApi?coverApi.myRule(getUser(req),month):null;}catch{return null;}})();
   const draft=(()=>{try{return !!smartApi?.isDraft(tenantId(req),month);}catch{return false;}})();
-  res.json({month,communities,selected_community_id:selected,staff,entries:draft?entries.filter(e=>e.source==='self-select'):entries,draft,profile,self_off_dates:selfOffDates,off_conflicts:conflicts,rule,self_allowed:scheduleSelfAllowed(getUser(req),profile,rule)});
+  // 來代班但不是本案場編制的人員（例如機動）也列進來，排在最後
+  { const have=new Set(staff.map(x=>x.id)); const extra=[...new Set(entries.map(e=>e.staff_id).filter(id=>!have.has(id)))]; if(extra.length){ const more=db.prepare(`SELECT id,name,employee_id,position,job_level FROM staff_users WHERE tenant_id=? AND id IN (${extra.map(()=>'?').join(',')})`).all(tenantId(req),...extra); staff.push(...scheduleSortStaff(tenantId(req),more).map(x=>({...x,visiting:true}))); } }
+  const selfAllowed=scheduleSelfAllowed(getUser(req),profile,rule);
+  const blocked={}; if(selfAllowed&&profile){ for(const day of scheduleWorkdays(month)){ const why=scheduleSelfBlock(tenantId(req),selected,day,u.id,profile.schedule_role); if(why)blocked[day]=why; } }
+  res.json({month,communities,selected_community_id:selected,staff,entries:draft?entries.filter(e=>e.source==='self-select'):entries,draft,profile,self_off_dates:selfOffDates,off_conflicts:conflicts,rule,self_allowed:selfAllowed,self_blocked:blocked,self_deadline:scheduleSelfDeadline(tenantId(req),month)});
 });
 
 // 現場人員：機動／保全的自選休假與自己的班表資料，後端先備妥；前台介面可獨立接上，不會看到行政資料。
 app.get('/api/staff/schedule/month',requireStaffFiller,(req,res)=>{const month=scheduleMonth(req.query?.month);const u=getUser(req);const p=scheduleGetProfile(tenantId(req),u.id);if(!p)return res.status(404).json({error:'尚未設定班表身分'});const category=p.schedule_role;const rows=db.prepare('SELECT e.*,c.name community_name FROM schedule_entries e LEFT JOIN communities c ON c.id=e.community_id WHERE e.tenant_id=? AND e.month=? AND e.staff_id=? ORDER BY e.work_date').all(tenantId(req),month,u.id);res.json({month,category,profile:p,entries:rows,problems:scheduleValidateEntries(tenantId(req),month).filter(x=>x.staff_id===u.id)});});
+// 班表人員排序：行政（經理在前、秘書其次）→ 保全 → 機動
+function scheduleRankOf(tid,x){
+  const role=(scheduleGetProfile(tid,x.id)||{}).schedule_role||'';const pos=`${x.position||''} ${x.job_level||''}`;
+  if(role==='admin'||/經理|副理|主任|總幹事|秘書/.test(pos)&&role!=='security'&&role!=='mobile'){ if(/經理|副理|主任|總幹事|主管/.test(pos))return [0,role||'admin']; if(/秘書/.test(pos))return [1,role||'admin']; return [2,role||'admin']; }
+  if(role==='security')return [3,role]; if(role==='mobile')return [4,role]; return [5,role];
+}
+function scheduleSortStaff(tid,list){return list.map(x=>{const [rank,role]=scheduleRankOf(tid,x);return {...x,schedule_role:role,rank};}).sort((a,b)=>a.rank-b.rank||String(a.name).localeCompare(String(b.name),'zh-Hant'));}
+// 自選休假會不會撞假：
+// - 行政（經理、秘書）彼此不會撞假，可以同一天休
+// - 保全：同一天同案場已排休的保全人數，不能超過可代班的機動人數（至少 1）
+// - 機動：同一天同案場已有其他機動排休就不行
+function scheduleSelfBlock(tid,cid,date,selfId,role){
+  if(role==='admin')return '';
+  const offs=db.prepare("SELECT DISTINCT e.staff_id,u.name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.work_date=? AND e.community_id=? AND e.shift_code='off' AND e.staff_id<>?").all(tid,date,cid,selfId);
+  const same=offs.filter(o=>((scheduleGetProfile(tid,o.staff_id)||{}).schedule_role||'')===role);
+  if(!same.length)return '';
+  let cap=1;
+  if(role==='security'){const mob=db.prepare("SELECT DISTINCT a.staff_id FROM staff_work_assignments a JOIN staff_users u ON u.id=a.staff_id WHERE a.tenant_id=? AND a.scope_type='site' AND a.community_id=? AND u.is_active=1").all(tid,cid).filter(r=>((scheduleGetProfile(tid,r.staff_id)||{}).schedule_role||'')==='mobile');cap=Math.max(1,mob.length);}
+  if(same.length<cap)return '';
+  return `這一天 ${same.map(x=>x.name).join('、')} 已排休，沒有足夠的${role==='security'?'機動人員可以代班':'機動人力'}，請選擇其他日期。`;
+}
+// 自選休假回報期限（總後台依公司設定）：每月 N 號前要選好「下個月」的自選休假；0＝不限
+function scheduleSelfDeadline(tid,month){
+  let day=0;try{day=Number(db.prepare('SELECT self_select_deadline FROM tenants WHERE id=?').get(tid)?.self_select_deadline||0);}catch{}
+  if(!day)return {day:0,until:'',closed:false};
+  const [y,m]=month.split('-').map(Number);const py=m===1?y-1:y,pm=m===1?12:m-1;const last=new Date(py,pm,0).getDate();
+  const until=`${py}-${String(pm).padStart(2,'0')}-${String(Math.min(day,last)).padStart(2,'0')}`;
+  const today=new Date(Date.now()+8*3600e3).toISOString().slice(0,10);
+  return {day,until,closed:today>until};
+}
 // 自選休假：保全、機動，以及「固定月休」的行政人員（社區主管、秘書）
 function scheduleSelfAllowed(u,p,rule){if(!p)return false;if(['security','mobile'].includes(p.schedule_role))return true;return p.schedule_role==='admin'&&rule?.mode==='fixed_monthly'&&Number(rule.self_select_days||0)>0;}
 app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
@@ -2623,8 +2669,10 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
   const existingSelf=db.prepare("SELECT 1 FROM schedule_entries WHERE tenant_id=? AND work_date=? AND staff_id=? AND shift_code='off' AND source='self-select' LIMIT 1").get(tenantId(req),date,u.id);
   if(existingSelf)throw new Error('您已選擇這一天休假。');
   if(used>=Number(p.self_select_days||2))throw new Error(`本月最多可自選 ${p.self_select_days||2} 天`);
-  const collision=db.prepare("SELECT u.name FROM schedule_entries e JOIN staff_users u ON u.id=e.staff_id AND u.tenant_id=e.tenant_id WHERE e.tenant_id=? AND e.work_date=? AND e.community_id=? AND e.shift_code='off' AND e.staff_id<>? LIMIT 1").get(tenantId(req),date,requestedCommunity,u.id);
-  if(collision)throw new Error(`這一天 ${collision.name} 已排休，為避免案場撞假，請選擇其他日期。`);
+  const dl=scheduleSelfDeadline(tenantId(req),month);
+  if(dl.closed)throw new Error(`${month.slice(5)} 月的自選休假已在 ${dl.until} 截止，未選的休假由公司協助安排。`);
+  const collision=scheduleSelfBlock(tenantId(req),requestedCommunity,date,u.id,p.schedule_role);
+  if(collision)throw new Error(collision);
   scheduleUpsertEntry(tenantId(req),{staff_id:u.id,community_id:requestedCommunity,work_date:date,category:p.schedule_role,shift_code:'off',source:'self-select',note:'人員自選休假'},u.id);
   res.json({success:true});
 }catch(e){res.status(400).json({error:e.message||'自選休假失敗'});}});

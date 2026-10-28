@@ -12,7 +12,8 @@ module.exports = function registerAccountRoutes(app, d) {
   function rule(pw, u) {
     if (pw.length < 6) return '新密碼至少 6 碼';
     if (pw.length > 64) return '新密碼太長';
-    if (pw === u.employee_id) return '新密碼不能和員編相同';
+    if (pw === u.employee_id) return '新密碼不能與帳號相同';
+    { const dg = s => String(s || '').replace(/\D/g, ''); let m = ''; try { m = db.prepare('SELECT mobile FROM hr_profiles WHERE staff_id=?').get(u.id)?.mobile || ''; } catch {} if (m && dg(pw).length >= 9 && dg(pw).slice(-9) === dg(m).slice(-9) && pw.replace(/[\d\s+-]/g, '') === '') return '新密碼不能與帳號（手機號碼）相同'; }
     if (/^(\d)\1+$/.test(pw) || ['123456', '1234567', '12345678', '000000', '111111', 'password'].includes(pw.toLowerCase())) return '這個密碼太容易被猜到，請換一個';
     return '';
   }

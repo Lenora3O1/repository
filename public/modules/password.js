@@ -8,10 +8,10 @@
     const box=document.createElement('div');box.className='modal-backdrop';box.id='pwModal';box.style.zIndex='9999';
     box.innerHTML=`<div class="modal" role="dialog" aria-modal="true" style="max-width:440px;width:min(440px,94vw)">${force?'':'<button type="button" class="modal-close" aria-label="關閉">×</button>'}
       <h2>🔑 ${force?'請先設定您的密碼':'修改密碼'}</h2>
-      ${force?'<p class="hint">這是公司開通（或重設）時給您的臨時密碼。為了帳號安全，請改成只有您知道的密碼後再開始使用。</p>':''}
+      ${force?'<p class="hint">目前密碼為臨時密碼。為了帳號安全，請修改密碼後再開始使用。</p>':''}
       <form id="pwForm" style="display:grid;gap:10px">
         <label style="display:flex;flex-direction:column;gap:5px;font-weight:700;margin:0">${force?'目前的臨時密碼':'目前的密碼'}<input type="password" name="cur" autocomplete="current-password" required></label>
-        <label style="display:flex;flex-direction:column;gap:5px;font-weight:700;margin:0">新密碼<input type="password" name="n1" autocomplete="new-password" minlength="6" required><small class="muted" style="font-weight:400">至少 6 碼，不能和員編相同，避免 123456 這類容易猜到的密碼</small></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-weight:700;margin:0">新密碼<input type="password" name="n1" autocomplete="new-password" minlength="6" required><small class="muted" style="font-weight:400">至少 6 碼，不能與帳號相同，避免 123456 這類容易猜到的密碼</small></label>
         <label style="display:flex;flex-direction:column;gap:5px;font-weight:700;margin:0">再輸入一次新密碼<input type="password" name="n2" autocomplete="new-password" required></label>
         <label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:500"><input type="checkbox" name="show" style="width:auto;margin:0"> 顯示密碼</label>
         <div id="pwMsg"></div>
