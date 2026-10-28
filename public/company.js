@@ -20,14 +20,53 @@ async function loadPermissionCatalog(){
 const SENSITIVE_PERMS=[['hr-records','👥 人事資料設定（人事管理：到職、特休、加保級距、薪轉帳號）'],['payroll','💰 薪資設定（人員薪資、薪資統計表、薪資單、借資、代扣款）']];
 function sensitivePermHtml(selected,attr){const admin=state.currentRole==='company_admin';return `<div class="workspace-permission-group sensitive-perms"><div class="workspace-permission-title">🔒 人事／薪資權限${admin?'':'（只有公司管理員可以設定）'}</div><div class="check-list">${SENSITIVE_PERMS.map(([k,l])=>`<label class="check-row"><input type="checkbox" data-${attr}-perm="${k}" ${selected.has(k)?'checked':''} ${admin?'':'disabled'}> ${l}</label>`).join('')}</div></div>`;}
 function permissionOptionsHtml(items, selected, attrName){
+  const list=(items||[]).filter(x=>x&&x.enabled!==false&&String(x.action||'')!=='home');
+  // 現場目錄（有 perm_key）：母目錄＋子項逐項勾選；子項沒勾的存成 nosub:<id>，沒有權限代碼的目錄沒勾存成 nomenu:<id>
+  if(list.some(x=>'perm_key' in x)) return sitePermissionTreeHtml(list,selected,attrName);
   const seen=new Set(SENSITIVE_PERMS.map(x=>x[0]));
-  return (items||[]).filter(x=>x&&x.enabled!==false).map(x=>{
+  return list.map(x=>{
     const key=menuPermissionKeyClient(x);
     if(!key || seen.has(key)) return '';
     seen.add(key);
     return `<label class="check-row"><input type="checkbox" data-${attrName}-perm="${escapeAttr(key)}" ${selected.has(key)?'checked':''}> ${escapeHtml(x.icon||'')} ${escapeHtml(x.label||'未命名')}</label>`;
   }).join('');
 }
+function sitePermissionTreeHtml(list,selected,attrName){
+  const ids=new Set(list.map(x=>String(x.id)));const kids={};
+  for(const x of list)if(x.parentId&&ids.has(String(x.parentId)))(kids[x.parentId] ||= []).push(x);
+  const seen=new Set();
+  return list.filter(x=>!x.parentId||!ids.has(String(x.parentId))).map(x=>{
+    const key=x.perm_key||'';const node=key||('free:'+x.id);
+    if(seen.has(node))return '';seen.add(node);
+    const on=key?selected.has(key):!selected.has('nomenu:'+x.id);
+    const parent=`<label class="check-row perm-parent"><input type="checkbox" data-perm-node="${escapeAttr(node)}" ${key?`data-${attrName}-perm="${escapeAttr(key)}"`:`data-free-id="${escapeAttr(x.id)}"`} ${on?'checked':''}> ${escapeHtml(x.icon||'')} ${escapeHtml(x.label||'未命名')}</label>`;
+    const ch=kids[x.id]||[];
+    if(!ch.length)return `<div class="perm-node">${parent}</div>`;
+    return `<div class="perm-node has-subs">${parent}<div class="perm-subs">${ch.map(c=>`<label class="check-row perm-sub"><input type="checkbox" data-sub-of="${escapeAttr(node)}" data-sub-id="${escapeAttr(c.id)}" ${on&&!selected.has('nosub:'+c.id)?'checked':''}> ${escapeHtml(String(c.label||'未命名'))}</label>`).join('')}</div></div>`;
+  }).join('');
+}
+// 勾母目錄＝子項全勾；子項全部取消＝母目錄取消
+document.addEventListener('change',e=>{
+  const t=e.target;if(!(t instanceof HTMLInputElement))return;
+  const node=t.closest('.perm-node');if(!node)return;
+  if(t.dataset.permNode){node.querySelectorAll('input[data-sub-of]').forEach(s=>s.checked=t.checked);}
+  else if(t.dataset.subOf){const p=node.querySelector('input[data-perm-node]');if(p)p.checked=[...node.querySelectorAll('input[data-sub-of]')].some(s=>s.checked);}
+});
+// 依母目錄重設子項（換職位帶入預設權限時用）
+function syncSubPerms(root,list=[]){const sel=new Set(list);root.querySelectorAll('.perm-node').forEach(n=>{const p=n.querySelector('input[data-perm-node]');if(!p)return;if(p.dataset.freeId)p.checked=!sel.has('nomenu:'+p.dataset.freeId);n.querySelectorAll('input[data-sub-of]').forEach(s=>s.checked=p.checked&&!sel.has('nosub:'+s.dataset.subId));});}
+// 收集細項設定：把沒勾的子項／目錄轉成 nosub:／nomenu:
+function withSubPerms(root,perms){
+  const out=(perms||[]).filter(k=>!/^(nosub|nomenu):/.test(k));
+  root.querySelectorAll('.perm-node').forEach(n=>{
+    if(n.closest('[style*="display: none"],[style*="display:none"]'))return;
+    const p=n.querySelector('input[data-perm-node]');if(!p)return;
+    if(p.dataset.freeId&&!p.checked)out.push('nomenu:'+p.dataset.freeId);
+    const subs=[...n.querySelectorAll('input[data-sub-of]')];
+    if(p.checked&&subs.some(s=>!s.checked))subs.filter(s=>!s.checked).forEach(s=>out.push('nosub:'+s.dataset.subId));
+  });
+  return [...new Set(out)];
+}
+
 function menuPermissionKeyClient(item){
   const raw=`${item?.id||''} ${item?.action||''} ${item?.label||''}`.toLowerCase();
   const rules=[
@@ -167,7 +206,7 @@ async function changeStaffStatus(id,status){const label=status==='disabled'?'停
 async function loadArchive(status){try{const rows=await api(`/api/company/personnel-archive?status=${encodeURIComponent(status)}`);$('personArchiveList').innerHTML=rows.length?rows.map(r=>`<div class="archive-card"><strong>${escapeHtml(r.employee_id)}｜${escapeHtml(r.name)}</strong><span>${r.person_status==='blacklist'?'永不錄用':'封存'}</span><small>封存時間：${formatDate(r.archived_at)}</small><small>原工作：${escapeHtml((r.snapshot?.job_categories||[]).join('、'))}｜案場：${escapeHtml((r.snapshot?.communities||[]).map(x=>x.name).join('、')||'無')}</small></div>`).join(''):'<div class="empty">目前沒有資料。</div>'}catch(err){alert(err.message)}}
 async function addCompanyAdmin(e){e.preventDefault();try{await api('/api/company/admins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employee_id:$('newAdminId').value,mobile:$('newAdminMobile')?.value||'',name:$('newAdminName').value,password:$('newAdminPass').value})});closeCompanyModal(e.target.closest('.modal-backdrop'));await loadAll();alert('公司管理員帳號已開通。')}catch(err){alert(err.message)}}
 async function saveCompanyAdmin(id){try{await api(`/api/company/admins/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$(`admin-name-${id}`).value,is_active:$(`admin-active-${id}`).value==='1',password:$(`admin-pass-${id}`).value})});await loadAll();alert('公司管理員資料已更新。')}catch(err){alert(err.message)}}
-async function addStaff(e){e.preventDefault();try{const ids=[...e.target.querySelectorAll('input[data-new-cid]:checked')].map(x=>Number(x.dataset.newCid));const jobs=[...e.target.querySelectorAll('input[data-new-job]:checked')].map(x=>x.dataset.newJob);const permissions=[...e.target.querySelectorAll('input[data-new-perm]:checked')].map(x=>x.dataset.newPerm);const r=await api('/api/company/staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employee_id:$('newEmployeeId').value,mobile:$('newStaffMobile')?.value||'',name:$('newStaffName').value,password:$('newStaffPass').value,work_type:$('newWorkType').value,job_categories:jobs,job_level:$('newJobLevel').value,permissions,community_ids:ids})});closeCompanyModal(e.target.closest('.modal-backdrop'));await loadAll();alert('已開通人員帳號，內勤／駐點、案場、職務與工作台權限已建立。')}catch(err){alert(err.message)}}
+async function addStaff(e){e.preventDefault();try{const ids=[...e.target.querySelectorAll('input[data-new-cid]:checked')].map(x=>Number(x.dataset.newCid));const jobs=[...e.target.querySelectorAll('input[data-new-job]:checked')].map(x=>x.dataset.newJob);const permissions=withSubPerms(e.target,[...e.target.querySelectorAll('input[data-new-perm]:checked')].map(x=>x.dataset.newPerm));const r=await api('/api/company/staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employee_id:$('newEmployeeId').value,mobile:$('newStaffMobile')?.value||'',name:$('newStaffName').value,password:$('newStaffPass').value,work_type:$('newWorkType').value,job_categories:jobs,job_level:$('newJobLevel').value,permissions,community_ids:ids})});closeCompanyModal(e.target.closest('.modal-backdrop'));await loadAll();alert('已開通人員帳號，內勤／駐點、案場、職務與工作台權限已建立。')}catch(err){alert(err.message)}}
 async function openStaffSettings(id){
  const u=state.staff.find(x=>Number(x.id)===Number(id)); if(!u)return;
  const rows=await api(`/api/company/staff/${id}/communities`);
@@ -182,7 +221,7 @@ async function openStaffSettings(id){
  const type=box.querySelector('#editWorkType'),list=box.querySelector('#editCommunityList'),companyGroup=box.querySelector('#editCompanyPermGroup'),siteGroup=box.querySelector('#editSitePermGroup');
  const sync=()=>{companyGroup.style.display=type.value==='site'?'none':'block';siteGroup.style.display=type.value==='internal'?'none':'block';const internal=type.value==='internal';list.style.opacity=internal?'0.5':'1';list.querySelectorAll('input[data-edit-cid]').forEach(x=>{x.disabled=internal||x.closest('label').textContent.includes('已停用');if(internal)x.checked=false;});}; type.addEventListener('change',sync); sync();
 }
-async function saveStaffSettings(id,btn){const box=btn.closest('.modal');const communityIds=[...box.querySelectorAll('input[data-edit-cid]:checked')].map(x=>Number(x.dataset.editCid));const jobs=[...box.querySelectorAll('input[data-edit-job]:checked')].map(x=>x.dataset.editJob);const permissions=[...box.querySelectorAll('input[data-edit-perm]:checked')].map(x=>x.dataset.editPerm);try{await api(`/api/company/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({work_type:box.querySelector('#editWorkType').value,job_categories:jobs,job_level:box.querySelector('#editJobLevel').value,permissions,community_ids:communityIds})});closeCompanyModal(btn);await loadAll();alert('職務、案場與工作台權限已更新。')}catch(err){alert(err.message)}}
+async function saveStaffSettings(id,btn){const box=btn.closest('.modal');const communityIds=[...box.querySelectorAll('input[data-edit-cid]:checked')].map(x=>Number(x.dataset.editCid));const jobs=[...box.querySelectorAll('input[data-edit-job]:checked')].map(x=>x.dataset.editJob);const permissions=withSubPerms(box,[...box.querySelectorAll('input[data-edit-perm]:checked')].map(x=>x.dataset.editPerm));try{await api(`/api/company/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({work_type:box.querySelector('#editWorkType').value,job_categories:jobs,job_level:box.querySelector('#editJobLevel').value,permissions,community_ids:communityIds})});closeCompanyModal(btn);await loadAll();alert('職務、案場與工作台權限已更新。')}catch(err){alert(err.message)}}
 
 function renderCommunities(){const el=$('tab-communities');setTimeout(()=>window.OrgCompanyModule?.renderRegions($('regionPanel'),{onChange:()=>{}}),0);el.innerHTML=`<div id="regionPanel"></div><div class="panel"><div class="section-title">🏠 社區管理</div><p class="hint">新增社區會在目前畫面中央開啟設定視窗。</p><button onclick="openAddCommunityModal()">＋ 新增社區</button></div><div class="panel"><div class="section-title">本公司社區（${state.communities.length} 個）</div><div class="table-wrap"><table><thead><tr><th>社區名稱</th><th>代表地址</th><th>狀態</th><th>操作</th></tr></thead><tbody>${state.communities.map(c=>`<tr><td><input id="community-name-${c.id}" value="${escapeAttr(c.name)}"></td><td><input id="community-addr-${c.id}" value="${escapeAttr(c.main_address||'')}" placeholder="例如：範例市幸福區和平路100號"></td><td><select id="community-status-${c.id}"><option value="active" ${c.status==='active'?'selected':''}>服務中</option><option value="inactive" ${c.status!=='active'?'selected':''}>已結束服務／停用</option></select></td><td><button class="secondary" onclick="saveCommunity(${c.id})">儲存</button> <button class="danger" onclick="toggleCommunityService(${c.id},${c.status==='active'?'true':'false'})">${c.status==='active'?'結束服務':'恢復服務'}</button></td></tr>`).join('')}</tbody></table></div></div>`}
 function openAddCommunityModal(){const box=openCompanyModal('＋ 新增社區',`<form id="addCommunityForm"><div class="field"><label>社區名稱</label><input id="newCommunityName" required placeholder="例如：幸福花園"></div><div class="field"><label>代表地址（社區主要地址）</label><input id="newCommunityAddr" placeholder="例如：範例市幸福區和平路100號"></div><p class="hint">社區有多個門牌（例如前棟、後棟）時，由駐點經理或秘書第一次使用住戶名冊時，在「社區棟別門牌設定」逐棟設定。</p><div class="modal-actions"><button type="submit">新增社區</button></div></form>`);(box?.querySelector?box:document).querySelector('#addCommunityForm').addEventListener('submit',addCommunity);}

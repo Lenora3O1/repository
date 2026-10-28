@@ -109,6 +109,7 @@ module.exports = function registerResidentRoutes(app, d) {
     if (!c) { res.status(400).json({ error: '請先選擇目前要操作的案場' }); return null; }
     const u = getUser(req);
     if (!u || !u.is_active || u.role === 'company_admin' || ['left', 'blacklist', 'disabled'].includes(String(u.person_status || ''))) { res.status(403).json({ error: '這個帳號已沒有查看住戶名冊的權限', revoked: true }); return null; }
+    if (d.staffMenuAllows && !d.staffMenuAllows(u, category)) { res.status(403).json({ error: '目前帳號沒有開通這個住戶名冊項目，請洽公司內勤' }); return null; }
     if (edit && !residentCanEdit(u)) { res.status(403).json({ error: '目前帳號沒有修改住戶名冊的權限（經理、秘書可以修改）' }); return null; }
     return { tid: tenantId(req), cid: c.id, community: c, category, u, by: u?.name || u?.employee_id || '' };
   }

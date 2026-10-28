@@ -2431,3 +2431,12 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .page-pin-btn:hover{background:#F5F2EE;color:#C98A1B}
 .page-pin-btn[data-pinned="1"]{color:#E0A526}
 .page-pin-btn:focus-visible{outline:2px solid #A44528;outline-offset:2px}
+
+/* 駐點工作項目：母目錄＋子項逐項勾選 */
+.check-list:has(.perm-node){display:grid!important;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px!important;align-items:start}
+.perm-node{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid #ECE4E1;border-radius:10px;background:#fff}
+.perm-node .check-row{display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:flex-start!important;gap:8px!important;text-align:left!important;margin:0!important;padding:3px 0!important;min-height:0!important}
+.perm-node .check-row input{width:auto!important;margin:0!important;flex:none}
+.perm-node .perm-parent{font-weight:700}
+.perm-subs{margin:2px 0 0 22px;padding-left:8px;border-left:2px solid #EFE6E2;display:flex;flex-direction:column}
+.perm-node .perm-sub{font-weight:500;font-size:.92em;color:#4E322D}
