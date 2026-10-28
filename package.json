@@ -3,6 +3,9 @@
   "version": "4.6.1",
   "description": "物業社區交接清冊｜多租戶、分層權限、員編登入、草稿續填、工作日誌模板分析測試與 Word 產製系統",
   "main": "server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node server.js"
   },

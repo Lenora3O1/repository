@@ -58,7 +58,7 @@ let plansApi;
 let smartApi=null; // 智慧月班表（草稿中的月份不給現場看） // 代班／加班模組（休假制度說明）
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
-const DATA_DIR = process.env.DATA_DIR || __dirname;
+const { DATA_DIR, ephemeral: DATA_EPHEMERAL } = require('./data-dir');
 const TEMPLATES_DIR = path.join(DATA_DIR, 'uploads', 'templates');
 const PLATFORM_RESOURCES_DIR = path.join(DATA_DIR, 'uploads', 'platform-resources');
 const RESIDENT_IMPORTS_DIR = path.join(DATA_DIR, 'uploads', 'resident-imports');
@@ -2746,4 +2746,6 @@ interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,r
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi,plans:plansApi});
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi,plans:plansApi});
 
+// 主機健康檢查（Render Health Check Path 填 /healthz）
+app.get('/healthz',(req,res)=>{try{db.prepare('SELECT 1').get();res.json({ok:true,persistent_storage:!DATA_EPHEMERAL});}catch(e){res.status(500).json({ok:false});}});
 app.listen(PORT,()=>console.log(`V4 伺服器已啟動：http://localhost:${PORT}`));

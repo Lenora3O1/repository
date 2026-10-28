@@ -1,0 +1,27 @@
+# Render Blueprint：在 Render 選「New → Blueprint」，選這個 GitHub repository 就會照這裡建立服務。
+# SQLite 資料庫與上傳檔案放在持久磁碟（/data）；持久磁碟需要付費方案（Starter 以上），免費方案不能掛磁碟。
+services:
+  - type: web
+    name: hesi-property
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /data
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

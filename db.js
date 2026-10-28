@@ -3,8 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DATA_DIR = process.env.DATA_DIR || __dirname;
-fs.mkdirSync(DATA_DIR, { recursive: true });
+const { DATA_DIR } = require('./data-dir');
 const db = new Database(path.join(DATA_DIR, 'data.sqlite'));
 db.pragma('foreign_keys = ON');
 
