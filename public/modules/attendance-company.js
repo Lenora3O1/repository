@@ -4,7 +4,8 @@
   const esc=s=>window.escapeHtml?window.escapeHtml(s):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
   let cache={rules:{},communities:[],locations:[]};
-  function qrUrl(token,size=420){return `https://quickchart.io/qr?text=${encodeURIComponent(token)}&size=${size}&margin=2`;}
+  // QR Code 在本機產生（vendor/qrcode-generator.js），巡邏點代碼不會送到外部網站
+  function qrUrl(token,size=420){if(window.qrcode){try{const q=window.qrcode(0,'M');q.addData(String(token));q.make();const cell=Math.max(2,Math.floor(size/(q.getModuleCount()+8)));return q.createDataURL(cell,cell*4);}catch(e){console.warn('qr',e)}}return `https://quickchart.io/qr?text=${encodeURIComponent(token)}&size=${size}&margin=2`;}
   let googlePlacesPromise=null;
   async function loadGooglePlaces(){
     if(googlePlacesPromise)return googlePlacesPromise;

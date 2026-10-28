@@ -1,7 +1,9 @@
 (function(){
   const M=window.AttendanceStaffModule={};
   const esc=s=>window.escapeHtml?window.escapeHtml(s):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',...options});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
+  // 網路斷線（fetch 失敗）和伺服器拒絕（例如超出打卡範圍）要分開：只有斷線才暫存，被拒絕要直接告訴本人
+  async function api(url,options={}){let r;try{r=await fetch(url,{credentials:'same-origin',...options});}catch(e){const x=new Error('目前沒有網路');x.network=true;throw x;}let d={};try{d=await r.json()}catch{}if(!r.ok){const x=new Error(d.error||'操作失敗');x.status=r.status;if(r.status>=500||r.status===0)x.network=true;throw x;}return d;}
+  const BOOT_KEY='handover-attendance-boot-v1';
   const KEY='handover-attendance-offline-v2';
   let state={rules:{},locations:[],routes:[],communities:[],activeCommunityId:null,box:null,scanner:null,stream:null,activeRouteId:null};
   const readQueue=()=>{try{const x=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(x)?x:[]}catch{return[]}};
@@ -9,21 +11,22 @@
   const uid=()=>`C-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
   const activeCommunity=()=>Number(state.activeCommunityId||0)||Number(window.__attendanceActiveCommunityId||0)||0;
   const patrolEnabled=()=>!!state.patrol_access?.[activeCommunity()];
-  async function load(){state=Object.assign(state,await api('/api/staff/attendance/bootstrap'));state.activeCommunityId=state.activeCommunityId||state.communities?.[0]?.id||0;try{window.__attendanceActiveCommunityId=state.activeCommunityId;localStorage.setItem('handover-attendance-community',String(state.activeCommunityId))}catch{};return state}
+  async function load(){let boot;try{boot=await api('/api/staff/attendance/bootstrap');try{localStorage.setItem(BOOT_KEY,JSON.stringify({at:Date.now(),boot}))}catch{}}catch(e){if(!e.network)throw e;let c=null;try{c=JSON.parse(localStorage.getItem(BOOT_KEY)||'null')}catch{}if(!c?.boot)throw new Error('目前沒有網路，而且這支手機還沒有下載過巡邏點資料。請先在有網路的地方打開一次本頁。');boot=c.boot;state.fromCache=true;}state=Object.assign(state,boot);state.activeCommunityId=state.activeCommunityId||state.communities?.[0]?.id||0;try{window.__attendanceActiveCommunityId=state.activeCommunityId;localStorage.setItem('handover-attendance-community',String(state.activeCommunityId))}catch{};return state}
   function currentCommunityName(){return (state.communities||[]).find(c=>Number(c.id)===Number(activeCommunity()))?.name||'目前案場'}
   function routes(){return patrolEnabled()?(state.routes||[]).filter(x=>Number(x.community_id)===Number(activeCommunity())&&x.is_active):[]}
   function routeById(id){return routes().find(x=>Number(x.id)===Number(id))||null}
   function locations(type){if(type==='patrol'&&!patrolEnabled())return [];return (state.locations||[]).filter(x=>Number(x.community_id)===Number(activeCommunity())&&x.is_active&&(!type||x.location_type===type))}
   function online(){return navigator.onLine!==false}
+  function dist(a,b,c,d){const R=6371000,r=Math.PI/180,x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));}
   async function getPosition(){return new Promise((resolve,reject)=>{if(!navigator.geolocation)return reject(new Error('此裝置不支援定位'));navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy_m:p.coords.accuracy}),e=>reject(new Error(`無法取得定位：${e.message}`)),{enableHighAccuracy:true,timeout:12000,maximumAge:0})})}
   async function submitRecord(record){
-    try{const d=await api('/api/staff/attendance/records',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)});return d}catch(e){if(state.rules?.offline_queue_enabled!==false){const q=readQueue();q.push({...record,source:'offline'});saveQueue(q);render();return {success:true,offline:true}}throw e}
+    try{const d=await api('/api/staff/attendance/records',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)});return d}catch(e){if(e.network&&state.rules?.offline_queue_enabled!==false){const q=readQueue();q.push({...record,source:'offline'});saveQueue(q);render();return {success:true,offline:true}}throw e}
   }
-  async function syncQueue(){if(!online()||state.rules?.offline_sync_enabled===false)return;const q=readQueue();if(!q.length)return;try{const d=await api('/api/staff/attendance/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:q})});const failed=(d.results||[]).filter(x=>!x.success);saveQueue(q.filter(x=>failed.some(f=>f.client_record_id===x.client_record_id)));render()}catch{}}
+  async function syncQueue(){if(!online()||state.rules?.offline_sync_enabled===false)return;const q=readQueue();if(!q.length)return;try{const d=await api('/api/staff/attendance/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:q})});const failed=(d.results||[]).filter(x=>!x.success);saveQueue([]);render();if(failed.length)alert(`有 ${failed.length} 筆離線紀錄無法補登：\n${failed.slice(0,5).map(f=>'・'+(f.error||'補登失敗')).join('\n')}\n\n請告知主管協助處理。`)}catch(e){/* 還是沒網路就留著下次再送 */}}
   async function checkInOut(type){
     const points=locations('attendance');if(!points.length)return alert('公司尚未設定目前案場的出勤打卡點。');
     let pos=null;try{if(state.rules?.gps_checkin_enabled!==false)pos=await getPosition()}catch(e){return alert(e.message)}
-    const loc=points[0];
+    const near=pos?points.map(p=>({p,d:(p.lat!=null&&p.lng!=null)?dist(pos.lat,pos.lng,p.lat,p.lng):1e12})).sort((a,b)=>a.d-b.d)[0].p:points[0];const loc=near;
     try{const d=await submitRecord({community_id:activeCommunity(),location_id:loc.id,record_type:type,lat:pos?.lat??null,lng:pos?.lng??null,accuracy_m:pos?.accuracy_m??null,recorded_at:new Date().toISOString(),client_record_id:uid(),source:'online'});alert(d.offline?'📡 目前沒有網路，已先暫存；恢復網路後會自動同步。':`✅ ${type==='checkin'?'上班':'下班'}打卡完成`)}catch(e){alert(e.message)}
   }
   async function submitPatrol(token){
@@ -37,9 +40,15 @@
   }
   async function startScanner(){
     const box=state.box, video=box?.querySelector('#attVideo');if(!video)return;
-    if(!('BarcodeDetector' in window))return alert('目前瀏覽器未提供原生 QR 掃描功能，請改用下方「輸入巡邏點代碼」，或使用支援 BarcodeDetector 的新版手機瀏覽器。');
-    try{state.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});video.srcObject=state.stream;await video.play();const detector=new BarcodeDetector({formats:['qr_code']});state.scanner=true;const tick=async()=>{if(!state.scanner)return;try{const codes=await detector.detect(video);if(codes?.[0]?.rawValue){state.scanner=false;stopScanner();await submitPatrol(codes[0].rawValue);return}}catch{}requestAnimationFrame(tick)};requestAnimationFrame(tick)}catch(e){alert(`無法啟動相機：${e.message}`)}
+    // Android Chrome 有內建 BarcodeDetector；iPhone Safari 沒有，改用本機的 jsQR 解析相機畫面
+    let detect=null;
+    if('BarcodeDetector' in window){try{const det=new BarcodeDetector({formats:['qr_code']});detect=async v=>(await det.detect(v))?.[0]?.rawValue||'';}catch{}}
+    if(!detect){try{await loadJsQR();}catch{return alert('無法載入 QR 掃描元件，請改用下方「輸入巡邏點代碼」。');}const cv=document.createElement('canvas');const cx=cv.getContext('2d',{willReadFrequently:true});detect=async v=>{const w=v.videoWidth,h=v.videoHeight;if(!w||!h)return '';const sc=Math.min(1,640/Math.max(w,h));cv.width=Math.round(w*sc);cv.height=Math.round(h*sc);cx.drawImage(v,0,0,cv.width,cv.height);const img=cx.getImageData(0,0,cv.width,cv.height);const r=window.jsQR(img.data,cv.width,cv.height,{inversionAttempts:'dontInvert'});return r?.data||'';};}
+    if(!navigator.mediaDevices?.getUserMedia)return alert('這支手機的瀏覽器不允許開啟相機，請改用下方「輸入巡邏點代碼」。');
+    try{state.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});video.setAttribute('playsinline','');video.muted=true;video.srcObject=state.stream;await video.play();state.scanner=true;let last=0;const tick=async t=>{if(!state.scanner)return;if(t-last>180){last=t;try{const code=await detect(video);if(code){state.scanner=false;stopScanner();state.box?.querySelector('#attScanner')&&(state.box.querySelector('#attScanner').style.display='none');try{navigator.vibrate?.(80)}catch{}await submitPatrol(code);return}}catch{}}requestAnimationFrame(tick)};requestAnimationFrame(tick)}catch(e){alert(e.name==='NotAllowedError'?'相機權限被拒絕。請到手機的瀏覽器設定允許使用相機，或改用下方「輸入巡邏點代碼」。':`無法啟動相機：${e.message}`)}
   }
+  let jsqrPromise=null;
+  function loadJsQR(){if(window.jsQR)return Promise.resolve();if(!jsqrPromise)jsqrPromise=new Promise((ok,no)=>{const sc=document.createElement('script');sc.src='vendor/jsQR.js';sc.onload=()=>ok();sc.onerror=()=>{jsqrPromise=null;no(new Error('load'))};document.head.appendChild(sc);});return jsqrPromise;}
   function stopScanner(){state.scanner=false;if(state.stream){state.stream.getTracks().forEach(t=>t.stop());state.stream=null}const v=state.box?.querySelector('#attVideo');if(v)v.srcObject=null}
   async function renderManagerPatrolPanel(el){
     if(!state.can_manage_patrol)return;
@@ -66,8 +75,8 @@
   function render(){
     const el=state.box?.querySelector('#attendanceStaffRoot');if(!el)return;
     const points=locations('attendance'), patrol=locations('patrol'), queue=readQueue();
-    el.innerHTML=`<div class="attendance-staff-head"><div><div class="eyebrow">📍 出勤與巡邏｜${esc(currentCommunityName())}</div><h1>${esc(sectionTitle())}</h1><p class="hint">出勤使用 GPS；地下室巡邏使用 QR Code。${online()?'目前網路正常。':'目前離線，紀錄會暫存手機。'}</p></div><span class="tag ${online()?'success':''}">${online()?'🟢 在線':'🔴 離線'}</span></div>
-      ${communitySwitcher()}<div class="attendance-staff-grid"><div class="panel-lite" data-att-section="checkin"><div class="section-title">🕐 出勤打卡</div>${points.length?`<p class="hint">打卡點：${esc(points[0].name)}｜有效範圍 ${points[0].radius_m} 公尺</p><div class="attendance-actions"><button id="attCheckin">🟢 上班打卡</button><button class="secondary" id="attCheckout">🔴 下班打卡</button></div>`:'<div class="empty">公司尚未設定出勤打卡點。</div>'}</div>
+    el.innerHTML=`<div class="attendance-staff-head"><div><div class="eyebrow">📍 出勤與巡邏｜${esc(currentCommunityName())}</div><h1>${esc(sectionTitle())}</h1><p class="hint">出勤使用 GPS；地下室巡邏使用 QR Code。${online()?'目前網路正常。':'目前離線，紀錄會暫存手機。'}${state.fromCache?'（使用這支手機先前下載的巡邏點資料）':''}${queue.length?`<br><b>還有 ${queue.length} 筆離線紀錄等待上傳</b>，恢復網路後會自動補登。`:''}</p></div><span class="tag ${online()?'success':''}">${online()?'🟢 在線':'🔴 離線'}</span></div>
+      ${communitySwitcher()}<div class="attendance-staff-grid"><div class="panel-lite" data-att-section="checkin"><div class="section-title">🕐 出勤打卡</div>${points.length?`<p class="hint">打卡點：${points.map(p=>`${esc(p.name)}（${p.radius_m} 公尺內）`).join('、')}${points.length>1?'，在任一點範圍內都可以打卡':''}</p><div class="attendance-actions"><button id="attCheckin">🟢 上班打卡</button><button class="secondary" id="attCheckout">🔴 下班打卡</button></div>`:'<div class="empty">公司尚未設定出勤打卡點。</div>'}</div>
       <div class="panel-lite" data-att-section="patrol"><div class="section-title">🚨 巡邏巡檢</div>${patrolEnabled()?`<p class="hint">已設定 ${patrol.length} 個巡邏點。地下室可完全不依賴 GPS。${routes().length?'先選擇巡邏動線，再依順序掃描 QR Code。':''}</p>${routes().length?`<div class="field"><label>今日巡邏動線</label><select id="attRouteSelect"><option value="">不指定動線（一般巡邏）</option>${routes().map(r=>`<option value="${r.id}" ${Number(r.id)===Number(state.activeRouteId)?'selected':''}>${esc(r.name)}${r.time_label?'｜參考 '+esc(r.time_label):''}</option>`).join('')}</select><p class="hint">⏱️ 動線時間只作為提示，不會因超過時間而禁止打卡。</p></div>`:''}<div id="attRoutePreview"></div><div class="attendance-actions"><button id="attScan">📷 掃描 QR Code</button></div><div class="editor-grid"><div class="wide"><label>沒有相機時可輸入巡邏點代碼</label><input id="attManualToken" placeholder="例如 P-ABC123..."></div></div><button class="secondary" id="attManualSubmit">完成巡邏打卡</button><div id="attScanner" style="display:none;margin-top:12px"><video id="attVideo" playsinline style="width:100%;max-height:320px;border-radius:12px;background:#111"></video><button class="secondary" id="attStopScan">停止掃描</button></div>`:'<div class="info-box purple"><strong>🔒 尚未開通巡邏工作</strong><p>目前由公司後台設定巡邏人員。若您需要執行巡邏，請聯絡公司經理／內勤勤務開通。</p></div>'}</div></div><div class="panel-lite attendance-records-panel" data-att-section="records"><div class="section-title">🗂️ ${state.section==='records'?'巡邏與出勤紀錄':'最近紀錄'}</div><div id="attRecent"><div class="hint">載入中…</div></div></div><div id="attManagerPatrolMount" data-att-section="patrol"></div>`;applySection(el);el.querySelector('#attCommunitySelect')?.addEventListener('change',e=>{state.activeCommunityId=Number(e.target.value)||state.activeCommunityId;try{window.__attendanceActiveCommunityId=state.activeCommunityId;localStorage.setItem('handover-attendance-community',String(state.activeCommunityId))}catch{};state.activeRouteId=null;render()});
     el.querySelector('#attCheckin')?.addEventListener('click',()=>checkInOut('checkin'));
     el.querySelector('#attCheckout')?.addEventListener('click',()=>checkInOut('checkout'));
@@ -91,6 +100,7 @@
     host.innerHTML='<div class="panel attendance-staff-workspace"><div id="attendanceStaffRoot"></div></div>';
     state.box=host.firstElementChild;
     render();await syncQueue();
+    if(!('BarcodeDetector' in window))loadJsQR().catch(()=>{});
   };
   M.stop=function(){stopScanner();state.box=null;};
   // 切換到其他工作目錄時關閉相機，避免背景持續使用鏡頭。
