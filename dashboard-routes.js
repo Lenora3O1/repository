@@ -49,6 +49,9 @@ module.exports = function registerDashboardRoutes(app, d) {
     // ---------- 每個人都有：我的待辦 ----------
     const pend = pendingFor(tid, u);
     cards.push({ id: 'me_approvals', size: 'sm', icon: '✅', title: '待我審核的假單', value: pend.length, sub: pend.length ? `最早 ${pend.map(r => r.start_date).sort()[0]}` : '目前沒有', tone: pend.length ? 'alert' : '', action: { action: 'leave', label: '請假管理', tab: 'approve' } });
+    // 補打卡：輪到我審核的才顯示
+    const pf = safe(() => db.prepare("SELECT * FROM punch_fix_requests WHERE tenant_id=? AND status='pending'").all(tid).filter(r => r.staff_id !== u.id && (u.role === 'company_admin' || ((parse(r.steps_json, [])[r.step_index] || {}).approvers || []).includes(u.id))), []);
+    if (pf.length) cards.push({ id: 'me_punch_fix', size: 'sm', icon: '🕒', title: '待我審核的補打卡', value: pf.length, sub: `最早 ${pf.map(r => r.fix_date).sort()[0]}`, tone: 'alert', action: { action: 'punch-fix', label: '補打卡審核' } });
     const unread = safe(() => db.prepare('SELECT COUNT(*) c FROM messages WHERE tenant_id=? AND recipient_id=? AND read_at IS NULL').get(tid, u.id).c, 0);
     cards.push({ id: 'me_messages', size: 'sm', icon: '💬', title: '未讀訊息', value: unread, sub: unread ? '點選開啟訊息' : '都看過了', action: { special: 'messages' } });
     const hr = safe(() => db.prepare('SELECT hire_date,annual_used FROM hr_profiles WHERE tenant_id=? AND staff_id=?').get(tid, u.id), null) || {};

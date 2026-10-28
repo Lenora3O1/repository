@@ -517,7 +517,7 @@ async function handleWorkspaceMenu(e){
     try{if(!window.ResidentRosterModule) throw new Error('住戶名冊模組尚未載入，請重新整理頁面'); await window.ResidentRosterModule.render(action,label||'住戶名冊');}catch(err){showWorkspaceError(label||'住戶名冊',err);}
     return;
   }
-  if(['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records'].includes(action)){
+  if(['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records','staff-punch-fix'].includes(action)){
     showWorkspaceLoading(label||'出勤與巡邏');
     try{if(!window.AttendanceStaffModule) throw new Error('出勤與巡邏模組尚未載入，請重新整理頁面'); await window.AttendanceStaffModule.render({action,container:$('staffHome')});}catch(err){showWorkspaceError(label||'出勤與巡邏',err);}
     return;

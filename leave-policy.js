@@ -60,6 +60,8 @@ function defaults() {
     types: {},                 // 各法定假別的優於法定設定
     custom: [],                // 公司自訂假別（例如生日假）
     // by：site 現場主管（沒有則直屬主管）、dept 職務主管、region 區域督導、direct 直屬主管、position 指定職位、people 指定人員
+    // 補打卡：每月上限（0＝不限）、可以補幾天內的卡、審核流程（依組織架構自動找審核人）
+    punch_fix: { enabled: true, monthly_limit: 3, days_back: 7, flow: [{ id: 'pf_direct', name: '直屬主管', by: 'direct' }] },
     flow: [
       { id: 'site', name: '現場主管', by: 'site', min_days: 0 },
       { id: 'dept', name: '職務主管', by: 'dept', min_days: 0 },
@@ -88,7 +90,7 @@ function normalize(input) {
     overtime_allowance: { name: str(b.overtime_allowance?.name, 12) || '支援費', unit: b.overtime_allowance?.unit === 'hour' ? 'hour' : 'time', amount: Math.max(0, Math.min(100000, Math.round(num(b.overtime_allowance?.amount)))) },
     overtime_auto: b.overtime_auto !== false,
     overtime_types: (() => { const src = Array.isArray(b.overtime_types) && b.overtime_types.length ? b.overtime_types : OT_DEFAULTS; const seen = new Set(); const out = [];
-      for (const x of src.slice(0, 12)) { const name = str(x?.name, 16); if (!name) continue; let oid = /^[a-z0-9_]{2,20}$/.test(x?.id) ? x.id : `o_${id()}`; while (seen.has(oid)) oid = `o_${id()}`; seen.add(oid);
+      for (const x of src.slice(0, 12)) { const name = str(x?.name, 16); if (!name) continue; let oid = typeof x?.id === 'string' && /^[a-z0-9_]{2,20}$/.test(x.id) ? x.id : `o_${id()}`; while (seen.has(oid)) oid = `o_${id()}`; seen.add(oid);
         out.push({ id: oid, name, calc: OT_CALC[x?.calc] ? x.calc : 'law_weekday', comp: ['pay', 'comp', 'choose'].includes(x?.comp) ? x.comp : 'pay', amount: Math.max(0, Math.min(100000, Math.round(num(x?.amount)))), enabled: x?.enabled !== false, hint: str(x?.hint, 60) }); }
       return out; })(),
     attendance: { enabled: !!b.attendance?.enabled, name: str(b.attendance?.name, 20) || '全勤獎金', personal: b.attendance?.personal === 'all' ? 'all' : 'prorate' },
@@ -105,15 +107,25 @@ function normalize(input) {
   }
   for (const c of (Array.isArray(b.custom) ? b.custom : []).slice(0, 12)) {
     const name = str(c?.name, 12); if (!name) continue;
-    p.custom.push({ id: /^c_[a-z0-9]{3,12}$/.test(c?.id) ? c.id : `c_${id()}`, name, pay: clampRatio(c?.pay ?? 1), quota: Math.max(0, Math.min(365, Math.round(num(c?.quota) * 2) / 2)), per: c?.per === 'event' ? 'event' : 'year', proof: ['none', 'optional', 'required'].includes(c?.proof) ? c.proof : 'none', reason: !!c?.reason, att: ['none', 'prorate', 'all'].includes(c?.att) ? c.att : 'none', enabled: c?.enabled !== false, hint: str(c?.hint, 60) });
+    p.custom.push({ id: typeof c?.id === 'string' && /^c_[a-z0-9]{3,12}$/.test(c.id) ? c.id : `c_${id()}`, name, pay: clampRatio(c?.pay ?? 1), quota: Math.max(0, Math.min(365, Math.round(num(c?.quota) * 2) / 2)), per: c?.per === 'event' ? 'event' : 'year', proof: ['none', 'optional', 'required'].includes(c?.proof) ? c.proof : 'none', reason: !!c?.reason, att: ['none', 'prorate', 'all'].includes(c?.att) ? c.att : 'none', enabled: c?.enabled !== false, hint: str(c?.hint, 60) });
   }
   const seen = new Set();
   for (const s of (Array.isArray(b.flow) ? b.flow : d.flow).slice(0, 8)) {
     const name = str(s?.name, 12); if (!name) continue;
-    let sid = /^[a-z0-9_]{2,16}$/.test(s?.id) ? s.id : `s_${id()}`; while (seen.has(sid)) sid = `s_${id()}`; seen.add(sid);
+    let sid = typeof s?.id === 'string' && /^[a-z0-9_]{2,16}$/.test(s.id) ? s.id : `s_${id()}`; while (seen.has(sid)) sid = `s_${id()}`; seen.add(sid);
     const by = ['site', 'dept', 'region', 'direct', 'position', 'people'].includes(s?.by) ? s.by : 'people'; // 舊設定（只有 scope）視為指定人員
     p.flow.push({ id: sid, name, by, position: by === 'position' ? str(s?.position, 24) : '', scope: s?.scope === 'community' ? 'community' : 'company', min_days: Math.max(0, Math.min(60, Math.round(num(s?.min_days) * 2) / 2)) });
   }
+  { const x = b.punch_fix && typeof b.punch_fix === 'object' ? b.punch_fix : d.punch_fix; const pf = { enabled: x.enabled !== false, monthly_limit: Math.max(0, Math.min(31, Math.round(num(x.monthly_limit, 3)))), days_back: Math.max(1, Math.min(31, Math.round(num(x.days_back, 7)))) || 7, flow: [] };
+    const seen2 = new Set();
+    for (const s of (Array.isArray(x.flow) ? x.flow : d.punch_fix.flow).slice(0, 5)) {
+      const name = str(s?.name, 12); if (!name) continue;
+      let sid = typeof s?.id === 'string' && /^[a-z0-9_]{2,16}$/.test(s.id) ? s.id : `pf_${id()}`; while (seen2.has(sid)) sid = `pf_${id()}`; seen2.add(sid);
+      const by = ['site', 'dept', 'region', 'direct', 'position'].includes(s?.by) ? s.by : 'direct';
+      pf.flow.push({ id: sid, name, by, position: by === 'position' ? str(s?.position, 24) : '' });
+    }
+    if (!pf.flow.length) pf.flow = d.punch_fix.flow.map(s => ({ ...s, position: '' }));
+    p.punch_fix = pf; }
   return { policy: p, notes };
 }
 
