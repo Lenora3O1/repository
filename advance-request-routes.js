@@ -20,6 +20,10 @@ module.exports = function registerAdvanceRequestRoutes(app, d) {
   CREATE TABLE IF NOT EXISTS advance_request_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL, step_name TEXT DEFAULT '', actor_id INTEGER, actor_name TEXT DEFAULT '', action TEXT NOT NULL, comment TEXT DEFAULT '', created_at TEXT NOT NULL);
   `);
 
+  // 同意條款紀錄：條款全文、同意時間、網路位址、裝置
+  { const cols = db.prepare('PRAGMA table_info(advance_requests)').all().map(c => c.name);
+    for (const [c, def] of [['consent_text', "TEXT DEFAULT ''"], ['consent_at', 'TEXT'], ['client_ip', "TEXT DEFAULT ''"], ['user_agent', "TEXT DEFAULT ''"]]) if (!cols.includes(c)) db.exec(`ALTER TABLE advance_requests ADD COLUMN ${c} ${def}`); }
+  const ipOf = req => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || req.ip || '';
   const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
   const wrap = fn => (req, res) => { try { fn(req, res); } catch (e) { if (!res.headersSent) bad(res, e.message || '操作失敗', e.status || 400); } };
   const err = (m, s = 400) => Object.assign(new Error(m), { status: s });
@@ -126,11 +130,12 @@ module.exports = function registerAdvanceRequestRoutes(app, d) {
       status: r.status, status_label: ST[r.status] || r.status, current_step: r.status === 'pending' ? steps[r.step_index]?.name || '' : '',
       steps: steps.map((s, i) => ({ name: s.name, skipped: s.skipped, note: s.note || '', approvers: s.approvers.map(x => nameOf(tid, x)).filter(Boolean), state: s.skipped ? 'skipped' : r.status === 'pending' ? (i < r.step_index ? 'done' : i === r.step_index ? 'current' : 'waiting') : ['approved', 'disbursed'].includes(r.status) ? 'done' : (i < r.step_index ? 'done' : i === r.step_index ? r.status : 'waiting') })),
       actions: acts.map(a => ({ step: a.step_name, actor: a.actor_name, action: a.action, comment: a.comment, at: a.created_at })),
+      consent_text: r.consent_text || '', consent_at: r.consent_at || '', client_ip: r.client_ip || '', user_agent: r.user_agent || '',
       estimate: parse(r.estimate_json, {}), on_behalf_by: r.on_behalf_by || '', created_at: r.created_at, decided_at: r.decided_at, disbursed_at: r.disbursed_at, disbursed_by: r.disbursed_by,
       can_decide: canDecide(r, viewer), can_cancel: !!viewer && r.staff_id === viewer.id && r.status === 'pending',
     };
   }
-  function create(tid, applicant, b, actor, onBehalf) {
+  function create(tid, applicant, b, actor, onBehalf, meta = {}) {
     const s = settingsFor(tid); const est = estimate(tid, applicant, s);
     const amount = int(b.amount); const reason = str(b.reason, 200);
     if (!onBehalf) {
@@ -138,11 +143,13 @@ module.exports = function registerAdvanceRequestRoutes(app, d) {
       if (amount <= 0) throw err('請選擇或填寫借支金額');
       if (s.amounts.length && !est.options.includes(amount)) throw err(`借支金額只能選：${est.options.map(money).join('、')} 元`);
       if (amount > est.available) throw err(`目前最多可借 ${money(est.available)} 元`);
+      if (b.agree !== true) throw err('請先閱讀並同意借支同意條款');
     } else if (amount <= 0) throw err('請填寫借支金額');
     const steps = onBehalf ? [] : resolveSteps(tid, applicant, s.flow); const first = onBehalf ? -1 : nextStep(steps, 0);
     const t = now();
     const info = db.prepare('INSERT INTO advance_requests (tenant_id,staff_id,month,amount,reason,status,step_index,steps_json,estimate_json,on_behalf_by,created_at,updated_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(tid, applicant.id, est.month, amount, reason, first < 0 ? 'approved' : 'pending', Math.max(0, first), JSON.stringify(steps), JSON.stringify(est), onBehalf ? (actor?.name || '') : '', t, t, first < 0 ? t : null);
+    if (!onBehalf) db.prepare('UPDATE advance_requests SET consent_text=?,consent_at=?,client_ip=?,user_agent=? WHERE id=?').run(s.consent_text, t, str(meta.ip, 80), str(meta.ua, 300), Number(info.lastInsertRowid));
     const r = db.prepare('SELECT * FROM advance_requests WHERE id=?').get(Number(info.lastInsertRowid));
     act(r, actor, '', onBehalf ? 'on_behalf' : 'submit', onBehalf ? `會計代為登記${reason ? `：${reason}` : ''}` : reason);
     if (first >= 0) askReview(tid, applicant, steps[first].approvers, `💰 ${applicant.name} 申請借支 ${money(amount)} 元（${steps[first].name}）${reason ? `\n事由：${reason}` : ''}`);
@@ -171,9 +178,9 @@ module.exports = function registerAdvanceRequestRoutes(app, d) {
     const list = db.prepare('SELECT * FROM advance_requests WHERE tenant_id=? AND staff_id=? ORDER BY id DESC LIMIT 36').all(tid, u.id).map(r => out(r, u));
     const review = db.prepare("SELECT * FROM advance_requests WHERE tenant_id=? AND status='pending' ORDER BY id").all(tid).filter(r => canDecide(r, u) && (u.role !== 'company_admin' || isApproverOf(r, u))).map(r => out(r, u));
     res.set('Cache-Control', 'no-store');
-    res.json({ settings: { enabled: s.enabled, ratio_den: s.ratio_den, amounts: s.amounts, monthly_limit: s.monthly_limit, min_days: s.min_days, after_trial: s.after_trial, deadline_day: s.deadline_day, flow: s.flow.map(x => x.name) }, estimate: estimate(tid, u, s), mine: list, review });
+    res.json({ company: db.prepare('SELECT name FROM tenants WHERE id=?').get(tid)?.name || '', me: { name: u.name, employee_id: u.employee_id }, settings: { consent_text: s.consent_text, enabled: s.enabled, ratio_den: s.ratio_den, amounts: s.amounts, monthly_limit: s.monthly_limit, min_days: s.min_days, after_trial: s.after_trial, deadline_day: s.deadline_day, flow: s.flow.map(x => x.name) }, estimate: estimate(tid, u, s), mine: list, review });
   }
-  function submit(req, res) { const u = getUser(req); const r = create(tenantId(req), u, req.body || {}, u, false); res.json({ success: true, request: out(r, u) }); }
+  function submit(req, res) { const u = getUser(req); const r = create(tenantId(req), u, req.body || {}, u, false, { ip: ipOf(req), ua: req.headers['user-agent'] || '' }); res.json({ success: true, request: out(r, u) }); }
   function cancel(req, res) {
     const u = getUser(req), tid = tenantId(req), r = db.prepare('SELECT * FROM advance_requests WHERE id=? AND tenant_id=?').get(Number(req.params.id), tid);
     if (!r || r.staff_id !== u.id) throw err('找不到申請', 404); if (r.status !== 'pending') throw err('只能取消審核中的申請');
@@ -188,10 +195,15 @@ module.exports = function registerAdvanceRequestRoutes(app, d) {
 
   // ================= 公司：會計（全部、代為登記、確認撥款）；其他主管只看輪到自己的 =================
   app.get('/api/company/advance-requests', requireCompanyAdmin, wrap((req, res) => {
-    const u = getUser(req), tid = tenantId(req), all = canPay(u);
-    const rows = db.prepare("SELECT * FROM advance_requests WHERE tenant_id=? ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, id DESC LIMIT 300").all(tid).filter(r => all || isApproverOf(r, u));
+    const u = getUser(req), tid = tenantId(req), all = canPay(u); const q = req.query || {};
+    // 歷史查詢：年份／月份（依申請所屬月份）、姓名或員編、狀態
+    const where = ['a.tenant_id=?'], args = [tid];
+    if (/^\d{4}-\d{2}$/.test(String(q.month || ''))) { where.push('a.month=?'); args.push(q.month); } else if (/^\d{4}$/.test(String(q.year || ''))) { where.push('substr(a.month,1,4)=?'); args.push(q.year); }
+    if (q.status && ST[q.status]) { where.push('a.status=?'); args.push(q.status); }
+    if (str(q.q, 30)) { where.push('(u.name LIKE ? OR u.employee_id LIKE ?)'); args.push(`%${str(q.q, 30)}%`, `%${str(q.q, 30)}%`); }
+    const rows = db.prepare(`SELECT a.* FROM advance_requests a LEFT JOIN staff_users u ON u.id=a.staff_id WHERE ${where.join(' AND ')} ORDER BY CASE a.status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, a.id DESC LIMIT 1000`).all(...args).filter(r => all || isApproverOf(r, u));
     res.set('Cache-Control', 'no-store');
-    res.json({ can_disburse: all, settings: settingsFor(tid), rows: rows.map(r => out(r, u)) });
+    res.json({ can_disburse: all, company: db.prepare('SELECT name FROM tenants WHERE id=?').get(tid)?.name || '', settings: settingsFor(tid), rows: rows.map(r => out(r, u)) });
   }));
   app.post('/api/company/advance-requests/:id/decide', requireCompanyAdmin, wrap(decide));
   // 會計代為登記（特殊狀況）：不走審核，直接成為待撥款，並留下代登記紀錄
