@@ -195,4 +195,51 @@ function parseBylaws(text, opts = {}) {
   return { title: title || header, items: merged };
 }
 
-module.exports = { parseBylaws, docxText, cleanLines, fmtNum, cnCount };
+// ---------- 從規約找出管理委員會組成（職務、人數、任期） ----------
+function cnToNum(t) {
+  t = String(t || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).replace(/兩/g, '二').replace(/壹/g, '一').replace(/貳/g, '二').replace(/參/g, '三').replace(/拾/g, '十');
+  if (/^\d+$/.test(t)) return Number(t);
+  const D = { 〇: 0, 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  let n = 0, cur = 0;
+  for (const c of t) { if (c in D) cur = D[c]; else if (c === '十') { n += (cur || 1) * 10; cur = 0; } else if (c === '百') { n += (cur || 1) * 100; cur = 0; } else return NaN; }
+  return n + cur;
+}
+const ROLE_SKIP = new Set(['管理委員', '候補委員', '委員會', '各委員', '其餘委員', '其他委員', '前項委員', '該委員', '本屆委員']);
+function committeeFromBylaws(items) {
+  const NUM = '[一二兩三四五六七八九十〇零壹貳參\\d０-９]+';
+  const roleRe = new RegExp(`([\\u4e00-\\u9fa5]{0,6}委員)\\s*(${NUM})\\s*[名人位]`, 'g');
+  const totalRes = [new RegExp(`(?:共|計|合計|總計)\\s*(?:選出|選任|設|置)?\\s*(${NUM})\\s*[名人位]\\s*(?:管理)?委員`), new RegExp(`(?:管理)?委員\\s*(?:共|計|合計|總計)\\s*(${NUM})\\s*[名人位]`), new RegExp(`選出\\s*(${NUM})\\s*[名人位]\\s*(?:管理)?委員`)];
+  const arts = (items || []).filter(i => i.type === 'article' || i.type === 'text');
+  let best = null;
+  for (const a of arts) {
+    const text = `${a.title || ''}\n${a.body || ''}`; if (!/委員/.test(text)) continue;
+    const roles = []; let m; roleRe.lastIndex = 0;
+    while ((m = roleRe.exec(text))) {
+      const raw = m[1]; const KNOWN = ['副主任委員', '主任委員', '監察委員', '財務委員', '候補委員', '管理委員'];
+      let role = KNOWN.find(k => raw.endsWith(k)) || (raw === '委員' || /[設置及與和為、]委員$/.test(raw) || raw.length < 4 ? '委員' : raw.slice(-4));
+      const n = cnToNum(m[2]); if (!role || !n || n > 50) continue;
+      if (ROLE_SKIP.has(role)) continue;
+      if (role.length < 2) continue;
+      const hit = roles.find(r => r.role === role); if (hit) continue; roles.push({ role, count: n });
+    }
+    let total = null; for (const re of totalRes) { const t = text.match(re); if (t) { total = cnToNum(t[1]); break; } }
+    const score = roles.filter(r => r.role !== '委員').length * 2 + (total ? 1 : 0);
+    if (score >= 3 && (!best || score > best.score)) best = { score, roles, total, no: a.no, title: a.title, excerpt: text.slice(0, 600) };
+  }
+  // 任期：「每年5月1日起至翌年4月30日止」
+  let term = null;
+  for (const a of arts) {
+    const t = `${a.body || ''}`.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0));
+    const m = t.match(/(\d{1,2}|[一二三四五六七八九十]+)\s*月\s*(\d{1,2}|[一二三四五六七八九十]+)\s*日\s*起\s*至\s*(?:翌|次)年\s*(?:度)?\s*(\d{1,2}|[一二三四五六七八九十]+)\s*月\s*(\d{1,2}|[一二三四五六七八九十]+)\s*日/);
+    if (m && /任期/.test(t)) { term = { from: [cnToNum(m[1]), cnToNum(m[2])], to: [cnToNum(m[3]), cnToNum(m[4])], no: a.no, text: m[0] }; break; }
+  }
+  if (!best && !term) return null;
+  const roles = best ? best.roles : [];
+  const named = roles.filter(r => r.role !== '委員').reduce((x, r) => x + r.count, 0);
+  const generic = roles.find(r => r.role === '委員')?.count || 0;
+  const total = best?.total || (named + generic) || null;
+  const extra = total && total > named + generic ? total - named - generic : 0;
+  return { roles: roles.filter(r => r.role !== '委員'), generic: generic + extra, total, source: best ? { no: best.no, title: best.title, excerpt: best.excerpt } : null, term };
+}
+
+module.exports = { parseBylaws, docxText, cleanLines, fmtNum, cnCount, cnToNum, committeeFromBylaws };

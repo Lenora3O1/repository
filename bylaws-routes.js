@@ -4,7 +4,7 @@
 'use strict';
 const { readZip, writeZip } = require('./mini-zip');
 
-const { parseBylaws, docxText } = require('./bylaws-parse');
+const { parseBylaws, docxText, committeeFromBylaws } = require('./bylaws-parse');
 
 // 條文 → .docx（標楷體、A4）
 function buildDocx({ title, items, footer }) {
@@ -135,6 +135,20 @@ module.exports = function registerBylawsRoutes(app, d) {
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.set('Content-Disposition', `attachment; filename="bylaws.docx"; filename*=UTF-8''${encodeURIComponent(`${r.title || '規約'}（第${r.version_no}版）.docx`)}`);
     res.send(buf);
+  }));
+  // 本屆委員：依目前規約找出委員會組成（職務與人數）、任期
+  app.get('/api/staff/committee/bylaws-suggest', requireStaffFiller, wrap((req, res) => {
+    req.query.kind = 'bylaws'; const t = ctx(req, true); const r = current(t);
+    if (!r) return res.json({ found: false, reason: '尚未上傳規約' });
+    const c = committeeFromBylaws(JSON.parse(r.items_json || '[]'));
+    if (!c) return res.json({ found: false, reason: '規約裡沒有找到委員人數或職務的規定' });
+    let term = null;
+    if (c.term && c.term.from.every(Boolean) && c.term.to.every(Boolean)) {
+      const tw = new Date(Date.now() + 8 * 3600e3); const y = tw.getUTCFullYear(); const md = (tw.getUTCMonth() + 1) * 100 + tw.getUTCDate();
+      const [fm, fd] = c.term.from, [tm, td] = c.term.to; const sy = md >= fm * 100 + fd ? y : y - 1; const p2 = n => String(n).padStart(2, '0');
+      term = { start: `${sy}-${p2(fm)}-${p2(fd)}`, end: `${sy + 1}-${p2(tm)}-${p2(td)}`, text: c.term.text, no: c.term.no };
+    }
+    res.json({ found: true, version: { id: r.id, version_no: r.version_no, title: r.title }, roles: c.roles, generic: c.generic, total: c.total, source: c.source, term });
   }));
   return { parseBylaws, docxText, buildDocx };
 };

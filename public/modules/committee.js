@@ -27,27 +27,43 @@
   async function render(host,label){
     css();host.innerHTML='<div class="panel"><div class="cm-muted">載入本屆委員…</div></div>';
     let d;try{d=await api('/api/staff/committee');}catch(e){host.innerHTML=`<div class="panel"><h1>${esc(label||'本屆委員')}</h1><div class="cm-tip">${esc(e.message)}</div></div>`;return;}
+    if(d.can_edit){try{d.suggest=await api('/api/staff/committee/bylaws-suggest');}catch{d.suggest=null;}}
     view(host,label,d,false);
   }
-  function view(host,label,d,editing){
+  // 依規約產生職務：固定三職務保留；其餘職務補到規約規定的人數（已經有的不重複）；人選留空（從缺）可以之後再選或刪除
+  function applySuggest(st,sg){
+    let added=0;const FIX=['主任委員','監察委員','財務委員'];
+    const want=[...sg.roles.filter(r=>!FIX.includes(r.role)).map(r=>({role:r.role,count:r.count})),...(sg.generic?[{role:'委員',count:sg.generic}]:[])];
+    for(const w of want){const have=st.members.filter(m=>!m.fixed&&m.role===w.role).length;for(let i=have;i<w.count;i++){st.members.push({role:w.role,fixed:false,name:'',unit:'',phone:'',source:'manual',from_bylaws:true});added++;}}
+    if(sg.term&&!st.head.term_start&&!st.head.term_end){st.head.term_start=sg.term.start;st.head.term_end=sg.term.end;}
+    return added;
+  }
+  const sgText=sg=>`${sg.source?`規約${esc(sg.source.no||'')}${sg.source.title?`（${esc(sg.source.title)}）`:''}`:'規約'}${sg.total?`規定委員共 <b>${sg.total}</b> 名`:''}：${sg.roles.map(r=>`${esc(r.role)}${r.count>1?` ${r.count} 名`:''}`).join('、')}${sg.generic?`、委員 ${sg.generic} 名`:''}${sg.term?`；任期 ${esc(sg.term.text)}（本屆 ${esc(sg.term.start)}～${esc(sg.term.end)}）`:''}`;
+  function view(host,label,d,editing,applyNow){
     const P=d.profile;const st={head:{committee_name:P.committee_name,term_start:P.term_start,term_end:P.term_end,tax_id:P.tax_id},members:JSON.parse(JSON.stringify(P.members||[]))};
+    const sg=d.suggest&&d.suggest.found?d.suggest:null;let note='';
+    if(editing&&applyNow&&sg){const n=applySuggest(st,sg);note=n?`已依規約加入 ${n} 個職務（人選先留空，可以從住戶選擇；有委員請辭從缺時，可以清空或刪除該職務）。按「儲存本屆委員」才會生效。`:'目前的職務已經符合規約，沒有需要新增的。';}
     const draw=()=>{
       const rule=`承租人${P.tenant_eligible?'可以':'不可以'}擔任；房子出租中的所有權人${P.landlord_eligible?'可以':'不可以'}擔任（依「社區資訊」設定）`;
       host.innerHTML=`<div class="panel"><div class="eyebrow">🏛 管理委員會</div><h1>${esc(label||'本屆委員')}</h1><div class="cm">
         <div class="cm-card"><div class="cm-h"><h3>${esc(P.committee_title||'管理委員會')}</h3>${d.can_edit&&!editing?'<button type="button" id="cmEdit">✏️ 編輯本屆委員</button>':''}</div>
           <div class="cm-kv">${editing?`<div><small>抬頭（管委會名稱）</small><input data-h="committee_name" maxlength="60" value="${esc(st.head.committee_name)}" placeholder="${esc(P.name?P.name+'管理委員會':'')}"></div><div><small>任期開始</small><input type="date" data-h="term_start" value="${esc(st.head.term_start)}"></div><div><small>任期結束</small><input type="date" data-h="term_end" value="${esc(st.head.term_end)}"></div><div><small>統一編號（選填）</small><input data-h="tax_id" maxlength="8" inputmode="numeric" value="${esc(st.head.tax_id)}"></div>`
-            :`<div><small>任期</small><b>${P.term_start||P.term_end?`${esc(P.term_start||'—')}～${esc(P.term_end||'—')}`:'—'}</b></div><div><small>統一編號</small><b>${esc(P.tax_id||'—')}</b></div><div><small>委員人數</small><b>${(P.members||[]).filter(m=>m.name).length} 人</b></div>`}</div>
+            :`<div><small>任期</small><b>${P.term_start||P.term_end?`${esc(P.term_start||'—')}～${esc(P.term_end||'—')}`:'—'}</b></div><div><small>統一編號</small><b>${esc(P.tax_id||'—')}</b></div><div><small>委員人數</small><b>${(P.members||[]).filter(m=>m.name).length} 人</b>${(P.members||[]).some(m=>!m.name)?`<span class="cm-muted">（${(P.members||[]).filter(m=>!m.name).length} 席從缺）</span>`:''}${sg&&sg.total?`<span class="cm-muted">／規約 ${sg.total} 名</span>`:''}</div>`}</div>
           <div class="cm-muted">委員資格：${esc(rule)}。</div></div>
-        <div class="cm-card"><div class="cm-h"><h3>委員名單</h3>${editing?'<button type="button" class="secondary" id="cmAdd">＋ 新增職務</button>':''}</div>
+        ${sg&&d.can_edit&&(!editing||!note)&&!st.members.some(m=>!m.fixed)?`<div class="cm-tip">📜 ${sgText(sg)}。<div style="margin-top:6px"><button type="button" id="cmSg">依規約產生職務</button></div></div>`:''}
+        ${note?`<div class="cm-tip">✅ ${esc(note)}<div class="cm-muted" style="margin-top:4px">依據：${sgText(sg)}</div></div>`:''}
+        <div class="cm-card"><div class="cm-h"><h3>委員名單</h3>${editing?`${sg?'<button type="button" class="secondary" id="cmSg2">📜 依規約產生職務</button>':''}<button type="button" class="secondary" id="cmAdd">＋ 新增職務</button>`:''}</div>
           <div class="cm-list">${st.members.map((m,i)=>`<div class="cm-m ${m.fixed?'fixed':''}">
             <div class="cm-role">${editing&&!m.fixed?`<input data-role="${i}" list="cmRoles" maxlength="20" value="${esc(m.role)}" placeholder="職稱">`:`${esc(m.role)}${m.fixed?'<span class="cm-tag cm-fix">固定</span>':''}`}</div>
-            <div class="cm-who">${m.name?`<b>${esc(m.name)}</b>${m.unit?`<span class="cm-tag">${esc(m.unit)}</span>`:''}<span class="cm-tag">${esc(SRC[m.source]||'手動輸入')}</span>${m.phone?`<div class="s">📞 ${esc(m.phone)}</div>`:''}`:'<span class="cm-muted">（尚未設定）</span>'}</div>
+            <div class="cm-who">${m.name?`<b>${esc(m.name)}</b>${m.unit?`<span class="cm-tag">${esc(m.unit)}</span>`:''}<span class="cm-tag">${esc(SRC[m.source]||'手動輸入')}</span>${m.phone?`<div class="s">📞 ${esc(m.phone)}</div>`:''}`:`<span class="cm-muted">${m.fixed?'（尚未設定）':'（從缺／尚未選任）'}</span>`}</div>
             <div class="cm-acts">${editing?`<button type="button" data-pick="${i}">從住戶選擇</button><button type="button" class="secondary" data-man="${i}">手動輸入</button>${m.name?`<button type="button" class="secondary" data-clr="${i}">清空</button>`:''}${m.fixed?'':`<button type="button" class="secondary" data-del="${i}" style="color:#a33131">刪除職務</button>`}`:''}</div></div>`).join('')}</div>
           <datalist id="cmRoles">${ROLES.map(r=>`<option value="${r}">`).join('')}</datalist>
           ${editing?`<div class="cm-h"><button type="button" class="secondary" id="cmCancel">取消</button><button type="button" id="cmSave">💾 儲存本屆委員</button></div><div class="cm-muted">主任委員、監察委員、財務委員是固定職務，不能刪除；改選後直接換人即可。存證信函的寄件人會自動帶入主任委員。</div>`
             :`${(P.committee_updated_at)?`<div class="cm-muted">最後更新：${esc(tw(P.committee_updated_at))} ${esc(P.committee_updated_by)}</div>`:''}`}
         </div></div></div>`;
+      host.querySelector('#cmSg')?.addEventListener('click',()=>{if(editing){const n=applySuggest(st,sg);note=n?`已依規約加入 ${n} 個職務（人選先留空）。按「儲存本屆委員」才會生效。`:'目前的職務已經符合規約。';draw();}else view(host,label,d,true,true);});
       if(!editing){host.querySelector('#cmEdit')?.addEventListener('click',()=>view(host,label,d,true));return;}
+      host.querySelector('#cmSg2')?.addEventListener('click',()=>{const n=applySuggest(st,sg);note=n?`已依規約加入 ${n} 個職務（人選先留空）。按「儲存本屆委員」才會生效。`:'目前的職務已經符合規約，沒有需要新增的。';draw();});
       host.querySelectorAll('[data-h]').forEach(i=>i.oninput=()=>st.head[i.dataset.h]=i.value);
       host.querySelectorAll('[data-role]').forEach(i=>i.oninput=()=>st.members[Number(i.dataset.role)].role=i.value);
       host.querySelector('#cmAdd').onclick=()=>{st.members.push({role:'委員',fixed:false,name:'',unit:'',phone:'',source:'manual'});draw();};
