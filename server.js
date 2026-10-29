@@ -1785,7 +1785,8 @@ const RESIDENT_HEADER_ALIASES={
   floor:['樓層','樓','層','floor','floor_no'],
   name:['姓名','住戶姓名','所有權人','承租人','戶長','name','owner','tenant'],
   phone:['電話','聯絡電話','手機','手機號碼','聯絡手機','phone','mobile','tel'],
-  address:['地址','門牌','門牌地址','住址','完整地址','戶籍地址','通訊地址','address'],
+  address:['地址','門牌','門牌地址','住址','完整地址','address'],
+  mail_address:['戶籍／通訊地址','戶籍/通訊地址','戶籍地址','通訊地址','戶籍地','通訊處','mail_address'],
   relation:['身分','身份','關係','住戶身分','relation','role'],
   lease_start:['租約起日','租約起始日','租約開始','租約開始日','起租日','租期起','租期開始','租賃起日','lease_start','start_date'],
   lease_end:['租約迄日','租約到期','租約到期日','到期日','租約結束','租約結束日','租期迄','租期結束','租賃迄日','退租日','lease_end','end_date'],
@@ -1817,9 +1818,9 @@ function residentNormalizeRow(row,map){
   const known=new Set(Object.values(map));const extra=Object.entries(row).filter(([k,v])=>v!==undefined&&v!==null&&String(v).trim()!==''&&!known.has(k)).map(([k,v])=>`${k}：${String(v).trim()}`).join('；');
   let lease_start=residentLease.normalizeDate(residentCell(row,map.lease_start)),lease_end=residentLease.normalizeDate(residentCell(row,map.lease_end));
   if((!lease_start||!lease_end)&&map.lease_range){const [a,b]=residentLease.splitLeaseRange(residentCell(row,map.lease_range));lease_start=lease_start||a;lease_end=lease_end||b;}
-  return {building,unit,floor,name,phone,address,extra,relation,lease_start,lease_end,emergency_name:residentCell(row,map.emergency_name),emergency_phone:residentCell(row,map.emergency_phone),raw:row};
+  return {building,unit,floor,name,phone,address,extra,relation,lease_start,lease_end,emergency_name:residentCell(row,map.emergency_name),emergency_phone:residentCell(row,map.emergency_phone),mail_address:residentCell(row,map.mail_address),raw:row};
 }
-const residentLease=require('./resident-routes');
+const residentLease=require('./resident-routes');let residentApi=null;
 function residentLooksLikeMatrixUnit(v){
   return /^\s*\d+-\d+-\d{4}(?:\([^)]*\))?\s*$/.test(String(v??''));
 }
@@ -1940,7 +1941,7 @@ app.put('/api/staff/residents/preference',requireStaffFiller,(req,res)=>{try{con
 // 住戶名冊讀取／上傳／逐筆編輯／聯繫表自動更新：resident-routes.js
 function residentCanEdit(u){if(!u||u.role==='company_admin')return false;if(residentCanUpload(u))return true;const vals=[u.job_level,u.job_category,u.position,...getJobCategories(u)];return vals.some(v=>String(v||'').includes('秘書'));}
 const layoutApi=require('./community-layout')({db,now});
-require('./resident-routes')(app,{db,staffMenuAllows,getUser,tenantId,now,requireStaffFiller,residentCategory,residentActiveCommunity,residentCanEdit,residentParseFile,residentUpload,RESIDENT_IMPORTS_DIR,path,XLSX,layoutApi,fs});
+residentApi=require('./resident-routes')(app,{db,staffMenuAllows,getUser,tenantId,now,requireStaffFiller,residentCategory,residentActiveCommunity,residentCanEdit,residentParseFile,residentUpload,RESIDENT_IMPORTS_DIR,path,XLSX,layoutApi,fs});
 
 
 
@@ -2745,7 +2746,7 @@ apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tena
 const advanceReqApi=require('./advance-request-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,effectivePermissions,payroll,ap:apApi});
 interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi,addons:plansApi});
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi,plans:plansApi});
-require('./legal-letter-routes')(app,{db,getUser,tenantId,now,requireStaffFiller,requireCompanyAdmin,residentActiveCommunity,residentCanEdit,effectivePermissions});
+require('./legal-letter-routes')(app,{db,getUser,tenantId,now,requireStaffFiller,requireCompanyAdmin,residentActiveCommunity,residentCanEdit,effectivePermissions,residents:residentApi});
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi,plans:plansApi});
 
 // 主機健康檢查（Render Health Check Path 填 /healthz）

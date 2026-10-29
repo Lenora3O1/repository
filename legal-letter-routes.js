@@ -5,7 +5,7 @@
 'use strict';
 
 module.exports = function registerLegalLetterRoutes(app, d) {
-  const { db, getUser, tenantId, now, requireStaffFiller, requireCompanyAdmin, residentActiveCommunity, residentCanEdit, effectivePermissions } = d;
+  const { db, getUser, tenantId, now, requireStaffFiller, requireCompanyAdmin, residentActiveCommunity, residentCanEdit, effectivePermissions, residents } = d;
 
   db.exec(`
   CREATE TABLE IF NOT EXISTS legal_letters (
@@ -15,9 +15,18 @@ module.exports = function registerLegalLetterRoutes(app, d) {
     created_by TEXT DEFAULT '', created_by_id INTEGER, created_at TEXT NOT NULL, updated_by TEXT DEFAULT '', updated_at TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_legal_letters ON legal_letters(tenant_id, scope, community_id);
+  CREATE TABLE IF NOT EXISTS community_vendors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, category TEXT NOT NULL DEFAULT 'maintenance', name TEXT NOT NULL, service TEXT DEFAULT '',
+    tax_id TEXT DEFAULT '', owner TEXT DEFAULT '', contact TEXT DEFAULT '', phone TEXT DEFAULT '', address TEXT DEFAULT '', contract_start TEXT DEFAULT '', contract_end TEXT DEFAULT '', note TEXT DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT DEFAULT '', created_at TEXT NOT NULL, updated_by TEXT DEFAULT '', updated_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_community_vendors ON community_vendors(tenant_id, community_id);
   CREATE TABLE IF NOT EXISTS legal_letter_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, letter_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL, actor TEXT DEFAULT '', action TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL);
   `);
 
+  { const cols = db.prepare('PRAGMA table_info(legal_letters)').all().map(c => c.name); if (!cols.includes('kind')) db.exec("ALTER TABLE legal_letters ADD COLUMN kind TEXT DEFAULT 'general'"); }
+  const KINDS = { fee: '管理費催繳', other: '其他', general: '一般' };
+  const VCAT = { maintenance: '簽約保養廠商', general: '一般廠商', special: '特約廠商' };
   const parse = (v, f) => { try { const x = JSON.parse(v || ''); return x ?? f; } catch { return f; } };
   const str = (v, m = 200) => String(v ?? '').replace(/\r/g, '').trim().slice(0, m);
   const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
@@ -36,7 +45,7 @@ module.exports = function registerLegalLetterRoutes(app, d) {
 
   function cleanSender(s) { s = s || {}; return { kind: ['committee', 'company', 'custom'].includes(s.kind) ? s.kind : 'custom', org: str(s.org, 80), rep_title: str(s.rep_title, 20), rep: str(s.rep, 40), address: str(s.address, 120), entity_id: Number(s.entity_id) || null }; }
   function cleanRecipients(list) {
-    const out = (Array.isArray(list) ? list : []).slice(0, 12).map(r => ({ name: str(r?.name, 80), address: str(r?.address, 120), cc: !!r?.cc, unit: str(r?.unit, 40), source: str(r?.source, 20) })).filter(r => r.name || r.address);
+    const out = (Array.isArray(list) ? list : []).slice(0, 12).map(r => ({ name: str(r?.name, 80), address: str(r?.address, 120), cc: !!r?.cc, unit: str(r?.unit, 40), source: str(r?.source, 20), ref_id: Number(r?.ref_id) || null })).filter(r => r.name || r.address);
     return out;
   }
   function validate(L, final) {
@@ -52,7 +61,7 @@ module.exports = function registerLegalLetterRoutes(app, d) {
 
   function out(r, withLogs) {
     const sender = parse(r.sender_json, {}), recipients = parse(r.recipients_json, []);
-    const o = { id: r.id, scope: r.scope, community_id: r.community_id, title: r.title, sender, recipients, body: r.body, status: r.status, pages: r.pages, sent_date: r.sent_date, post_no: r.post_no, note: r.note, created_by: r.created_by, created_at: r.created_at, updated_by: r.updated_by, updated_at: r.updated_at,
+    const o = { id: r.id, scope: r.scope, kind: r.kind || 'general', kind_label: KINDS[r.kind] || '一般', community_id: r.community_id, title: r.title, sender, recipients, body: r.body, status: r.status, pages: r.pages, sent_date: r.sent_date, post_no: r.post_no, note: r.note, created_by: r.created_by, created_at: r.created_at, updated_by: r.updated_by, updated_at: r.updated_at,
       copies: recipients.length + 2 };
     if (withLogs) o.logs = db.prepare('SELECT actor,action,note,created_at FROM legal_letter_logs WHERE letter_id=? ORDER BY id').all(r.id).map(x => ({ ...x, label: ACT[x.action] || x.action }));
     return o;
@@ -95,6 +104,7 @@ module.exports = function registerLegalLetterRoutes(app, d) {
       const q = str(req.query.q, 40), st = str(req.query.status, 10);
       const where = ['tenant_id=?', 'scope=?', t.scope === 'site' ? 'community_id=?' : 'community_id IS NULL']; const args = t.scope === 'site' ? [t.tid, t.scope, t.cid] : [t.tid, t.scope];
       if (['draft', 'printed', 'sent'].includes(st)) { where.push('status=?'); args.push(st); }
+      if (KINDS[req.query.kind]) { where.push('kind=?'); args.push(req.query.kind); }
       if (q) { where.push('(title LIKE ? OR recipients_json LIKE ? OR body LIKE ?)'); args.push(`%${q}%`, `%${q}%`, `%${q}%`); }
       const rows = db.prepare(`SELECT * FROM legal_letters WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT 300`).all(...args).map(r => { const o = out(r); delete o.body; return o; });
       res.json({ rows, scope: t.scope, community: t.community ? { id: t.community.id, name: t.community.name, address: t.community.address } : null, default_sender: defaultSender(t), entities: t.scope === 'company' ? entities(t.tid) : [] });
@@ -104,9 +114,9 @@ module.exports = function registerLegalLetterRoutes(app, d) {
       const t = ctxOf(req); const b = req.body || {};
       const L = { title: str(b.title, 60), sender: cleanSender(b.sender), recipients: cleanRecipients(b.recipients), body: str(b.body, 20000) };
       validate(L, false);
-      const lay = layout(L.body);
-      const info = db.prepare('INSERT INTO legal_letters (tenant_id,community_id,scope,title,sender_json,recipients_json,body,status,pages,created_by,created_by_id,created_at,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(t.tid, t.cid, t.scope, L.title, JSON.stringify(L.sender), JSON.stringify(L.recipients), L.body, 'draft', lay.pages, t.u.name || '', t.u.id, now(), t.u.name || '', now());
+      const lay = layout(L.body); const kind = KINDS[b.kind] ? b.kind : 'general';
+      const info = db.prepare('INSERT INTO legal_letters (tenant_id,community_id,scope,kind,title,sender_json,recipients_json,body,status,pages,created_by,created_by_id,created_at,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(t.tid, t.cid, t.scope, kind, L.title, JSON.stringify(L.sender), JSON.stringify(L.recipients), L.body, 'draft', lay.pages, t.u.name || '', t.u.id, now(), t.u.name || '', now());
       const id = Number(info.lastInsertRowid); log(id, t.tid, t.u.name, 'create', L.title);
       res.json({ letter: out(find(t, id), true) });
     }));
@@ -115,7 +125,7 @@ module.exports = function registerLegalLetterRoutes(app, d) {
       if (r.status === 'sent') throw err('已寄出的信函不能修改；如需更正請另建一封');
       const L = { title: str(b.title, 60), sender: cleanSender(b.sender), recipients: cleanRecipients(b.recipients), body: str(b.body, 20000) };
       validate(L, false);
-      db.prepare('UPDATE legal_letters SET title=?,sender_json=?,recipients_json=?,body=?,pages=?,status=\'draft\',updated_by=?,updated_at=? WHERE id=?').run(L.title, JSON.stringify(L.sender), JSON.stringify(L.recipients), L.body, layout(L.body).pages, t.u.name || '', now(), r.id);
+      db.prepare('UPDATE legal_letters SET kind=?,title=?,sender_json=?,recipients_json=?,body=?,pages=?,status=\'draft\',updated_by=?,updated_at=? WHERE id=?').run(KINDS[b.kind] ? b.kind : (r.kind || 'general'), L.title, JSON.stringify(L.sender), JSON.stringify(L.recipients), L.body, layout(L.body).pages, t.u.name || '', now(), r.id);
       log(r.id, t.tid, t.u.name, 'update'); res.json({ letter: out(find(t, r.id), true) });
     }));
     // 列印前檢查必填欄位，記錄列印
@@ -141,6 +151,54 @@ module.exports = function registerLegalLetterRoutes(app, d) {
       db.prepare('DELETE FROM legal_letters WHERE id=?').run(r.id); log(r.id, t.tid, t.u.name, 'delete', r.title); res.json({ ok: true });
     }));
   }
+  // 收件人來源 ----------------------------------------------------------
+  // 管理費催繳：區分所有權人（出租中的戶別帶戶籍／通訊地址）
+  app.get('/api/staff/legal-letters/owners', requireStaffFiller, wrap((req, res) => {
+    const t = siteCtx(req);
+    if (!residents) throw err('住戶名冊尚未啟用');
+    if (!residents.acked(t.tid, t.u.id)) return res.json({ ack_required: true, rows: [] });
+    res.json({ rows: residents.ownerMailing(t.tid, t.cid) });
+  }));
+  // 社區簽約廠商（廠商聯繫）：存證信函可直接帶入廠商名稱、負責人、地址
+  const vOut = r => ({ id: r.id, category: r.category, category_label: VCAT[r.category] || r.category, name: r.name, service: r.service, tax_id: r.tax_id, owner: r.owner, contact: r.contact, phone: r.phone, address: r.address, contract_start: r.contract_start, contract_end: r.contract_end, note: r.note, is_active: !!r.is_active, current: !!r.is_active && (!r.contract_end || r.contract_end >= todayTW()) && (!r.contract_start || r.contract_start <= todayTW()) });
+  const todayTW = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  function vClean(b) {
+    const v = { category: VCAT[b.category] ? b.category : 'maintenance', name: str(b.name, 80), service: str(b.service, 80), tax_id: str(b.tax_id, 8), owner: str(b.owner, 40), contact: str(b.contact, 40), phone: str(b.phone, 40), address: str(b.address, 120), contract_start: isDate(b.contract_start) ? b.contract_start : '', contract_end: isDate(b.contract_end) ? b.contract_end : '', note: str(b.note, 300) };
+    if (!v.name) throw err('請填寫廠商名稱');
+    if (v.tax_id && !/^\d{8}$/.test(v.tax_id)) throw err('統一編號是 8 位數字');
+    if (v.contract_start && v.contract_end && v.contract_end < v.contract_start) throw err('合約到期日不能早於開始日');
+    return v;
+  }
+  app.get('/api/staff/community-vendors', requireStaffFiller, wrap((req, res) => {
+    const t = siteCtx(req);
+    const rows = db.prepare('SELECT * FROM community_vendors WHERE tenant_id=? AND community_id=? AND is_active=1 ORDER BY category, name').all(t.tid, t.cid).map(vOut);
+    res.json({ rows: req.query.current === '1' ? rows.filter(r => r.current) : rows, categories: VCAT });
+  }));
+  app.post('/api/staff/community-vendors', requireStaffFiller, wrap((req, res) => {
+    const t = siteCtx(req); const v = vClean(req.body || {});
+    const info = db.prepare('INSERT INTO community_vendors (tenant_id,community_id,category,name,service,tax_id,owner,contact,phone,address,contract_start,contract_end,note,created_by,created_at,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(t.tid, t.cid, v.category, v.name, v.service, v.tax_id, v.owner, v.contact, v.phone, v.address, v.contract_start, v.contract_end, v.note, t.u.name || '', now(), t.u.name || '', now());
+    res.json({ vendor: vOut(db.prepare('SELECT * FROM community_vendors WHERE id=?').get(Number(info.lastInsertRowid))) });
+  }));
+  app.put('/api/staff/community-vendors/:id', requireStaffFiller, wrap((req, res) => {
+    const t = siteCtx(req); const cur = db.prepare('SELECT * FROM community_vendors WHERE id=? AND tenant_id=? AND community_id=? AND is_active=1').get(Number(req.params.id), t.tid, t.cid);
+    if (!cur) throw err('找不到這家廠商', 404);
+    const v = vClean({ ...cur, ...(req.body || {}) });
+    db.prepare('UPDATE community_vendors SET category=?,name=?,service=?,tax_id=?,owner=?,contact=?,phone=?,address=?,contract_start=?,contract_end=?,note=?,updated_by=?,updated_at=? WHERE id=?')
+      .run(v.category, v.name, v.service, v.tax_id, v.owner, v.contact, v.phone, v.address, v.contract_start, v.contract_end, v.note, t.u.name || '', now(), cur.id);
+    res.json({ vendor: vOut(db.prepare('SELECT * FROM community_vendors WHERE id=?').get(cur.id)) });
+  }));
+  app.delete('/api/staff/community-vendors/:id', requireStaffFiller, wrap((req, res) => {
+    const t = siteCtx(req); const r = db.prepare('UPDATE community_vendors SET is_active=0,updated_by=?,updated_at=? WHERE id=? AND tenant_id=? AND community_id=? AND is_active=1').run(t.u.name || '', now(), Number(req.params.id), t.tid, t.cid);
+    if (!r.changes) throw err('找不到這家廠商', 404); res.json({ ok: true });
+  }));
+  // 公司：公司應支的廠商資料（只回傳名稱、統編、聯絡人、地址）
+  app.get('/api/company/legal-letters/vendors', requireCompanyAdmin, wrap((req, res) => {
+    const t = companyCtx(req); let rows = [];
+    try { rows = db.prepare('SELECT id,name,tax_id,contact,phone,address,category FROM ap_vendors WHERE tenant_id=? AND is_active=1 ORDER BY name').all(t.tid).map(v => ({ ...v, owner: '', service: v.category || '', current: true })); } catch {}
+    res.json({ rows });
+  }));
+
   routes('/api/staff', requireStaffFiller, siteCtx);
   routes('/api/company', requireCompanyAdmin, companyCtx);
   return { layout };
