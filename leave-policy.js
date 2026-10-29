@@ -62,6 +62,9 @@ function defaults() {
     // by：site 現場主管（沒有則直屬主管）、dept 職務主管、region 區域督導、direct 直屬主管、position 指定職位、people 指定人員
     // 補打卡：每月上限（0＝不限）、可以補幾天內的卡、審核流程（依組織架構自動找審核人）
     punch_fix: { enabled: true, monthly_limit: 3, days_back: 7, flow: [{ id: 'pf_direct', name: '直屬主管', by: 'direct' }] },
+    // 借支（預支薪資）：本人申請 → 審核 → 會計確認撥款 → 當月薪資一次扣回
+    // ratio_den：最多借本月已賺薪資的 1/N（0＝不限）；amounts：只能選的金額（空＝不限）；monthly_limit：每月幾次（0＝不限）
+    advance: { enabled: true, ratio_den: 0, amounts: [], monthly_limit: 1, min_days: 0, after_trial: false, deadline_day: 0, flow: [{ id: 'adv_direct', name: '直屬主管', by: 'direct' }, { id: 'adv_acct', name: '會計', by: 'position', position: 'accountant' }] },
     flow: [
       { id: 'site', name: '現場主管', by: 'site', min_days: 0 },
       { id: 'dept', name: '職務主管', by: 'dept', min_days: 0 },
@@ -126,6 +129,20 @@ function normalize(input) {
     }
     if (!pf.flow.length) pf.flow = d.punch_fix.flow.map(s => ({ ...s, position: '' }));
     p.punch_fix = pf; }
+  { const x = b.advance && typeof b.advance === 'object' ? b.advance : d.advance;
+    const amounts = (Array.isArray(x.amounts) ? x.amounts : String(x.amounts || '').split(/[,，、\s]+/)).map(v => Math.round(num(v))).filter(v => v > 0 && v <= 1000000);
+    const adv = { enabled: x.enabled !== false, ratio_den: [0, 2, 3, 4, 5].includes(Math.round(num(x.ratio_den))) ? Math.round(num(x.ratio_den)) : 0, amounts: [...new Set(amounts)].sort((a, c) => a - c).slice(0, 10),
+      monthly_limit: Math.max(0, Math.min(10, Math.round(num(x.monthly_limit, 1)))), min_days: Math.max(0, Math.min(365, Math.round(num(x.min_days)))), after_trial: !!x.after_trial,
+      deadline_day: Math.max(0, Math.min(28, Math.round(num(x.deadline_day)))), flow: [] };
+    const seen3 = new Set();
+    for (const s of (Array.isArray(x.flow) ? x.flow : d.advance.flow).slice(0, 5)) {
+      const name = str(s?.name, 12); if (!name) continue;
+      let sid = typeof s?.id === 'string' && /^[a-z0-9_]{2,16}$/.test(s.id) ? s.id : `adv_${id()}`; while (seen3.has(sid)) sid = `adv_${id()}`; seen3.add(sid);
+      const by = ['site', 'dept', 'region', 'direct', 'position'].includes(s?.by) ? s.by : 'direct';
+      adv.flow.push({ id: sid, name, by, position: by === 'position' ? str(s?.position, 24) : '' });
+    }
+    if (!adv.flow.length) adv.flow = d.advance.flow.map(s => ({ ...s, position: s.position || '' }));
+    p.advance = adv; }
   return { policy: p, notes };
 }
 

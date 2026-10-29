@@ -2742,6 +2742,7 @@ acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompa
 contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi});
 arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});
 apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,contracts:contractApi,plans:plansApi});
+const advanceReqApi=require('./advance-request-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,effectivePermissions,payroll,ap:apApi});
 interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi,addons:plansApi});
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi,plans:plansApi});
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi,plans:plansApi});

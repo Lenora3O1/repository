@@ -136,10 +136,14 @@ async function showStaffProfile(user){
       </button>
       <button type="button" class="monthly-payslip-card" id="monthlyPayslipBtn">
         <span><strong>本月薪資單</strong><small>${d.payslip?.available?`${escapeHtml(d.payslip.month.slice(0,4)+' 年 '+Number(d.payslip.month.slice(5,7))+' 月')}｜實發 ${Number(d.payslip.net||0).toLocaleString('en-US')} 元${d.payslip.confirmed?'':'（待確認）'}`:'點選查看當月薪資單'}</small></span><b>›</b>
+      </button>
+      <button type="button" class="monthly-payslip-card" id="advanceBtn">
+        <span><strong>💰 借支申請</strong><small>系統依班表與應扣金額自動算出本月可借金額；主管也在這裡審核</small></span><b>›</b>
       </button>`;
     modal.querySelector('#salaryDetailsBtn').addEventListener('click',()=>openSalaryDetailsCard({...salary,pay_method:d.pay_method},d.advances));
     modal.querySelector('#changePasswordBtn').addEventListener('click',()=>window.PasswordModule?.open('/api/staff'));
     modal.querySelector('#monthlyPayslipBtn').addEventListener('click',()=>openPayslipCard(d).catch(e=>alert(e.message)));
+    modal.querySelector('#advanceBtn').addEventListener('click',()=>{if(window.AdvanceModule)window.AdvanceModule.openStaff('/api/staff');else alert('借支模組尚未載入，請重新整理頁面');});
   }catch(e){modal.querySelector('#staffProfileBody').innerHTML=`<div class="profile-error">目前無法載入職員資料。<br><small>${escapeHtml(e.message||'')}</small></div>`;}
 }
 function payslipModal(inner){
