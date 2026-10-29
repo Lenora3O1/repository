@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 8;
+const VERSION = 9;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -12,6 +12,7 @@ const COMPANY = [
     { id: 'company-equip-requests', label: '設備申請紀錄', action: 'equip-requests', match: ['設備申請紀錄', '借用紀錄'] },
     { id: 'company-equip-sites', label: '社區管理', action: 'equip-sites', match: ['社區進駐設備', '進駐設備'], exact: ['社區管理'] },
     { id: 'company-contracts', label: '社區合約', action: 'contracts', match: ['社區合約'] },
+    { id: 'company-legal-letter', label: '存證信函', action: 'legal-letter', match: ['存證信函'] },
   ] },
   { parent: { id: 'company-accounting', label: '會計', labels: ['會計'], icon: '💰', action: 'finance' }, children: [
     { id: 'company-ar', label: '公司應收', action: 'acct-ar', match: ['公司應收', '應收帳款'] },
@@ -31,6 +32,8 @@ const STAFF = [
   // 社區資訊：社區名稱、代表地址、棟別門牌（同時服務多個社區的人，看的是目前選擇的社區）
   { parent: null, children: [{ id: 'staff-community-info', label: '社區資訊', action: 'community-info', exact: ['社區資訊', '社區基本資料'], after: 'residents', icon: '🏢' }] },
   // 現場「設備借用申請」放在公司資源底下；舊版放在最上層的「設備申請」會合併過來
+  // 存證信函：管理委員會底下（經理、秘書以管委會名義寄出）
+  { parent: { id: 'committee', label: '管理委員會', labels: ['管理委員會', '管委會'], icon: '👥', action: 'committee' }, keepOrder: true, children: [{ id: 'staff-legal-letter', label: '存證信函', action: 'legal-letter', match: ['存證信函'] }] },
   { parent: { id: 'company-resources', label: '公司資源', labels: ['公司資源'], icon: '📦', action: 'company-resources' }, keepOrder: true, children: [{ id: 'staff-equipment', label: '設備借用申請', action: 'staff-equipment', match: ['設備借用'], exact: ['設備申請'], anywhere: true }] },
 ];
 

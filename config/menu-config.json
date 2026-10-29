@@ -82,6 +82,14 @@
       "enabled": true
     },
     {
+      "id": "staff-legal-letter",
+      "parentId": "committee",
+      "icon": "↳",
+      "label": "存證信函",
+      "action": "legal-letter",
+      "enabled": true
+    },
+    {
       "id": "residents",
       "parentId": null,
       "icon": "🏠",
@@ -441,6 +449,14 @@
       "icon": "↳",
       "label": "社區合約",
       "action": "contracts",
+      "enabled": true
+    },
+    {
+      "id": "company-legal-letter",
+      "parentId": "company-general-affairs",
+      "icon": "↳",
+      "label": "存證信函",
+      "action": "legal-letter",
       "enabled": true
     },
     {
