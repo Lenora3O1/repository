@@ -2746,6 +2746,7 @@ apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tena
 const advanceReqApi=require('./advance-request-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,effectivePermissions,payroll,ap:apApi});
 interviewApi=require('./interview-routes')(app,{db,crypto,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,org:orgApi,acct:acctApi,addons:plansApi});
 equipApi=require('./equipment-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,effectivePermissions,org:orgApi,plans:plansApi});
+require('./bylaws-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaffFiller,residentActiveCommunity,residentCanEdit,staffMenuAllows});
 require('./legal-letter-routes')(app,{db,getUser,tenantId,now,requireStaffFiller,requireCompanyAdmin,residentActiveCommunity,residentCanEdit,effectivePermissions,residents:residentApi});
 require('./dashboard-routes')(app,{db,getUser,tenantId,effectivePermissions,requireCompanyAdmin,getSiteAssignments,org:orgApi,payroll,equip:equipApi,contracts:contractApi,acct:acctApi,ar:arApi,ap:apApi,interview:interviewApi,plans:plansApi});
 
