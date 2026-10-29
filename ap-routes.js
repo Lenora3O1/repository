@@ -68,8 +68,8 @@ module.exports = function registerApRoutes(app, d) {
   }
   const needAcct = (req, res, next) => { if (!acct.canAcct(getUser(req))) return bad(res, '需要「會計」權限', 403); next(); };
 
-  const KIND = { vendor: '廠商款項', reimburse: '員工代墊', feedback: '社區回饋金', other: '其他' };
-  const LIAB = { vendor: 'ap', reimburse: 'accrued_expense', feedback: 'feedback_payable', other: 'accrued_expense' };
+  const KIND = { vendor: '廠商款項', reimburse: '員工代墊', feedback: '社區回饋金', advance: '員工借支', other: '其他' };
+  const LIAB = { vendor: 'ap', reimburse: 'accrued_expense', feedback: 'feedback_payable', advance: 'accrued_expense', other: 'accrued_expense' };
   const INV = { tri: '三聯式發票', e: '電子發票（有統編）', bi: '二聯式／收銀機發票（無統編）', receipt: '收據', none: '無憑證' };
   const STATUS = { draft: '草稿', pending: '審核中', approved: '待付款', rejected: '退回', paid: '已付款', void: '已作廢' };
   const METHOD = { transfer: '匯款', cash: '現金', check: '支票', other: '其他' };
@@ -176,7 +176,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
   function postAccrual(r, u) {
     if (!acctOn(r.tenant_id)) return null; // 沒有開通會計模組：公費款項申請照常審核，不產生傳票
     const items = parse(r.items_json, []); const k = calc(items, r.invoice_kind, r.tax); const lines = [];
-    const defaultKey = r.kind === 'feedback' ? 'cost_feedback' : 'exp_other';
+    const defaultKey = r.kind === 'feedback' ? 'cost_feedback' : r.kind === 'advance' ? 'staff_advance' : 'exp_other';
     for (const x of k.lines) lines.push({ code: x.account || undefined, key: x.account ? undefined : defaultKey, debit: x.net, memo: x.desc, community_id: x.community_id || r.community_id, party: r.payee, party_tax_id: r.payee_tax_id });
     if (k.tax) lines.push({ key: 'input_vat', debit: k.tax, memo: `進項稅額 ${r.invoice_no || ''}`.trim(), party: r.payee, party_tax_id: r.payee_tax_id });
     lines.push({ key: r.liability_key || 'ap', credit: k.gross, memo: `${r.no} ${r.payee}`, community_id: r.community_id, party: r.payee, party_tax_id: r.payee_tax_id });
@@ -492,5 +492,16 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
     return { todo: mine.length, todo_list: mine.slice(0, 8).map(r => ({ id: r.id, no: r.no, title: r.title, applicant: nameOf(tid, r.applicant_id) || r.created_by, amount: r.amount, step: curStep(r)?.name || '', days: days(r) })),
       final: fin.length, final_amount: fin.reduce((x, r) => x + r.amount, 0), acct_on: acctOn(tid), unpaid: ap.c, unpaid_amount: ap.s, overdue: ap.o };
   }
-  return { dashboard };
+  // 員工借支撥款：直接成為「待付款」的應付（不再走公費款項審核），會計再依一般付款流程付款
+  function createAdvancePayable(tid, b, u) {
+    const x = readRequest(tid, { kind: 'advance', payee: b.payee, title: b.title, items: b.items, invoice_kind: 'receipt', request_date: b.date, due_date: b.date, note: b.note || '' });
+    let id; tx(() => {
+      id = insert(tid, x, u);
+      db.prepare("UPDATE ap_requests SET status='approved',steps_json='[]',approved_at=?,updated_at=? WHERE id=?").run(now(), now(), id);
+      const vid = postAccrual(db.prepare('SELECT * FROM ap_requests WHERE id=?').get(id), u); if (vid) db.prepare('UPDATE ap_requests SET voucher_id=? WHERE id=?').run(vid, id);
+    })();
+    log(tid, id, u, 'create', b.log || '員工借支撥款');
+    return db.prepare('SELECT id,no FROM ap_requests WHERE id=?').get(id);
+  }
+  return { dashboard, createAdvancePayable };
 };

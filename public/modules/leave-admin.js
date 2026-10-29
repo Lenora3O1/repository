@@ -45,9 +45,11 @@
     const BY=[['site','現場主管（沒有則直屬主管）'],['dept','職務主管（所屬部門）'],['region','區域督導'],['direct','直屬主管'],['position','指定職位'],['people','指定人員（公司勾選）']];
     const PF=P.punch_fix=P.punch_fix||{enabled:true,monthly_limit:3,days_back:7,flow:[{id:'pf_direct',name:'直屬主管',by:'direct'}]};
     const PBY=BY.filter(([v])=>v!=='people');
+    const AV=P.advance=P.advance||{enabled:true,ratio_den:0,amounts:[],monthly_limit:1,min_days:0,after_trial:false,deadline_day:0,flow:[{id:'adv_direct',name:'直屬主管',by:'direct'},{id:'adv_acct',name:'會計',by:'position',position:'accountant'}]};
+    const avRow=(s,i)=>`<tr><td>${i+1}</td><td><input data-avs="${i}" data-f="name" value="${esc(s.name)}" placeholder="例如：會計"></td><td><select data-avs="${i}" data-f="by" data-redraw>${PBY.map(([v,l])=>`<option value="${v}" ${s.by===v?'selected':''}>${l}</option>`).join('')}</select>${s.by==='position'?`<select data-avs="${i}" data-f="position" style="margin-top:4px"><option value="">請選擇職位</option>${(S.positions||[]).map(p=>`<option value="${esc(p.id)}" ${s.position===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}</td><td style="white-space:nowrap"><button type="button" class="secondary" data-avup="${i}" style="padding:3px 9px;min-height:0" ${i?'':'disabled'}>↑</button> <button type="button" class="danger" data-avdel="${i}" style="padding:3px 9px;min-height:0">刪除</button></td></tr>`;
     const pfRow=(s,i)=>`<tr><td>${i+1}</td><td><input data-pfs="${i}" data-f="name" value="${esc(s.name)}" placeholder="例如：直屬主管"></td><td><select data-pfs="${i}" data-f="by" data-redraw>${PBY.map(([v,l])=>`<option value="${v}" ${s.by===v?'selected':''}>${l}</option>`).join('')}</select>${s.by==='position'?`<select data-pfs="${i}" data-f="position" style="margin-top:4px"><option value="">請選擇職位</option>${(S.positions||[]).map(p=>`<option value="${esc(p.id)}" ${s.position===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}</td><td style="white-space:nowrap"><button type="button" class="secondary" data-pfup="${i}" style="padding:3px 9px;min-height:0" ${i?'':'disabled'}>↑</button> <button type="button" class="danger" data-pfdel="${i}" style="padding:3px 9px;min-height:0">刪除</button></td></tr>`;
     const flowRow=(s,i)=>`<tr><td>${i+1}</td><td><input data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="例如：現場主管"></td><td><select data-s="${i}" data-f="by" data-redraw>${BY.map(([v,l])=>`<option value="${v}" ${(s.by||'people')===v?'selected':''}>${l}</option>`).join('')}</select>${(s.by||'people')==='position'?`<select data-s="${i}" data-f="position" style="margin-top:4px"><option value="">請選擇職位</option>${(S.positions||[]).map(p=>`<option value="${esc(p.id)}" ${s.position===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:(s.by||'people')==='people'?`<select data-s="${i}" data-f="scope" style="margin-top:4px"><option value="community" ${s.scope==='community'?'selected':''}>只限同社區</option><option value="company" ${s.scope!=='community'?'selected':''}>全公司</option></select>`:''}</td><td><input type="number" min="0" step="0.5" data-s="${i}" data-f="min_days" value="${s.min_days||0}" title="0＝每張假單都要"><small>天以上才需要</small></td><td style="white-space:nowrap"><button type="button" class="secondary" data-sup="${i}" style="padding:3px 9px;min-height:0" ${i?'':'disabled'}>↑</button> <button type="button" class="secondary" data-sdn="${i}" style="padding:3px 9px;min-height:0" ${i<P.flow.length-1?'':'disabled'}>↓</button> <button type="button" class="danger" data-sdel="${i}" style="padding:3px 9px;min-height:0">刪除</button></td></tr>`;
-    el.innerHTML=`<div class="panel"><div class="eyebrow">📝 平台設定</div><h1>請假與補打卡規則（各公司客製化）</h1>
+    el.innerHTML=`<div class="panel"><div class="eyebrow">📝 平台設定</div><h1>請假、補打卡與借支規則（各公司客製化）</h1>
       <p class="hint">依勞基法、勞工請假規則、性別平等工作法的最低標準內建，每家公司可以設定更好的福利、審核流程與薪資算法。給薪比例與天數不能低於法定，存檔時會自動補足。審核人依組織架構自動對應；選「指定人員」的關卡由公司管理員在「請假管理 → 審核設定」勾選。</p>
       <div class="la-bar"><b>公司</b><select id="laT">${S.list.tenants.map(t=>`<option value="${t.id}" ${t.id===S.tid?'selected':''}>${esc(t.name)}（${esc(t.code)}）${t.customized?' ✎':''}</option>`).join('')}</select>${d.customized?`<small class="muted">已客製化，最後更新 ${esc((d.updated_at||'').slice(0,16).replace('T',' '))}</small>`:'<small class="muted">目前使用平台預設</small>'}</div>
       <div id="laNotes"></div>
@@ -62,6 +64,18 @@
       </div>
       <div class="la-wrap" style="margin-top:8px"><table class="la-tbl"><thead><tr><th>#</th><th>審核關卡</th><th>審核對象</th><th></th></tr></thead><tbody>${PF.flow.map(pfRow).join('')}</tbody></table></div>
       <div class="la-bar"><button type="button" class="secondary" id="laPfAdd">＋ 新增關卡</button><small class="muted">審核人依組織架構自動找。「直屬主管」：保全、秘書是社區經理；社區經理是區域督導。找不到審核人的關卡會略過，全部找不到時由公司管理員審核。</small></div>
+      <div class="la-sec">借支（預支薪資）</div>
+      <div class="la-grid">
+        <label class="chk"><input type="checkbox" data-av="enabled" ${AV.enabled?'checked':''}> 開放人員自行申請借支</label>
+        <label>最多可借本月已賺薪資的<select data-av="ratio_den">${[[0,'不限（扣完應扣款項後全部）'],[2,'1/2'],[3,'1/3'],[4,'1/4'],[5,'1/5']].map(([v,l])=>`<option value="${v}" ${Number(AV.ratio_den)===v?'selected':''}>${l}</option>`).join('')}</select></label>
+        <label>只能選的金額（元，逗號分隔）<input data-av="amounts" value="${esc((AV.amounts||[]).join(', '))}" placeholder="例如 5000, 10000, 15000；空白＝不限"></label>
+        <label>每月最多申請次數<input type="number" min="0" max="10" data-av="monthly_limit" value="${AV.monthly_limit}"><small class="muted" style="font-weight:400">0＝不限</small></label>
+        <label>到職滿幾天才能借<input type="number" min="0" max="365" data-av="min_days" value="${AV.min_days}"><small class="muted" style="font-weight:400">0＝不限</small></label>
+        <label class="chk"><input type="checkbox" data-av="after_trial" ${AV.after_trial?'checked':''}> 試用期內不能借</label>
+        <label>每月幾號前申請<input type="number" min="0" max="28" data-av="deadline_day" value="${AV.deadline_day}"><small class="muted" style="font-weight:400">0＝不限；例如 20：每月 20 號前申請，當月撥款、當月薪資扣回</small></label>
+      </div>
+      <div class="la-wrap" style="margin-top:8px"><table class="la-tbl"><thead><tr><th>#</th><th>審核關卡</th><th>審核對象</th><th></th></tr></thead><tbody>${AV.flow.map(avRow).join('')}</tbody></table></div>
+      <div class="la-bar"><button type="button" class="secondary" id="laAvAdd">＋ 新增關卡</button><small class="muted">可借金額＝本月已賺薪資（依班表已上班天數，扣除已核准請假）− 勞健保、勞退自提、公司保險費、代扣款、請假扣款 − 本月已借；全部關卡核准後由會計確認撥款，撥款月份的薪資一次扣回。</small></div>
       <div class="la-sec">請假單位與證明</div>
       <div class="la-grid">
         <label>最小請假單位<select data-k="unit"><option value="day" ${P.unit==='day'?'selected':''}>1 天</option><option value="half" ${P.unit==='half'?'selected':''}>半天</option><option value="hour" ${P.unit==='hour'?'selected':''}>1 小時</option></select><small class="muted" style="font-weight:400">家庭照顧假依法一律可以小時請假</small></label>
@@ -91,7 +105,7 @@
       <div class="la-sec">公司自訂假別（福利假）</div>
       <div class="la-wrap"><table class="la-tbl"><thead><tr><th>名稱</th><th>給薪</th><th>天數上限</th><th>證明</th><th>原因</th><th>全勤</th></tr></thead><tbody>${P.custom.map(customRow).join('')||'<tr><td colspan="6" class="muted">沒有自訂假別</td></tr>'}</tbody></table></div>
       <div class="la-bar"><button type="button" class="secondary" id="laCusAdd">＋ 新增自訂假別</button></div>
-      <div class="la-bar" style="margin-top:16px"><button type="button" id="laSave">💾 儲存這家公司的請假與補打卡規則</button>${d.customized?'<button type="button" class="secondary" id="laReset">↺ 改回平台預設</button>':''}</div></div>`;
+      <div class="la-bar" style="margin-top:16px"><button type="button" id="laSave">💾 儲存這家公司的請假、補打卡與借支規則</button>${d.customized?'<button type="button" class="secondary" id="laReset">↺ 改回平台預設</button>':''}</div></div>`;
     el.querySelector('#laT').addEventListener('change',e=>{S.tid=Number(e.target.value);draw(el).catch(x=>alert(x.message));});
     const val=i=>i.type==='checkbox'?i.checked:i.type==='number'?Number(i.value):i.value;
     el.querySelectorAll('[data-k]').forEach(i=>i.addEventListener('change',()=>{P[i.dataset.k]=val(i);if(i.hasAttribute('data-redraw'))paint(el,d);}));
@@ -104,6 +118,11 @@
     el.querySelector('#laOtAdd')?.addEventListener('click',()=>{P.overtime_types=P.overtime_types||[];P.overtime_types.push({id:'',name:'新加班種類',calc:'law_weekday',comp:'choose',amount:0,enabled:true});paint(el,d);});
     el.querySelectorAll('[data-oa]').forEach(i=>i.addEventListener('change',()=>{P.overtime_allowance=P.overtime_allowance||{};P.overtime_allowance[i.dataset.oa]=val(i);}));
     const redraw=()=>paint(el,d);
+    el.querySelectorAll('[data-av]').forEach(i=>i.addEventListener('change',()=>{const k=i.dataset.av;P.advance[k]=k==='amounts'?i.value.split(/[,，、\s]+/).map(Number).filter(v=>v>0):k==='ratio_den'?Number(i.value):val(i);}));
+    el.querySelectorAll('[data-avs]').forEach(i=>i.addEventListener('change',()=>{const s=P.advance.flow[Number(i.dataset.avs)];s[i.dataset.f]=val(i);if(i.dataset.f==='by'){s.name=i.selectedOptions[0].textContent.replace(/（.*$/,'');}if(i.hasAttribute('data-redraw'))paint(el,d);}));
+    el.querySelectorAll('[data-avdel]').forEach(b=>b.addEventListener('click',()=>{if(P.advance.flow.length<=1){alert('至少要有一關');return;}P.advance.flow.splice(Number(b.dataset.avdel),1);redraw();}));
+    el.querySelectorAll('[data-avup]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.avup),f=P.advance.flow;[f[i-1],f[i]]=[f[i],f[i-1]];redraw();}));
+    el.querySelector('#laAvAdd').addEventListener('click',()=>{if(P.advance.flow.length>=5){alert('最多 5 關');return;}P.advance.flow.push({id:'',name:'職務主管',by:'dept',position:''});redraw();});
     el.querySelectorAll('[data-pf]').forEach(i=>i.addEventListener('change',()=>{P.punch_fix[i.dataset.pf]=val(i);}));
     el.querySelectorAll('[data-pfs]').forEach(i=>i.addEventListener('change',()=>{const s=P.punch_fix.flow[Number(i.dataset.pfs)];s[i.dataset.f]=val(i);if(i.dataset.f==='by'){s.name=i.selectedOptions[0].textContent.replace(/（.*$/,'');}if(i.hasAttribute('data-redraw'))paint(el,d);}));
     el.querySelectorAll('[data-pfdel]').forEach(b=>b.addEventListener('click',()=>{if(P.punch_fix.flow.length<=1){alert('至少要有一關');return;}P.punch_fix.flow.splice(Number(b.dataset.pfdel),1);redraw();}));

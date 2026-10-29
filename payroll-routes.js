@@ -540,6 +540,22 @@ module.exports = function registerPayrollRoutes(app, d) {
     app.post('/api/admin/insurance-tables/confirm', requireSuperAdmin, wrap((req, res) => { res.json({ success: true, table: tables.confirmPending('總後台') }); }));
     app.delete('/api/admin/insurance-tables/:year', requireSuperAdmin, wrap((req, res) => { if (INS.BUILTIN[req.params.year] && !tables.all()[req.params.year]?.updated_at) return bad(res, '內建年度不能刪除'); tables.removeTable(req.params.year); res.json({ success: true }); }));
   }
+  // ---------- 借支申請用：本月薪資基礎與一定要扣的金額 ----------
+  function advanceBasis(tid, u, month) {
+    const t = tables.forMonth(month); const prof = profileOut(u, profileRow(tid, u.id), t);
+    const bm = baseForMonth(prof, month); const allow = prof.allowances.reduce((a, x) => a + int(x.amount), 0); const monthly = bm.base + allow;
+    const g = prof.auto_grade ? { ...prof, ...INS.suggestGrades(t, monthly) } : prof; const ins = insuranceFor(g, t, tid);
+    let L = null; try { L = leaveHooks?.forMonth ? leaveHooks.forMonth(tid, u, month, { base: bm.base, allowances: prof.allowances }) : null; } catch {}
+    const due = db.prepare("SELECT * FROM salary_advances WHERE tenant_id=? AND staff_id=? AND status='active' AND start_month<=?").all(tid, u.id, month).reduce((a, x) => a + Math.min(int(x.monthly_deduct), advanceBalance(x)), 0);
+    return { configured: prof.configured, payroll_enabled: prof.payroll_enabled, hire_date: prof.hire_date, trial_end_date: prof.trial_end_date, monthly,
+      ins_ee: int(ins.employee.labor) + int(ins.employee.health) + int(ins.employee.pension_self), company_ins_ee: insFor(tid, prof, month).reduce((a, x) => a + int(x.employee), 0),
+      deductions: deductionsFor(prof.deductions, month).reduce((a, x) => a + int(x.amount), 0), leave_deduct: L ? int(L.leave_deduct) + int(L.attendance_deduct) : 0, advances_due: due };
+  }
+  // 借支撥款後建立借資（當月薪資一次扣回）
+  function createAdvance(tid, sid, f) {
+    const info = db.prepare('INSERT INTO salary_advances (tenant_id,staff_id,advance_date,amount,monthly_deduct,start_month,reason,status,created_at,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(tid, sid, f.date, int(f.amount), int(f.amount), f.start_month, str(f.reason, 200), 'active', now(), f.by || '', now());
+    return Number(info.lastInsertRowid);
+  }
   tables.startScheduler();
-  return { profileExtras, canPayroll, canHR, annualLeave, setLeaveHooks: h => { leaveHooks = h; } };
+  return { advanceBasis, createAdvance, profileExtras, canPayroll, canHR, annualLeave, setLeaveHooks: h => { leaveHooks = h; } };
 };

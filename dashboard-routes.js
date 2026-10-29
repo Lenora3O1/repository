@@ -49,6 +49,11 @@ module.exports = function registerDashboardRoutes(app, d) {
     // ---------- 每個人都有：我的待辦 ----------
     const pend = pendingFor(tid, u);
     cards.push({ id: 'me_approvals', size: 'sm', icon: '✅', title: '待我審核的假單', value: pend.length, sub: pend.length ? `最早 ${pend.map(r => r.start_date).sort()[0]}` : '目前沒有', tone: pend.length ? 'alert' : '', action: { action: 'leave', label: '請假管理', tab: 'approve' } });
+    // 借支：輪到我審核的才顯示；會計另外看「待撥款」
+    const adv = safe(() => db.prepare("SELECT * FROM advance_requests WHERE tenant_id=? AND status='pending'").all(tid).filter(r => r.staff_id !== u.id && (u.role === 'company_admin' || ((parse(r.steps_json, [])[r.step_index] || {}).approvers || []).includes(u.id))), []);
+    if (adv.length) cards.push({ id: 'me_advance', size: 'sm', icon: '💰', title: '待我審核的借支', value: adv.length, sub: `合計 ${adv.reduce((a, r) => a + Number(r.amount || 0), 0).toLocaleString('en-US')} 元`, tone: 'alert', action: { action: 'advance-review', label: '借支審核' } });
+    const advPay = safe(() => (u.role === 'company_admin' || (effectivePermissions(u) || []).includes('payroll')) ? db.prepare("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM advance_requests WHERE tenant_id=? AND status='approved'").get(tid) : null, null);
+    if (advPay && advPay.c) cards.push({ id: 'acct_advance_pay', size: 'sm', icon: '💵', title: '借支待撥款', value: advPay.c, sub: `合計 ${Number(advPay.s).toLocaleString('en-US')} 元`, tone: 'alert', action: { action: 'payroll-advances', label: '借資' } });
     // 補打卡：輪到我審核的才顯示
     const pf = safe(() => db.prepare("SELECT * FROM punch_fix_requests WHERE tenant_id=? AND status='pending'").all(tid).filter(r => r.staff_id !== u.id && (u.role === 'company_admin' || ((parse(r.steps_json, [])[r.step_index] || {}).approvers || []).includes(u.id))), []);
     if (pf.length) cards.push({ id: 'me_punch_fix', size: 'sm', icon: '🕒', title: '待我審核的補打卡', value: pf.length, sub: `最早 ${pf.map(r => r.fix_date).sort()[0]}`, tone: 'alert', action: { action: 'punch-fix', label: '補打卡審核' } });
