@@ -58,8 +58,54 @@
     p.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();togglePin(item.id,p);});
     return p;
   }
+  // ---------- 網址與瀏覽器歷程：上一頁／下一頁、滑鼠中鍵（或 Ctrl＋點）開新分頁 ----------
+  const scopeOf=()=>location.pathname.includes('company.html')?'company':'staff';
+  const homeDetail=()=>scopeOf()==='company'?{action:'overview',id:'home',label:'總覽'}:{action:'home',id:'home',label:'工作台'};
+  const keyOf=d=>String(d?.id||d?.action||'');
+  const pick=d=>{const o={};for(const k of ['action','id','label','parentId','parentLabel','tab'])if(d&&d[k]!==undefined&&d[k]!==null)o[k]=d[k];return o;};
+  const isHome=d=>d.action==='home'||d.id==='home'||(scopeOf()==='company'&&d.action==='overview');
+  const baseUrl=()=>location.pathname+location.search;
+  const menuUrl=d=>`${baseUrl()}#m=${encodeURIComponent(keyOf(d))}`;
+  try{if(!history.state&&!/^#m=/.test(location.hash))history.replaceState({home:true},'',baseUrl());}catch(e){}
+  document.addEventListener('workspace-menu',e=>{
+    const d=e.detail||{};if(d.fromHistory)return;
+    try{
+      const st=history.state;
+      if(isHome(d)){if(!st||st.home)history.replaceState({home:true},'',baseUrl());else history.pushState({home:true},'',baseUrl());return;}
+      if(!keyOf(d))return;
+      if(st&&st.menu&&keyOf(st.menu)===keyOf(d)){history.replaceState({menu:pick(d)},'',menuUrl(d));return;}
+      history.pushState({menu:pick(d)},'',menuUrl(d));
+    }catch(err){}
+  },true);
+  window.addEventListener('popstate',e=>{
+    if(!document.body.classList.contains('is-authenticated'))return;
+    const st=e.state;const d=st&&st.menu?st.menu:homeDetail();
+    document.body.classList.remove('sidebar-open','sidebar-hover');
+    document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{...d,fromHistory:true}}));
+  });
+  let menuItems=null,menuResolve;const menuReady=new Promise(r=>menuResolve=r);
+  // 開新分頁或重新整理時，網址帶著 #m=… 就直接打開那個功能（登入、選好社區之後由各頁呼叫）
+  window.__openDeepLink=async function(){
+    const m=location.hash.match(/^#m=(.+)$/);if(!m||window.__deepLinkDone)return false;window.__deepLinkDone=true;
+    const key=decodeURIComponent(m[1]);
+    const items=await Promise.race([menuReady,new Promise(r=>setTimeout(()=>r(menuItems||[]),6000))]);
+    const it=(items||[]).find(x=>String(x.id)===key)||(items||[]).find(x=>String(x.action||'')===key);
+    if(!it){try{history.replaceState({home:true},'',baseUrl());}catch(e){}return false;}
+    const parent=it.parentId?items.find(x=>String(x.id)===String(it.parentId)):null;
+    const d={action:it.action,id:it.id,label:it.label,parentId:it.parentId||null,parentLabel:parent?.label||''};
+    try{history.replaceState({menu:pick(d)},'',menuUrl(d));}catch(e){}
+    document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{...d,fromHistory:true}}));
+    return true;
+  };
+  function openInNewTab(item){window.open(menuUrl({id:item.id,action:item.action}),'_blank','noopener');}
+  function bindNewTab(btn,item){
+    btn.addEventListener('mousedown',e=>{if(e.button===1)e.preventDefault();});
+    btn.addEventListener('auxclick',e=>{if(e.button===1){e.preventDefault();e.stopPropagation();openInNewTab(item);}});
+    btn.addEventListener('click',e=>{if(e.ctrlKey||e.metaKey||e.shiftKey){e.preventDefault();e.stopImmediatePropagation();openInNewTab(item);}},true);
+  }
   function renderItems(items,pinnedIds=new Set()){
     const nav=sidebar?.querySelector('.nav-tabs'); if(!nav)return;
+    menuItems=Array.isArray(items)?items:[];menuResolve(menuItems);
     nav.innerHTML='';
     // 工作台是首頁，不屬於工作目錄；從目錄中移除，改由左上角 ↩ 返回。
     items=(Array.isArray(items)?items:[]).filter(x=>String(x.action||'')!=='home' && String(x.label||'')!=='我的工作台');
@@ -96,15 +142,16 @@
             const box=btn.nextElementSibling;if(box)box.classList.toggle('is-collapsed',open);
           });
         }else{
-          btn.addEventListener('click',()=>emit(item));
+          btn.addEventListener('click',()=>emit(item));bindNewTab(btn,item);
         }
+        if(children.length&&['todo','community-info'].includes(String(item.action||'')))bindNewTab(btn,item);
         nav.appendChild(btn);
         if(children.length){
           const childBox=document.createElement('div');childBox.className='menu-children is-collapsed';nav.appendChild(childBox);
           for(const child of children){
             const cbtn=document.createElement('button');cbtn.type='button';cbtn.className='menu-child';cbtn.dataset.menuAction=child.action||'placeholder';cbtn.dataset.menuId=child.id;
             cbtn.innerHTML=`<span class="nav-icon">•</span><span class="nav-label">${esc(child.label||'未命名功能')}</span>`;
-            cbtn.addEventListener('click',()=>emit(child));
+            cbtn.addEventListener('click',()=>emit(child));bindNewTab(cbtn,child);
             childBox.appendChild(cbtn);
           }
         }

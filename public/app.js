@@ -66,6 +66,7 @@ function showHome(user){
   if(active){window.__activeCommunityId=Number(active.community_id);}
   else if(list.length===1){window.__activeCommunityId=Number(list[0].community_id);selectSiteContext(list[0].community_id);}
   loadHome(user);
+  window.__openDeepLink?.();
 }
 async function selectSiteContext(communityId){try{await api('/api/staff/select-community',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({community_id:Number(communityId)})});}catch(e){console.warn('site context select failed',e)}}
 function openSiteContextPicker(assignments){const u=window.__siteChooserUser||{site_assignments:assignments};showSiteChooser({...u,site_assignments:assignments},{cancelable:true});}

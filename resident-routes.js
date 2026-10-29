@@ -564,7 +564,7 @@ module.exports = function registerResidentRoutes(app, d) {
         if (!c) return res.status(400).json({ error: `「${x.name}」已不在住戶名冊中，請重新選擇` });
         if (!c.eligible) return res.status(400).json({ error: `${x.name}（${c.kind}）不能擔任委員：${c.reason}` });
       }
-      if (!x.fixed && !x.name) continue;
+      // 從缺的職務（沒有人選）也保留，方便之後遞補
       clean.push(x);
     }
     const before = profileOf(t.tid, t.cid); ensureProfile(t.tid, t.cid);
