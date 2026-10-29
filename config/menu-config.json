@@ -130,6 +130,14 @@
       "enabled": true
     },
     {
+      "id": "staff-bylaws",
+      "parentId": "staff-community-info",
+      "icon": "↳",
+      "label": "規約",
+      "action": "bylaws",
+      "enabled": true
+    },
+    {
       "id": "vendors",
       "parentId": null,
       "icon": "🏢",
