@@ -403,5 +403,5 @@ async function adoptPlatformResource(id){if(!confirm('要把這份平台公版�
 async function downloadCompanyResource(id){window.open(`/api/company/resources/${id}/download`,'_blank')}
 async function deleteCompanyResource(id){if(!confirm('確定刪除本公司的這份資源嗎？平台原始公版不會受影響。'))return;try{await api(`/api/company/resources/${id}`,{method:'DELETE'});await loadAll();alert('已刪除公司資源。')}catch(e){alert(e.message)}}
 
-// 面試電腦：這台電腦設定過公司代碼、且公司已開通面試功能時，登入頁右下角才顯示「面試人員填寫履歷」
-(function(){try{const c=localStorage.getItem('interviewCompany');const a=document.getElementById('interviewEntry');if(!c||!a)return;fetch(`/api/interview/${encodeURIComponent(c)}/meta`,{cache:'no-store'}).then(r=>{if(r.ok)a.style.display='';}).catch(()=>{});}catch{}})();
+// 內勤登入頁右下角固定顯示「面試登入」；登入後（主畫面）隱藏
+(function(){const a=document.getElementById('interviewEntry');const mv=document.getElementById('mainView');if(!a||!mv)return;const sync=()=>{a.style.display=getComputedStyle(mv).display==='none'?'':'none';};sync();new MutationObserver(sync).observe(mv,{attributes:true,attributeFilter:['style','class']});})();

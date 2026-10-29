@@ -150,7 +150,7 @@ module.exports = function registerDashboardRoutes(app, d) {
     }
 
     // ---------- 面試 ----------
-    if (interview) { const iv = safe(() => interview.dashboard(tid, u), null); if (iv && iv.open) cards.push({ id: 'interviews', size: 'sm', icon: '📝', title: '面試待審核', value: iv.open, sub: '位面試人員', tone: 'alert', action: { action: 'interviews', label: '面試管理' } }); }
+    if (interview) { const iv = safe(() => interview.dashboard(tid, u), null); if (iv && iv.open) cards.push({ id: 'interviews', size: 'sm', icon: '📝', title: '待我面試', value: iv.open, sub: iv.mine ? `其中 ${iv.mine} 位剛交給我，請盡快查看` : '位面試人員待處理', tone: 'alert', action: { action: 'interviews', label: '面試管理' } }); }
 
     // ---------- 公費款項：主管直接在首頁審核；會計總審核；待付款 ----------
     if (ap) {

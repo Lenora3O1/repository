@@ -43,6 +43,15 @@ const DEFAULT_SETTINGS = {
     { id: 'duty', name: '勤務', hint: '保全、機動保全等現場勤務工作', positions: ['日班保全', '夜班保全', '機動保全', '保全隊長'], reviewer_positions: ['duty_head', 'duty_day_manager', 'duty_night_manager'], licenses: ['保全人員職前訓練', '防火管理人員', '急救／CPR', '汽車駕照', '機車駕照'] },
   ],
   hr_view: true,
+  // 面試者一開始選的「應徵職務」：依職務把資料交給主管（primary）；主管 5 分鐘沒有回應自動轉給督導（backup）
+  options: [
+    { id: 'admin_head', name: '行政主管', category: 'admin', hint: '社區經理、總幹事、主任秘書等管理職', positions: ['社區經理／總幹事', '社區副理', '主任秘書'], primary: ['property_head'], backup: ['region'] },
+    { id: 'admin_secretary', name: '行政秘書', category: 'admin', hint: '櫃台秘書、財務秘書、行政助理', positions: ['櫃台秘書', '財務秘書', '行政助理'], primary: ['secretary_head'], backup: ['secretary_manager'] },
+    { id: 'duty', name: '勤務人員', category: 'duty', hint: '日班、夜班、機動保全', positions: ['日班保全', '夜班保全', '機動保全', '保全隊長'], primary: ['duty_head'], backup: ['duty_day_manager', 'duty_night_manager'] },
+  ],
+  escalate_minutes: 5,
+  // 中文打字測驗（照著打一段文字）
+  typing: { enabled: true, seconds: 180, text: '本社區管理中心服務時間為每日上午八時至晚上十時，住戶如有包裹代收、公共設施預約、報修或其他需要協助的事項，歡迎至一樓櫃台洽詢。為維護社區安全，訪客進出請先登記並出示證件，感謝各位住戶的配合與支持，祝您闔家平安、生活愉快。' },
   consent: '本公司為辦理人員招募，依個人資料保護法向您蒐集姓名、身分證字號、聯絡方式、學經歷等資料，僅用於本次招募評估。未錄取者的資料將於保存期限屆滿後刪除；您可以隨時要求查閱、更正或刪除。您可以拒絕提供，但可能影響招募評估。',
 };
 module.exports = { DEFAULT_BANK, DEFAULT_SETTINGS };
