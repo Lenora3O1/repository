@@ -125,7 +125,7 @@ ${SHEET_CSS('.ll-sheet')}
       <div class="ll-card ll-pv"><div class="ll-pv-nav"><b style="flex:1">預覽</b><button type="button" class="secondary" id="llPrev">‹</button><span id="llPg"></span><button type="button" class="secondary" id="llNext">›</button></div><div id="llPaper"></div></div></div></div>`;
     const F=host.querySelector('#llForm');const q=s=>host.querySelector(s);
     if(locked)F.querySelectorAll('input,textarea,select').forEach(i=>i.disabled=true);
-    function drawSender(){const S=L.sender;const miss=!L.id&&site?(d.profile_missing||[]):[];q('#llSender').innerHTML=`<div class="ll-ri"><div><b>${esc(senderName(S))||'<span class="ll-muted">（尚未填寫）</span>'}</b><div class="ll-muted">${esc(S.address)||'（尚未填寫地址）'}${S.phone?`　電話 ${esc(S.phone)}`:''}</div></div></div>${site&&!locked?`<div class="ll-muted">${miss.length?`<span style="color:#a33131">⚠ 社區資訊還沒有設定：${esc(miss.join('、'))}。</span>請按「編輯」補上，或請經理、秘書到「社區資訊」設定，之後就會自動帶入。`:'已依「社區資訊」自動帶入（管委會抬頭、當屆主任委員、代表地址與電話），內容不對可以按「編輯」修改。'}</div>`:''}`;}
+    function drawSender(){const S=L.sender;const miss=!L.id&&site?(d.profile_missing||[]):[];q('#llSender').innerHTML=`<div class="ll-ri"><div><b>${esc(senderName(S))||'<span class="ll-muted">（尚未填寫）</span>'}</b><div class="ll-muted">${esc(S.address)||'（尚未填寫地址）'}${S.phone?`　電話 ${esc(S.phone)}`:''}</div></div></div>${site&&!locked?`<div class="ll-muted">${miss.length?`<span style="color:#a33131">⚠ 社區資訊還沒有設定：${esc(miss.join('、'))}。</span>請按「編輯」補上，或請經理、秘書到「社區資訊」（地址、電話）、「管理委員會 → 本屆委員」（主任委員）設定，之後就會自動帶入。`:'已自動帶入：管委會抬頭與當屆主任委員（本屆委員）、社區地址與電話（社區資訊）。內容不對可以按「編輯」修改。'}</div>`:''}`;}
     function drawRcps(){
       for(const [sel,cc] of [['#llMain',false],['#llCc',true]]){
         const list=L.recipients.map((r,i)=>({r,i})).filter(x=>!!x.r.cc===cc);

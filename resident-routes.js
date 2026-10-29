@@ -101,13 +101,31 @@ module.exports = function registerResidentRoutes(app, d) {
     '離職、停用帳號或調離本社區後，將立即無法再查看任何住戶資料。',
     '本系統服務商不查看、不取得各公司與各社區的住戶資料；因使用者個人行為造成的資料外洩，由行為人自行負責。',
   ];
-  // 社區資訊：管理委員會抬頭、社區代表電話、當屆主任委員（存證信函、公文自動帶入）
+  // 社區資訊（基本資料）與管理委員會（本屆委員）：存證信函、公告會自動帶入
   db.exec(`CREATE TABLE IF NOT EXISTS community_profiles (tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, committee_name TEXT DEFAULT '', phone TEXT DEFAULT '', chair_name TEXT DEFAULT '', term_start TEXT DEFAULT '', term_end TEXT DEFAULT '', tax_id TEXT DEFAULT '', updated_by TEXT DEFAULT '', updated_at TEXT, PRIMARY KEY (tenant_id, community_id))`);
+  { const cols = db.prepare('PRAGMA table_info(community_profiles)').all().map(c => c.name);
+    for (const [c, def] of [['fax', "TEXT DEFAULT ''"], ['email', "TEXT DEFAULT ''"], ['units_total', 'INTEGER'], ['floors_up', 'INTEGER'], ['floors_down', 'INTEGER'], ['car_spaces', 'INTEGER'], ['moto_spaces', 'INTEGER'], ['tenant_eligible', 'INTEGER DEFAULT 0'], ['landlord_eligible', 'INTEGER DEFAULT 1'], ['members_json', "TEXT DEFAULT '[]'"], ['committee_updated_by', "TEXT DEFAULT ''"], ['committee_updated_at', 'TEXT']])
+      if (!cols.includes(c)) db.exec(`ALTER TABLE community_profiles ADD COLUMN ${c} ${def}`); }
+  const FIXED_ROLES = ['主任委員', '監察委員', '財務委員'];
+  function membersOf(p) {
+    let list = []; try { list = JSON.parse(p.members_json || '[]'); } catch {}
+    if (!Array.isArray(list)) list = [];
+    // 三個固定職務一定在最前面（舊資料只有主委姓名時帶入）
+    const fixed = FIXED_ROLES.map(role => { const m = list.find(x => x.fixed && x.role === role) || (role === '主任委員' && p.chair_name ? { role, name: p.chair_name, source: 'manual' } : { role, name: '' }); return { ...m, role, fixed: true }; });
+    return [...fixed, ...list.filter(x => !x.fixed)];
+  }
   function profileOf(tid, cid) {
     const c = db.prepare('SELECT id,name,COALESCE(main_address,\'\') AS main_address FROM communities WHERE id=? AND tenant_id=?').get(cid, tid) || {};
     const p = db.prepare('SELECT * FROM community_profiles WHERE tenant_id=? AND community_id=?').get(tid, cid) || {};
-    return { community_id: cid, name: c.name || '', main_address: c.main_address || '', committee_name: p.committee_name || '', committee_title: p.committee_name || (c.name ? `${c.name}管理委員會` : ''), phone: p.phone || '', chair_name: p.chair_name || '', term_start: p.term_start || '', term_end: p.term_end || '', tax_id: p.tax_id || '', updated_by: p.updated_by || '', updated_at: p.updated_at || '' };
+    const members = membersOf(p); const chair = members.find(m => m.role === '主任委員')?.name || '';
+    const layoutUnits = (() => { try { return CL.units(tid, cid).length; } catch { return 0; } })();
+    return { community_id: cid, name: c.name || '', main_address: c.main_address || '', phone: p.phone || '', fax: p.fax || '', email: p.email || '',
+      units_total: p.units_total ?? null, layout_units: layoutUnits, floors_up: p.floors_up ?? null, floors_down: p.floors_down ?? null, car_spaces: p.car_spaces ?? null, moto_spaces: p.moto_spaces ?? null,
+      tenant_eligible: !!p.tenant_eligible, landlord_eligible: p.landlord_eligible === undefined || p.landlord_eligible === null ? true : !!p.landlord_eligible,
+      committee_name: p.committee_name || '', committee_title: p.committee_name || (c.name ? `${c.name}管理委員會` : ''), chair_name: chair, members, term_start: p.term_start || '', term_end: p.term_end || '', tax_id: p.tax_id || '',
+      updated_by: p.updated_by || '', updated_at: p.updated_at || '', committee_updated_by: p.committee_updated_by || '', committee_updated_at: p.committee_updated_at || '' };
   }
+  function ensureProfile(tid, cid) { db.prepare('INSERT OR IGNORE INTO community_profiles (tenant_id,community_id) VALUES (?,?)').run(tid, cid); }
   const ackOf = (tid, uid) => db.prepare('SELECT at FROM resident_acks WHERE tenant_id=? AND staff_id=? AND version=?').get(tid, uid, NOTICE_VERSION) || null;
 
   // ---------- 共用 ----------
@@ -477,17 +495,86 @@ module.exports = function registerResidentRoutes(app, d) {
     res.json({ community: c, profile: profileOf(t.tid, t.cid), layout: CL.layout(t.tid, t.cid), formats: Object.fromEntries(Object.entries(CL.FORMATS).map(([k, v]) => [k, v.label])), counts: per, total: U.length, can_edit: residentCanEdit(t.u),
       sample: U.slice(0, 3).concat(U.slice(-2)).map(u => ({ code: u.code, address: u.address })) });
   });
+  // 社區基本資料（經理、秘書）
   app.put('/api/staff/residents/profile', requireStaffFiller, (req, res) => {
     req.body = { ...(req.body || {}), category: 'residents-contact' }; const t = ctx(req, res, { edit: true }); if (!t) return;
-    const b = req.body; const s = (v, m) => String(v ?? '').trim().slice(0, m); const dt = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : '';
-    const v = { committee_name: s(b.committee_name, 60), phone: s(b.phone, 40), chair_name: s(b.chair_name, 40), term_start: dt(b.term_start), term_end: dt(b.term_end), tax_id: s(b.tax_id, 8) };
-    if (v.tax_id && !/^\d{8}$/.test(v.tax_id)) return res.status(400).json({ error: '統一編號是 8 位數字' });
-    if (v.term_start && v.term_end && v.term_end < v.term_start) return res.status(400).json({ error: '任期結束日不能早於開始日' });
-    const before = profileOf(t.tid, t.cid);
-    db.prepare('INSERT INTO community_profiles (tenant_id,community_id,committee_name,phone,chair_name,term_start,term_end,tax_id,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id) DO UPDATE SET committee_name=excluded.committee_name,phone=excluded.phone,chair_name=excluded.chair_name,term_start=excluded.term_start,term_end=excluded.term_end,tax_id=excluded.tax_id,updated_by=excluded.updated_by,updated_at=excluded.updated_at')
-      .run(t.tid, t.cid, v.committee_name, v.phone, v.chair_name, v.term_start, v.term_end, v.tax_id, t.by, now());
-    const ch = [['committee_name', '管委會抬頭'], ['phone', '代表電話'], ['chair_name', '主任委員'], ['term_start', '任期起'], ['term_end', '任期迄'], ['tax_id', '統一編號']].filter(([k]) => String(before[k] || '') !== String(v[k] || ''));
-    if (ch.length) log(t, { category: 'residents-contact', action: 'settings', summary: `更新社區資訊：${ch.map(([k, n]) => k === 'chair_name' ? `主任委員 ${before.chair_name || '—'} → ${v.chair_name || '—'}` : n).join('、')}` });
+    const before0 = profileOf(t.tid, t.cid); const b = { ...before0, ...Object.fromEntries(Object.entries(req.body).filter(([, x]) => x !== undefined)) }; const s = (v, m) => String(v ?? '').trim().slice(0, m);
+    const n = (v, max) => { if (v === '' || v === null || v === undefined) return null; const x = Math.round(Number(v)); if (!Number.isFinite(x) || x < 0 || x > max) throw new Error('數量請填 0 以上的整數'); return x; };
+    let v; try { v = { main_address: s(b.main_address, 120), phone: s(b.phone, 40), fax: s(b.fax, 40), email: s(b.email, 120), units_total: n(b.units_total, 100000), floors_up: n(b.floors_up, 200), floors_down: n(b.floors_down, 30), car_spaces: n(b.car_spaces, 100000), moto_spaces: n(b.moto_spaces, 100000), tenant_eligible: b.tenant_eligible ? 1 : 0, landlord_eligible: b.landlord_eligible === false || b.landlord_eligible === 0 ? 0 : 1 }; }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) return res.status(400).json({ error: '電子信箱格式不正確' });
+    const before = profileOf(t.tid, t.cid); ensureProfile(t.tid, t.cid);
+    db.prepare('UPDATE community_profiles SET phone=?,fax=?,email=?,units_total=?,floors_up=?,floors_down=?,car_spaces=?,moto_spaces=?,tenant_eligible=?,landlord_eligible=?,updated_by=?,updated_at=? WHERE tenant_id=? AND community_id=?')
+      .run(v.phone, v.fax, v.email, v.units_total, v.floors_up, v.floors_down, v.car_spaces, v.moto_spaces, v.tenant_eligible, v.landlord_eligible, t.by, now(), t.tid, t.cid);
+    if (req.body.main_address !== undefined) db.prepare('UPDATE communities SET main_address=?,updated_at=? WHERE id=? AND tenant_id=?').run(v.main_address, now(), t.cid, t.tid);
+    const names = { main_address: '地址', phone: '電話', fax: '傳真', email: '電子信箱', units_total: '總戶數', floors_up: '地上樓層', floors_down: '地下樓層', car_spaces: '汽車位', moto_spaces: '機車位', tenant_eligible: '承租人擔任委員', landlord_eligible: '出租戶擔任委員' };
+    const ch = Object.keys(names).filter(k => k !== 'main_address' || req.body.main_address !== undefined).filter(k => String(before[k] ?? '') !== String(typeof before[k] === 'boolean' ? !!v[k] : (v[k] ?? '')));
+    if (ch.length) log(t, { category: 'residents-contact', action: 'settings', summary: `更新社區資訊：${ch.map(k => names[k]).join('、')}` });
+    res.json({ success: true, profile: profileOf(t.tid, t.cid) });
+  });
+  // ---------- 管理委員會：本屆委員 ----------
+  function committeeCtx(req, res, edit) {
+    const c = residentActiveCommunity(req); if (!c) { res.status(400).json({ error: '請先選擇目前要操作的案場' }); return null; }
+    const u = getUser(req);
+    if (!u || !u.is_active || u.role === 'company_admin' || ['left', 'blacklist', 'disabled'].includes(String(u.person_status || ''))) { res.status(403).json({ error: '這個帳號沒有權限' }); return null; }
+    if (d.staffMenuAllows && !d.staffMenuAllows(u, 'committee-current')) { res.status(403).json({ error: '目前帳號沒有開通「本屆委員」，請洽公司內勤' }); return null; }
+    if (edit && !residentCanEdit(u)) { res.status(403).json({ error: '本屆委員由經理、秘書維護' }); return null; }
+    return { tid: tenantId(req), cid: c.id, community: c, u, by: u.name || u.employee_id || '', category: 'residents-contact' };
+  }
+  // 可擔任委員的住戶：區分所有權人（自住／出租）、承租人；依社區資訊的設定判斷能不能選
+  function candidates(tid, cid) {
+    const P = profileOf(tid, cid); const today = todayTW(); const UM = unitMap(tid, cid);
+    const leases = records(tid, cid, 'residents-tenants', { includeEnded: false }).filter(r => ['active', 'expiring', 'unset'].includes(leaseState(r, today)));
+    const rented = new Set(leases.map(unitKey).filter(Boolean));
+    const label = r => { const u = UM.get(r.unit); return u ? u.code : unitLabel(r); };
+    const out = [];
+    for (const o of records(tid, cid, 'residents-owners', { includeEnded: false })) for (const name of String(o.name || '').split(/[、,，;；]/).map(x => x.trim()).filter(Boolean)) {
+      const isRented = rented.has(unitKey(o));
+      out.push({ source: 'owner', ref_id: o.id, unit: label(o), name, phone: String(o.phone || '').split(/[、,，]/)[0].trim(), kind: isRented ? '所有權人（出租中）' : '所有權人', eligible: isRented ? P.landlord_eligible : true, reason: isRented && !P.landlord_eligible ? '社區設定：出租戶不能擔任委員' : '' });
+    }
+    for (const r of leases) for (const name of String(r.name || '').split(/[、,，;；]/).map(x => x.trim()).filter(Boolean))
+      out.push({ source: 'tenant', ref_id: r.id, unit: label(r), name, phone: String(r.phone || '').split(/[、,，]/)[0].trim(), kind: '承租人', eligible: P.tenant_eligible, reason: P.tenant_eligible ? '' : '社區設定：承租人不能擔任委員' });
+    return out.sort((a, b) => String(a.unit).localeCompare(String(b.unit), 'zh-Hant', { numeric: true }));
+  }
+  app.get('/api/staff/committee', requireStaffFiller, (req, res) => {
+    const t = committeeCtx(req, res, false); if (!t) return;
+    res.set('Cache-Control', 'no-store'); res.json({ community: t.community, profile: profileOf(t.tid, t.cid), fixed_roles: FIXED_ROLES, can_edit: residentCanEdit(t.u) });
+  });
+  app.get('/api/staff/committee/candidates', requireStaffFiller, (req, res) => {
+    const t = committeeCtx(req, res, true); if (!t) return; res.set('Cache-Control', 'no-store');
+    if (!ackOf(t.tid, t.u.id)) return res.json({ ack_required: true, rows: [] });
+    res.json({ rows: candidates(t.tid, t.cid) });
+  });
+  app.put('/api/staff/committee', requireStaffFiller, (req, res) => {
+    const t = committeeCtx(req, res, true); if (!t) return;
+    const prev = profileOf(t.tid, t.cid); const b = { committee_name: prev.committee_name, term_start: prev.term_start, term_end: prev.term_end, tax_id: prev.tax_id, members: prev.members, ...Object.fromEntries(Object.entries(req.body || {}).filter(([, x]) => x !== undefined)) }; const s = (v, m) => String(v ?? '').trim().slice(0, m); const dt = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : '';
+    const head = { committee_name: s(b.committee_name, 60), term_start: dt(b.term_start), term_end: dt(b.term_end), tax_id: s(b.tax_id, 8) };
+    if (head.tax_id && !/^\d{8}$/.test(head.tax_id)) return res.status(400).json({ error: '統一編號是 8 位數字' });
+    if (head.term_start && head.term_end && head.term_end < head.term_start) return res.status(400).json({ error: '任期結束日不能早於開始日' });
+    const raw = Array.isArray(b.members) ? b.members.slice(0, 60) : [];
+    const cand = new Map(candidates(t.tid, t.cid).map(c => [`${c.source}|${c.ref_id}|${c.name}`, c]));
+    const members = [];
+    for (const role of FIXED_ROLES) { const m = raw.find(x => x?.fixed && x.role === role) || { role }; members.push({ ...m, role, fixed: true }); }
+    for (const m of raw) if (m && !m.fixed) { const role = s(m.role, 20); if (!role) return res.status(400).json({ error: '請填寫職稱' }); members.push({ ...m, role, fixed: false }); }
+    const clean = [];
+    for (const m of members) {
+      const x = { role: m.role, fixed: m.fixed, name: s(m.name, 40), unit: s(m.unit, 40), phone: s(m.phone, 40), source: ['owner', 'tenant', 'manual'].includes(m.source) ? m.source : 'manual', ref_id: Number(m.ref_id) || null, note: s(m.note, 100) };
+      if (x.source !== 'manual' && x.name) {
+        const c = cand.get(`${x.source}|${x.ref_id}|${x.name}`);
+        if (!c) return res.status(400).json({ error: `「${x.name}」已不在住戶名冊中，請重新選擇` });
+        if (!c.eligible) return res.status(400).json({ error: `${x.name}（${c.kind}）不能擔任委員：${c.reason}` });
+      }
+      if (!x.fixed && !x.name) continue;
+      clean.push(x);
+    }
+    const before = profileOf(t.tid, t.cid); ensureProfile(t.tid, t.cid);
+    const chair = clean.find(m => m.role === '主任委員')?.name || '';
+    db.prepare('UPDATE community_profiles SET committee_name=?,term_start=?,term_end=?,tax_id=?,members_json=?,chair_name=?,committee_updated_by=?,committee_updated_at=? WHERE tenant_id=? AND community_id=?')
+      .run(head.committee_name, head.term_start, head.term_end, head.tax_id, JSON.stringify(clean), chair, t.by, now(), t.tid, t.cid);
+    const diff = [];
+    for (const m of clean) { const o = before.members.find(x => x.role === m.role && (m.fixed ? x.fixed : x.name === m.name)); if (m.fixed && (o?.name || '') !== m.name) diff.push(`${m.role} ${o?.name || '—'} → ${m.name || '—'}`); else if (!m.fixed && !o) diff.push(`新增${m.role} ${m.name}`); }
+    for (const o of before.members.filter(x => !x.fixed)) if (!clean.some(m => !m.fixed && m.role === o.role && m.name === o.name)) diff.push(`移除${o.role} ${o.name}`);
+    log(t, { category: 'residents-contact', action: 'settings', summary: `更新本屆委員${diff.length ? `：${diff.slice(0, 6).join('；')}` : ''}` });
     res.json({ success: true, profile: profileOf(t.tid, t.cid) });
   });
   app.put('/api/staff/residents/layout', requireStaffFiller, (req, res) => {
