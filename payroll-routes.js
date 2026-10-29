@@ -48,6 +48,9 @@ module.exports = function registerPayrollRoutes(app, d) {
     for (const [c, def] of [['trial_salary', 'INTEGER DEFAULT 0'], ['pay_method', "TEXT DEFAULT 'transfer'"], ['bank_name', "TEXT DEFAULT ''"], ['annual_used', 'REAL DEFAULT 0'], ['deductions_json', "TEXT DEFAULT '[]'"], ['birthday', "TEXT DEFAULT ''"], ['mobile', "TEXT DEFAULT ''"], ['address', "TEXT DEFAULT ''"], ['emergency_name', "TEXT DEFAULT ''"], ['emergency_relation', "TEXT DEFAULT ''"], ['emergency_phone', "TEXT DEFAULT ''"], ['insured_date', "TEXT DEFAULT ''"], ['salary_note', "TEXT DEFAULT ''"], ['hr_updated_at', 'TEXT'], ['hr_updated_by', "TEXT DEFAULT ''"], ['salary_updated_at', 'TEXT'], ['salary_updated_by', "TEXT DEFAULT ''"], ['gender', "TEXT DEFAULT ''"]])
       if (!cols.includes(c)) db.exec(`ALTER TABLE hr_profiles ADD COLUMN ${c} ${def}`); }
 
+  // 公司保險費（團險、誠實險、意外險等）：公司設定一次，新人到職自動套用，個別人員可以排除
+  { const cols = db.prepare('PRAGMA table_info(payroll_settings)').all().map(c => c.name); if (!cols.includes('company_ins_json')) db.exec("ALTER TABLE payroll_settings ADD COLUMN company_ins_json TEXT DEFAULT '[]'"); }
+  { const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name); if (!cols.includes('ins_exclude_json')) db.exec("ALTER TABLE hr_profiles ADD COLUMN ins_exclude_json TEXT DEFAULT '[]'"); }
   { const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name);
     for (const [c, def] of [['id_type', "TEXT DEFAULT 'national'"], ['id_no', "TEXT DEFAULT ''"], ['nationality', "TEXT DEFAULT ''"]]) if (!cols.includes(c)) db.exec(`ALTER TABLE hr_profiles ADD COLUMN ${c} ${def}`); }
   // 身分證字號／居留證號碼檢查（內政部檢查碼）：身分證 A123456789；新式居留證 A800000014（第 2 碼 8、9）；舊式居留證 AB12345678（第 2 碼 A～D）
@@ -110,6 +113,15 @@ module.exports = function registerPayrollRoutes(app, d) {
   const guard = check => (req, res, next) => { const u = getUser(req); if (!check(u)) return bad(res, '您沒有這項功能的權限（需要人事或會計權限）', 403); next(); };
   const wrap = fn => (req, res) => { try { const r = fn(req, res); if (r && r.catch) r.catch(e => { if (!res.headersSent) bad(res, e.message || '操作失敗', e.status || 400); }); } catch (e) { if (!res.headersSent) bad(res, e.message || '操作失敗', e.status || 400); } };
 
+  // ---------- 公司保險費 ----------
+  const cleanIns = list => (Array.isArray(list) ? list : []).map(x => ({ id: str(x?.id, 20).replace(/[^\w-]/g, '') || Math.random().toString(36).slice(2, 10), name: str(x?.name, 20), employee: Math.max(0, int(x?.employee)), company: Math.max(0, int(x?.company)) })).filter(x => x.name && (x.employee || x.company)).slice(0, 10);
+  function companyIns(tid) { try { return cleanIns(parse(db.prepare('SELECT company_ins_json FROM payroll_settings WHERE tenant_id=?').get(tid)?.company_ins_json, [])); } catch { return []; } }
+  // 某人某月適用的公司保險費：到職月起套用；排除的項目不扣
+  function insFor(tid, prof, month) {
+    if (prof.hire_date && prof.hire_date > `${month}-${String(daysIn(month)).padStart(2, '0')}`) return [];
+    const ex = new Set(prof.ins_exclude || []);
+    return companyIns(tid).filter(x => !ex.has(x.id)).map(x => ({ id: x.id, name: x.name, employee: x.employee, company: x.company }));
+  }
   function occupationalRate(tid, t) { const r = db.prepare('SELECT occupational_rate FROM payroll_settings WHERE tenant_id=?').get(tid); return r && r.occupational_rate != null ? Number(r.occupational_rate) : t.rates.occupational; }
   function staffList(tid) {
     return db.prepare(`SELECT id,tenant_id,employee_id,name,role,position,job_level,work_type,is_active,COALESCE(person_status,'active') person_status FROM staff_users WHERE tenant_id=? AND is_active=1 AND COALESCE(person_status,'active')='active' ORDER BY role='company_admin' DESC,employee_id`).all(tid);
@@ -133,7 +145,7 @@ module.exports = function registerPayrollRoutes(app, d) {
       health_dependents: int(p.health_dependents), pension_self_rate: Number(p.pension_self_rate) || 0, bank_account: p.bank_account || '', note: p.note || '',
       configured: !!r && int(p.base_salary) > 0, updated_at: p.updated_at || '', updated_by: p.updated_by || '',
       tenant_id: u.tenant_id, gender: ['F', 'M'].includes(p.gender) ? p.gender : '',
-      trial_salary: int(p.trial_salary), deductions: parse(p.deductions_json, []), salary_note: p.salary_note || '',
+      trial_salary: int(p.trial_salary), deductions: parse(p.deductions_json, []), ins_exclude: parse(p.ins_exclude_json, []), salary_note: p.salary_note || '',
       pay_method: p.pay_method === 'cash' ? 'cash' : 'transfer', bank_name: p.bank_name || '', annual_used: Number(p.annual_used) || 0,
       id_type: ['national', 'arc', 'passport'].includes(p.id_type) ? p.id_type : 'national', id_no: p.id_no || '', nationality: p.nationality || '', birthday: p.birthday || '', mobile: p.mobile || '', address: p.address || '', emergency_name: p.emergency_name || '', emergency_relation: p.emergency_relation || '', emergency_phone: p.emergency_phone || '', insured_date: p.insured_date || '',
       hr_updated_at: p.hr_updated_at || '', hr_updated_by: p.hr_updated_by || '', salary_updated_at: p.salary_updated_at || '', salary_updated_by: p.salary_updated_by || '',
@@ -162,10 +174,11 @@ module.exports = function registerPayrollRoutes(app, d) {
     const gross = int(data.base) + allowances + int(data.overtime) + int(data.other_add);
     const ee = data.ins?.employee || {};
     const deductionsTotal = (data.deductions || []).reduce((a, x) => a + int(x.amount), 0);
-    const deduct = int(ee.labor) + int(ee.health) + int(ee.pension_self) + int(data.leave_deduct) + int(data.attendance_deduct) + int(data.advance_deduct) + deductionsTotal + int(data.other_deduct);
+    const insEe = (data.company_ins || []).reduce((a, x) => a + int(x.employee), 0), insEr = (data.company_ins || []).reduce((a, x) => a + int(x.company), 0);
+    const deduct = int(ee.labor) + int(ee.health) + int(ee.pension_self) + insEe + int(data.leave_deduct) + int(data.attendance_deduct) + int(data.advance_deduct) + deductionsTotal + int(data.other_deduct);
     const er = data.ins?.employer || {};
-    const employer = int(er.labor) + int(er.occupational) + int(er.health) + int(er.pension);
-    return { ...data, deductions_total: deductionsTotal, gross, deduct_total: deduct, net: gross - deduct, employer_total: employer, employer_cost: gross + employer };
+    const employer = int(er.labor) + int(er.occupational) + int(er.health) + int(er.pension) + insEr;
+    return { ...data, company_ins_ee: insEe, company_ins_er: insEr, deductions_total: deductionsTotal, gross, deduct_total: deduct, net: gross - deduct, employer_total: employer, employer_cost: gross + employer };
   }
   function buildItem(tid, run, u, prof, t, prev) {
     const keep = prev ? parse(prev.data_json, {}) : {};
@@ -185,6 +198,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     const data = {
       base: baseNow, base_manual: !!keep.base_manual, base_note: keep.base_manual ? '本月手動調整' : bm.base_note,
       deductions: deductionsFor(prof.deductions, run.month),
+      company_ins: insFor(tid, prof, run.month),
       allowances: prof.allowances,
       overtime: otAuto ? int(L.overtime) : int(keep.overtime), overtime_manual: !!otManual, overtime_autocalc: otAuto, overtime_hours: L ? L.overtime_hours : 0, overtime_mode: L?.overtime_mode || 'pay', overtime_label: L?.overtime_label || '加班費', overtime_lines: L ? (L.overtime_lines || []) : [], overtime_comp_hours: L ? (L.overtime_comp_hours || 0) : 0,
       leave_deduct: L && !leaveManual ? int(L.leave_deduct) : int(keep.leave_deduct), leave_manual: !!leaveManual, leave_auto: !!L && !leaveManual, leave_lines: L ? L.lines : [],
@@ -229,7 +243,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     const sum = k => items.reduce((a, x) => a + int(typeof k === 'function' ? k(x) : x[k]), 0);
     const totals = {
       base: sum('base'), allowances: sum(x => (x.allowances || []).reduce((a, y) => a + int(y.amount), 0)), overtime: sum('overtime'), other_add: sum('other_add'), gross: sum('gross'),
-      labor_ee: sum(x => x.ins?.employee?.labor), health_ee: sum(x => x.ins?.employee?.health), pension_self: sum(x => x.ins?.employee?.pension_self),
+      labor_ee: sum(x => x.ins?.employee?.labor), health_ee: sum(x => x.ins?.employee?.health), pension_self: sum(x => x.ins?.employee?.pension_self), company_ins_ee: sum('company_ins_ee'), company_ins_er: sum('company_ins_er'),
       leave_deduct: sum('leave_deduct'), attendance_deduct: sum('attendance_deduct'), advance_deduct: sum('advance_deduct'), deductions: sum('deductions_total'), other_deduct: sum('other_deduct'), deduct_total: sum('deduct_total'), net: sum('net'),
       labor_er: sum(x => x.ins?.employer?.labor), occupational_er: sum(x => x.ins?.employer?.occupational), health_er: sum(x => x.ins?.employer?.health), pension_er: sum(x => x.ins?.employer?.pension),
       employer_total: sum('employer_total'), employer_cost: sum('employer_cost'),
@@ -302,12 +316,13 @@ module.exports = function registerPayrollRoutes(app, d) {
       payroll_enabled: p.payroll_enabled, base_salary: p.base_salary, trial_salary: p.trial_salary, allowances: p.allowances, monthly_salary: p.monthly_salary, trial_monthly: trialMonthly,
       deductions: p.deductions, deductions_now: deductionsFor(p.deductions, now_), auto_grade: p.auto_grade, labor_grade: cur.labor_grade, occupational_grade: cur.occupational_grade, health_grade: cur.health_grade, pension_grade: cur.pension_grade,
       pension_self_rate: p.pension_self_rate, pay_method: p.pay_method, bank_name: p.bank_name, bank_account: p.bank_account, insured_date: p.insured_date, salary_note: p.salary_note, configured: p.configured, salary_updated_at: p.salary_updated_at, salary_updated_by: p.salary_updated_by,
+      ins_exclude: p.ins_exclude || [], company_ins_now: insFor(tid, p, now_),
       insurance: insuranceFor(cur, t, tid) };
   };
   app.get(`${C}/payroll/salaries`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     const tid = tenantId(req); const t = tables.forMonth(monthTW());
     res.set('Cache-Control', 'no-store');
-    res.json({ salaries: staffList(tid).map(u => salaryView(profileOut(u, profileRow(tid, u.id), t), t, tid)), table: tableOut(tid, t), month: monthTW() });
+    res.json({ salaries: staffList(tid).map(u => salaryView(profileOut(u, profileRow(tid, u.id), t), t, tid)), table: tableOut(tid, t), month: monthTW(), company_ins: companyIns(tid) });
   }));
   app.put(`${C}/payroll/salaries/:staffId`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     const tid = tenantId(req); const sid = Number(req.params.staffId); const u = findStaff(tid, sid); if (!u) return bad(res, '找不到人員', 404);
@@ -317,6 +332,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     // 投保級距、薪轉帳號屬於人事資料，這裡不修改
     db.prepare('UPDATE hr_profiles SET payroll_enabled=?,base_salary=?,trial_salary=?,allowances_json=?,deductions_json=?,pension_self_rate=?,salary_note=?,salary_updated_at=?,salary_updated_by=?,updated_at=? WHERE tenant_id=? AND staff_id=?')
       .run(b.payroll_enabled === false ? 0 : 1, Math.max(0, int(b.base_salary)), Math.max(0, int(b.trial_salary)), JSON.stringify(allowances), JSON.stringify(cleanDeductions(b.deductions)), Math.max(0, Math.min(Number(b.pension_self_rate) || 0, 6)), str(b.salary_note, 500), now(), by(getUser(req)), now(), tid, sid);
+    if (Array.isArray(b.ins_exclude)) { const ids = new Set(companyIns(tid).map(x => x.id)); db.prepare('UPDATE hr_profiles SET ins_exclude_json=? WHERE tenant_id=? AND staff_id=?').run(JSON.stringify(b.ins_exclude.map(String).filter(x => ids.has(x))), tid, sid); }
     try { db.prepare('UPDATE staff_users SET formal_salary=? WHERE id=?').run(String(int(b.base_salary) || ''), sid); } catch {}
     res.json({ success: true, salary: salaryView(profileOut(u, profileRow(tid, sid), t), t, tid) });
   }));
@@ -326,6 +342,12 @@ module.exports = function registerPayrollRoutes(app, d) {
     ensureRow(tid, sid);
     db.prepare('UPDATE hr_profiles SET deductions_json=?,salary_updated_at=?,salary_updated_by=? WHERE tenant_id=? AND staff_id=?').run(JSON.stringify(cleanDeductions(req.body?.deductions)), now(), by(getUser(req)), tid, sid);
     res.json({ success: true });
+  }));
+  // 公司保險費設定（項目、員工負擔、公司負擔）
+  app.put(`${C}/payroll/company-insurance`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
+    const list = cleanIns(req.body?.items); const tid = tenantId(req);
+    db.prepare('INSERT INTO payroll_settings (tenant_id,company_ins_json,updated_at) VALUES (?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET company_ins_json=excluded.company_ins_json,updated_at=excluded.updated_at').run(tid, JSON.stringify(list), now());
+    res.json({ success: true, items: list });
   }));
   app.put(`${C}/payroll/settings`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     const r = Number(req.body?.occupational_rate); if (!(r >= 0 && r < 0.05)) return bad(res, '職災費率請輸入 0～5% 之間');
@@ -453,9 +475,9 @@ module.exports = function registerPayrollRoutes(app, d) {
   // 匯出 Excel（給會計、老闆）
   app.get(`${C}/payroll/runs/:month/export`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     const run = runOut(db.prepare('SELECT * FROM payroll_runs WHERE tenant_id=? AND month=?').get(tenantId(req), req.params.month)); if (!run) return bad(res, '找不到', 404);
-    const head = ['員編', '姓名', '職務', '底薪', '固定加給', '加班費', '其他加項', '應發合計', '勞保自付', '健保自付', '勞退自提', '請假扣款', '全勤扣減', '借資扣回', '代扣款', '其他扣項', '應扣合計', '實發金額', '勞保(公司)', '職災(公司)', '健保(公司)', '勞退6%(公司)', '公司負擔合計', '人事成本', '勞保級距', '健保級距', '勞退級距', '健保眷屬', '備註'];
-    const rows = run.items.map(x => [x.employee_id, x.name, x.position, x.base, (x.allowances || []).reduce((a, y) => a + int(y.amount), 0), x.overtime, x.other_add, x.gross, x.ins?.employee?.labor, x.ins?.employee?.health, x.ins?.employee?.pension_self, x.leave_deduct, x.attendance_deduct || 0, x.advance_deduct, x.deductions_total, x.other_deduct, x.deduct_total, x.net, x.ins?.employer?.labor, x.ins?.employer?.occupational, x.ins?.employer?.health, x.ins?.employer?.pension, x.employer_total, x.employer_cost, x.ins?.grades?.labor, x.ins?.grades?.health, x.ins?.grades?.pension, x.ins?.health_dependents, [x.base_note, ...(x.leave_lines || []).map(l => `${l.label} ${l.length}`), ...(x.deductions || []).map(d => `${d.name}${d.period}`), x.other_add_note, x.other_deduct_note, x.note].filter(Boolean).join('；')]);
-    const T = run.totals; rows.push(['合計', '', '', T.base, T.allowances, T.overtime, T.other_add, T.gross, T.labor_ee, T.health_ee, T.pension_self, T.leave_deduct, T.attendance_deduct, T.advance_deduct, T.deductions, T.other_deduct, T.deduct_total, T.net, T.labor_er, T.occupational_er, T.health_er, T.pension_er, T.employer_total, T.employer_cost]);
+    const head = ['員編', '姓名', '職務', '底薪', '固定加給', '加班費', '其他加項', '應發合計', '勞保自付', '健保自付', '勞退自提', '保險費（員工）', '請假扣款', '全勤扣減', '借資扣回', '代扣款', '其他扣項', '應扣合計', '實發金額', '勞保(公司)', '職災(公司)', '健保(公司)', '勞退6%(公司)', '保險費(公司)', '公司負擔合計', '人事成本', '勞保級距', '健保級距', '勞退級距', '健保眷屬', '備註'];
+    const rows = run.items.map(x => [x.employee_id, x.name, x.position, x.base, (x.allowances || []).reduce((a, y) => a + int(y.amount), 0), x.overtime, x.other_add, x.gross, x.ins?.employee?.labor, x.ins?.employee?.health, x.ins?.employee?.pension_self, x.company_ins_ee || 0, x.leave_deduct, x.attendance_deduct || 0, x.advance_deduct, x.deductions_total, x.other_deduct, x.deduct_total, x.net, x.ins?.employer?.labor, x.ins?.employer?.occupational, x.ins?.employer?.health, x.ins?.employer?.pension, x.company_ins_er || 0, x.employer_total, x.employer_cost, x.ins?.grades?.labor, x.ins?.grades?.health, x.ins?.grades?.pension, x.ins?.health_dependents, [x.base_note, ...(x.leave_lines || []).map(l => `${l.label} ${l.length}`), ...(x.deductions || []).map(d => `${d.name}${d.period}`), x.other_add_note, x.other_deduct_note, x.note].filter(Boolean).join('；')]);
+    const T = run.totals; rows.push(['合計', '', '', T.base, T.allowances, T.overtime, T.other_add, T.gross, T.labor_ee, T.health_ee, T.pension_self, T.company_ins_ee, T.leave_deduct, T.attendance_deduct, T.advance_deduct, T.deductions, T.other_deduct, T.deduct_total, T.net, T.labor_er, T.occupational_er, T.health_er, T.pension_er, T.company_ins_er, T.employer_total, T.employer_cost]);
     const ws = XLSX.utils.aoa_to_sheet([[`人員薪資統計表 ${monthLabel(run.month)}（${run.status === 'published' ? '已發布' : '草稿'}）`], head, ...rows]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, run.month);
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -501,7 +523,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     const latest = db.prepare("SELECT i.id,r.month,i.net,i.confirmed_at FROM payroll_items i JOIN payroll_runs r ON r.id=i.run_id WHERE i.tenant_id=? AND i.staff_id=? AND r.status='published' ORDER BY r.month DESC LIMIT 1").get(u.tenant_id, u.id);
     const advances = advancesOut(u.tenant_id, u.id).filter(a => a.status === 'active').map(a => ({ advance_date: a.advance_date, amount: a.amount, balance: a.balance, monthly_deduct: a.monthly_deduct }));
     return {
-      salary: { hire_date: p.hire_date, trial_end_date: p.trial_end_date, formal_salary: p.base_salary ? p.base_salary : '', trial_salary: p.trial_salary || '', allowances: p.allowances, deductions: deductionsFor(p.deductions, monthTW()), labor_insured: p.labor_insured, employment_insured: p.employment_insured, health_insured: p.health_insured, pension_enabled: p.pension_enabled, insurance_level: p.labor_insured ? p.labor_grade : '', health_grade: p.health_insured ? p.health_grade : '', pension_grade: p.pension_enabled ? p.pension_grade : '', health_dependents: p.health_dependents, pension_self_rate: p.pension_self_rate, employee_insurance: ins.employee, configured: p.configured },
+      salary: { hire_date: p.hire_date, trial_end_date: p.trial_end_date, formal_salary: p.base_salary ? p.base_salary : '', trial_salary: p.trial_salary || '', allowances: p.allowances, deductions: deductionsFor(p.deductions, monthTW()), company_ins: insFor(u.tenant_id, p0, monthTW()), labor_insured: p.labor_insured, employment_insured: p.employment_insured, health_insured: p.health_insured, pension_enabled: p.pension_enabled, insurance_level: p.labor_insured ? p.labor_grade : '', health_grade: p.health_insured ? p.health_grade : '', pension_grade: p.pension_enabled ? p.pension_grade : '', health_dependents: p.health_dependents, pension_self_rate: p.pension_self_rate, employee_insurance: ins.employee, configured: p.configured },
       annual_leave: annualLeave(p0.hire_date, todayTW()), annual_used: p0.annual_used + annualSys(p0, annualLeave(p0.hire_date, todayTW())).annual_system_used,
       pay_method: p0.pay_method,
       payslip: latest ? { available: true, id: latest.id, month: latest.month, net: latest.net, confirmed: !!latest.confirmed_at } : { available: false, message: '本月薪資單尚未發布' },
