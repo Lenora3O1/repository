@@ -74,6 +74,14 @@ function defaults() {
   };
 }
 
+// 借支同意條款（平台預設；總後台可依公司修改）。申請前必須閱讀並按「同意」，送出時保存當時的條款全文
+const ADVANCE_CONSENT = [
+  '一、本人自願向公司申請預支薪資（借支），金額以本次申請所載為準。',
+  '二、本人同意公司於撥款當月之薪資中一次扣還本次借支金額；如當月應發薪資不足扣還，同意於次月薪資繼續扣還至清償為止。',
+  '三、本人如於扣還完畢前離職，同意公司於最後一期應發薪資中扣還；不足部分，本人仍負清償責任。',
+  '四、本次申請由本人登入系統親自操作，系統記錄之同意時間、帳號、裝置與網路位址，作為本人同意之證明，與書面簽名具同等效力。',
+  '五、借支款項以轉帳方式撥入本人薪資帳戶，以銀行轉帳紀錄為收款證明。',
+].join('\n');
 const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 const clampRatio = v => Math.max(0, Math.min(1, Math.round(num(v) * 100) / 100));
 const str = (v, m = 30) => String(v ?? '').trim().slice(0, m);
@@ -133,7 +141,7 @@ function normalize(input) {
     const amounts = (Array.isArray(x.amounts) ? x.amounts : String(x.amounts || '').split(/[,，、\s]+/)).map(v => Math.round(num(v))).filter(v => v > 0 && v <= 1000000);
     const adv = { enabled: x.enabled !== false, ratio_den: [0, 2, 3, 4, 5].includes(Math.round(num(x.ratio_den))) ? Math.round(num(x.ratio_den)) : 0, amounts: [...new Set(amounts)].sort((a, c) => a - c).slice(0, 10),
       monthly_limit: Math.max(0, Math.min(10, Math.round(num(x.monthly_limit, 1)))), min_days: Math.max(0, Math.min(365, Math.round(num(x.min_days)))), after_trial: !!x.after_trial,
-      deadline_day: Math.max(0, Math.min(28, Math.round(num(x.deadline_day)))), flow: [] };
+      deadline_day: Math.max(0, Math.min(28, Math.round(num(x.deadline_day)))), consent_text: String(x.consent_text ?? '').trim().slice(0, 3000) || ADVANCE_CONSENT, flow: [] };
     const seen3 = new Set();
     for (const s of (Array.isArray(x.flow) ? x.flow : d.advance.flow).slice(0, 5)) {
       const name = str(s?.name, 12); if (!name) continue;
@@ -158,4 +166,4 @@ function typeList(policy) {
   return out;
 }
 
-module.exports = { OT_CALC, OT_DEFAULTS, TYPES, FUNERAL, MATERNITY, LEGAL_ORDER, defaults, normalize, typeList };
+module.exports = { OT_CALC, OT_DEFAULTS, TYPES, FUNERAL, MATERNITY, LEGAL_ORDER, ADVANCE_CONSENT, defaults, normalize, typeList };

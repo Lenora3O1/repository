@@ -76,6 +76,7 @@
       </div>
       <div class="la-wrap" style="margin-top:8px"><table class="la-tbl"><thead><tr><th>#</th><th>審核關卡</th><th>審核對象</th><th></th></tr></thead><tbody>${AV.flow.map(avRow).join('')}</tbody></table></div>
       <div class="la-bar"><button type="button" class="secondary" id="laAvAdd">＋ 新增關卡</button><small class="muted">可借金額＝本月已賺薪資（依班表已上班天數，扣除已核准請假）− 勞健保、勞退自提、公司保險費、代扣款、請假扣款 − 本月已借；全部關卡核准後由會計確認撥款，撥款月份的薪資一次扣回。</small></div>
+      <label style="display:block;margin-top:10px;font-weight:600">借支同意條款（員工進入借支申請前必須閱讀並按「同意」）<textarea data-av="consent_text" rows="7" style="width:100%;margin-top:4px;font:inherit;line-height:1.7;padding:8px 10px;border:1px solid #D8CECB;border-radius:8px;box-sizing:border-box">${(AV.consent_text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea><small class="muted" style="font-weight:400">每次申請都會把當下的條款全文、同意時間、帳號、裝置與網路位址存進申請單。清空後儲存即恢復系統預設條款。</small></label>
       <div class="la-sec">請假單位與證明</div>
       <div class="la-grid">
         <label>最小請假單位<select data-k="unit"><option value="day" ${P.unit==='day'?'selected':''}>1 天</option><option value="half" ${P.unit==='half'?'selected':''}>半天</option><option value="hour" ${P.unit==='hour'?'selected':''}>1 小時</option></select><small class="muted" style="font-weight:400">家庭照顧假依法一律可以小時請假</small></label>
