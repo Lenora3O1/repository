@@ -178,6 +178,7 @@ function openSalaryDetailsCard(salary,advances){
     <div><span>勞退</span><strong>${salary.pension_enabled?`公司提繳 6%${salary.pension_self_rate?`，自提 ${salary.pension_self_rate}%`:''}`:'未提繳'}</strong></div>
     <div><span>薪資發放</span><strong>${salary.pay_method==='cash'?'領現':'薪轉'}</strong></div>
     ${salary.configured?`<div><span>每月保費自付</span><strong>${money(eeSum)} 元</strong></div>`:''}
+    ${(salary.company_ins||[]).filter(x=>Number(x.employee)>0).map(x=>`<div><span>保險費：${escapeHtml(x.name)}</span><strong>${money(x.employee)} 元／月</strong></div>`).join('')}
     ${(salary.deductions||[]).map(x=>`<div><span>每月代扣：${escapeHtml(x.name)}</span><strong>${money(x.amount)} 元（${escapeHtml(x.period)}）</strong></div>`).join('')}
     ${advances.map(a=>`<div><span>借資餘額</span><strong>${money(a.balance)} 元（每月扣回 ${money(a.monthly_deduct)}）</strong></div>`).join('')}
   </div><p class="hint" style="margin-top:10px">資料由公司人事維護，如有錯誤請洽人事或會計。</p>`);
