@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 10;
+const VERSION = 11;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -33,7 +33,7 @@ const STAFF = [
   { parent: null, children: [{ id: 'staff-community-info', label: '社區資訊', action: 'community-info', exact: ['社區資訊', '社區基本資料'], after: 'residents', icon: '🏢' }] },
   // 現場「設備借用申請」放在公司資源底下；舊版放在最上層的「設備申請」會合併過來
   // 社區資訊底下：規約（上傳、搜尋、線上修改、下載 Word／PDF）
-  { parent: { id: 'staff-community-info', label: '社區資訊', labels: ['社區資訊', '社區基本資料'], icon: '🏢', action: 'community-info' }, keepOrder: true, children: [{ id: 'staff-bylaws', label: '規約', action: 'bylaws', match: ['規約'] }] },
+  { parent: { id: 'staff-community-info', label: '社區資訊', labels: ['社區資訊', '社區基本資料'], icon: '🏢', action: 'community-info' }, keepOrder: true, children: [{ id: 'staff-bylaws', label: '規約', action: 'bylaws', match: ['規約'] }, { id: 'staff-mgmt-rules', label: '管理辦法', action: 'mgmt-rules', match: ['管理辦法'] }] },
   // 存證信函：管理委員會底下（經理、秘書以管委會名義寄出）
   { parent: { id: 'committee', label: '管理委員會', labels: ['管理委員會', '管委會'], icon: '👥', action: 'committee' }, keepOrder: true, children: [{ id: 'staff-legal-letter', label: '存證信函', action: 'legal-letter', match: ['存證信函'] }] },
   { parent: { id: 'company-resources', label: '公司資源', labels: ['公司資源'], icon: '📦', action: 'company-resources' }, keepOrder: true, children: [{ id: 'staff-equipment', label: '設備借用申請', action: 'staff-equipment', match: ['設備借用'], exact: ['設備申請'], anywhere: true }] },

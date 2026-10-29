@@ -464,7 +464,7 @@ async function loadStaffSchedulePage(mode='community',label='案場全班班表'
 // 目錄設定使用的動作代碼與程式內部代碼對照（目錄的 handover-manager 等原本沒有對應，點了只會看到「建置中」）。
 const WORKSPACE_ACTION_ALIASES={'handover':'checklist','handover-manager':'manager-checklist','handover-secretary':'secretary-checklist'};
 // 企業自訂目錄若沒有設定功能代碼（placeholder），依名稱對應到已上線的功能
-const WORKSPACE_LABEL_ACTIONS=[['存證信函','legal-letter'],['規約','bylaws'],['本屆委員','committee-current'],['社區資訊','community-info'],['設備申請','staff-equipment'],['設備借用','staff-equipment'],['住戶聯繫表','residents-contact'],['區分所有權人','residents-owners'],['所有權人','residents-owners'],['承租人','residents-tenants'],['出勤打卡','staff-attendance-checkin'],['巡邏紀錄','staff-patrol-records'],['巡邏巡檢','staff-patrol'],['出勤與巡邏','staff-attendance'],['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop'],['請假管理','staff-schedule-leave'],['請假申請','staff-schedule-leave'],['請假／代班','staff-schedule-leave'],['加班','staff-schedule-overtime'],['我的休假制度','staff-schedule-rules'],['排班規則','staff-schedule-rules']];
+const WORKSPACE_LABEL_ACTIONS=[['存證信函','legal-letter'],['管理辦法','mgmt-rules'],['規約','bylaws'],['本屆委員','committee-current'],['社區資訊','community-info'],['設備申請','staff-equipment'],['設備借用','staff-equipment'],['住戶聯繫表','residents-contact'],['區分所有權人','residents-owners'],['所有權人','residents-owners'],['承租人','residents-tenants'],['出勤打卡','staff-attendance-checkin'],['巡邏紀錄','staff-patrol-records'],['巡邏巡檢','staff-patrol'],['出勤與巡邏','staff-attendance'],['經理交接','manager-checklist'],['秘書交接','secretary-checklist'],['交接清冊','checklist'],['工作日誌','work-journal'],['禮品','gifts'],['案場全班班表','staff-schedule-community'],['自選休假','staff-schedule-self-select'],['已封存','todo-archived'],['代辦事項','todo'],['案場 SOP','sop'],['案場SOP','sop'],['請假管理','staff-schedule-leave'],['請假申請','staff-schedule-leave'],['請假／代班','staff-schedule-leave'],['加班','staff-schedule-overtime'],['我的休假制度','staff-schedule-rules'],['排班規則','staff-schedule-rules']];
 function labelWorkspaceAction(label){const t=String(label||'');const hit=WORKSPACE_LABEL_ACTIONS.find(([k])=>t.includes(k));return hit?hit[1]:'';}
 function resolveWorkspaceAction(detail){
   // 舊設定常把連字號存成底線（work_journal），一律轉回平台代碼
@@ -537,9 +537,9 @@ async function handleWorkspaceMenu(e){
     try{if(!window.WorkJournalModule)throw new Error('工作日誌模組尚未載入，請重新整理頁面');await window.WorkJournalModule.render($('staffHome'),label||'工作日誌');}catch(err){showWorkspaceError(label||'工作日誌',err);}
     return;
   }
-  if(action==='bylaws'){
-    showWorkspaceLoading(label||'規約');
-    try{if(!window.BylawsModule)throw new Error('規約模組尚未載入，請重新整理頁面');await window.BylawsModule.render($('staffHome'),label||'規約');}catch(err){showWorkspaceError(label||'規約',err);}
+  if(action==='bylaws'||action==='mgmt-rules'){
+    const L=label||(action==='bylaws'?'規約':'管理辦法');showWorkspaceLoading(L);
+    try{if(!window.BylawsModule)throw new Error('規約模組尚未載入，請重新整理頁面');await window.BylawsModule.render($('staffHome'),L,action==='bylaws'?'bylaws':'rules');}catch(err){showWorkspaceError(L,err);}
     return;
   }
   if(action==='committee-current'){
