@@ -101,6 +101,13 @@ module.exports = function registerResidentRoutes(app, d) {
     '離職、停用帳號或調離本社區後，將立即無法再查看任何住戶資料。',
     '本系統服務商不查看、不取得各公司與各社區的住戶資料；因使用者個人行為造成的資料外洩，由行為人自行負責。',
   ];
+  // 社區資訊：管理委員會抬頭、社區代表電話、當屆主任委員（存證信函、公文自動帶入）
+  db.exec(`CREATE TABLE IF NOT EXISTS community_profiles (tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, committee_name TEXT DEFAULT '', phone TEXT DEFAULT '', chair_name TEXT DEFAULT '', term_start TEXT DEFAULT '', term_end TEXT DEFAULT '', tax_id TEXT DEFAULT '', updated_by TEXT DEFAULT '', updated_at TEXT, PRIMARY KEY (tenant_id, community_id))`);
+  function profileOf(tid, cid) {
+    const c = db.prepare('SELECT id,name,COALESCE(main_address,\'\') AS main_address FROM communities WHERE id=? AND tenant_id=?').get(cid, tid) || {};
+    const p = db.prepare('SELECT * FROM community_profiles WHERE tenant_id=? AND community_id=?').get(tid, cid) || {};
+    return { community_id: cid, name: c.name || '', main_address: c.main_address || '', committee_name: p.committee_name || '', committee_title: p.committee_name || (c.name ? `${c.name}管理委員會` : ''), phone: p.phone || '', chair_name: p.chair_name || '', term_start: p.term_start || '', term_end: p.term_end || '', tax_id: p.tax_id || '', updated_by: p.updated_by || '', updated_at: p.updated_at || '' };
+  }
   const ackOf = (tid, uid) => db.prepare('SELECT at FROM resident_acks WHERE tenant_id=? AND staff_id=? AND version=?').get(tid, uid, NOTICE_VERSION) || null;
 
   // ---------- 共用 ----------
@@ -467,8 +474,21 @@ module.exports = function registerResidentRoutes(app, d) {
     const c = db.prepare('SELECT id,name,main_address FROM communities WHERE id=?').get(t.cid); const U = CL.units(t.tid, t.cid);
     const per = {}; for (const u of U) per[u.building] = (per[u.building] || 0) + 1;
     res.set('Cache-Control', 'no-store');
-    res.json({ community: c, layout: CL.layout(t.tid, t.cid), formats: Object.fromEntries(Object.entries(CL.FORMATS).map(([k, v]) => [k, v.label])), counts: per, total: U.length, can_edit: residentCanEdit(t.u),
+    res.json({ community: c, profile: profileOf(t.tid, t.cid), layout: CL.layout(t.tid, t.cid), formats: Object.fromEntries(Object.entries(CL.FORMATS).map(([k, v]) => [k, v.label])), counts: per, total: U.length, can_edit: residentCanEdit(t.u),
       sample: U.slice(0, 3).concat(U.slice(-2)).map(u => ({ code: u.code, address: u.address })) });
+  });
+  app.put('/api/staff/residents/profile', requireStaffFiller, (req, res) => {
+    req.body = { ...(req.body || {}), category: 'residents-contact' }; const t = ctx(req, res, { edit: true }); if (!t) return;
+    const b = req.body; const s = (v, m) => String(v ?? '').trim().slice(0, m); const dt = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : '';
+    const v = { committee_name: s(b.committee_name, 60), phone: s(b.phone, 40), chair_name: s(b.chair_name, 40), term_start: dt(b.term_start), term_end: dt(b.term_end), tax_id: s(b.tax_id, 8) };
+    if (v.tax_id && !/^\d{8}$/.test(v.tax_id)) return res.status(400).json({ error: '統一編號是 8 位數字' });
+    if (v.term_start && v.term_end && v.term_end < v.term_start) return res.status(400).json({ error: '任期結束日不能早於開始日' });
+    const before = profileOf(t.tid, t.cid);
+    db.prepare('INSERT INTO community_profiles (tenant_id,community_id,committee_name,phone,chair_name,term_start,term_end,tax_id,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,community_id) DO UPDATE SET committee_name=excluded.committee_name,phone=excluded.phone,chair_name=excluded.chair_name,term_start=excluded.term_start,term_end=excluded.term_end,tax_id=excluded.tax_id,updated_by=excluded.updated_by,updated_at=excluded.updated_at')
+      .run(t.tid, t.cid, v.committee_name, v.phone, v.chair_name, v.term_start, v.term_end, v.tax_id, t.by, now());
+    const ch = [['committee_name', '管委會抬頭'], ['phone', '代表電話'], ['chair_name', '主任委員'], ['term_start', '任期起'], ['term_end', '任期迄'], ['tax_id', '統一編號']].filter(([k]) => String(before[k] || '') !== String(v[k] || ''));
+    if (ch.length) log(t, { category: 'residents-contact', action: 'settings', summary: `更新社區資訊：${ch.map(([k, n]) => k === 'chair_name' ? `主任委員 ${before.chair_name || '—'} → ${v.chair_name || '—'}` : n).join('、')}` });
+    res.json({ success: true, profile: profileOf(t.tid, t.cid) });
   });
   app.put('/api/staff/residents/layout', requireStaffFiller, (req, res) => {
     req.body = { ...(req.body || {}), category: 'residents-contact' }; const t = ctx(req, res, { edit: true }); if (!t) return;
@@ -539,6 +559,6 @@ module.exports = function registerResidentRoutes(app, d) {
     return out.sort((a, b) => a.sort - b.sort || String(a.unit).localeCompare(String(b.unit)));
   }
   const acked = (tid, uid) => !!ackOf(tid, uid);
-  return { desiredContacts, syncPlan, ownerMailing, acked };
+  return { desiredContacts, syncPlan, ownerMailing, acked, profileOf };
 };
 Object.assign(module.exports, { normalizeDate, splitLeaseRange, unitKey });

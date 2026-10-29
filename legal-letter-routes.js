@@ -43,7 +43,7 @@ module.exports = function registerLegalLetterRoutes(app, d) {
     return { lines, pages: Math.max(1, Math.ceil(lines.length / 10)) };
   }
 
-  function cleanSender(s) { s = s || {}; return { kind: ['committee', 'company', 'custom'].includes(s.kind) ? s.kind : 'custom', org: str(s.org, 80), rep_title: str(s.rep_title, 20), rep: str(s.rep, 40), address: str(s.address, 120), entity_id: Number(s.entity_id) || null }; }
+  function cleanSender(s) { s = s || {}; return { kind: ['committee', 'company', 'custom'].includes(s.kind) ? s.kind : 'custom', org: str(s.org, 80), rep_title: str(s.rep_title, 20), rep: str(s.rep, 40), address: str(s.address, 120), phone: str(s.phone, 40), entity_id: Number(s.entity_id) || null }; }
   function cleanRecipients(list) {
     const out = (Array.isArray(list) ? list : []).slice(0, 12).map(r => ({ name: str(r?.name, 80), address: str(r?.address, 120), cc: !!r?.cc, unit: str(r?.unit, 40), source: str(r?.source, 20), ref_id: Number(r?.ref_id) || null })).filter(r => r.name || r.address);
     return out;
@@ -91,9 +91,11 @@ module.exports = function registerLegalLetterRoutes(app, d) {
     try { return db.prepare('SELECT id,name,owner,address FROM acct_entities WHERE tenant_id=? AND is_active=1 ORDER BY is_default DESC,id').all(tid); } catch { return []; }
   }
   function defaultSender(t) {
-    const last = db.prepare(`SELECT sender_json FROM legal_letters WHERE tenant_id=? AND scope=? AND ${t.scope === 'site' ? 'community_id=?' : 'community_id IS NULL'} ORDER BY id DESC LIMIT 1`).get(...(t.scope === 'site' ? [t.tid, t.scope, t.cid] : [t.tid, t.scope]));
+    // 社區：一律依「社區資訊」自動帶入（管委會抬頭、當屆主任委員、代表地址、代表電話）；個別信件仍可手動修改
+    if (t.scope === 'site') { const p = residents?.profileOf ? residents.profileOf(t.tid, t.cid) : { committee_title: `${t.community.name}管理委員會`, chair_name: '', main_address: t.community.address, phone: '' };
+      return { kind: 'committee', org: p.committee_title, rep_title: '主任委員', rep: p.chair_name, address: p.main_address || '', phone: p.phone || '', entity_id: null }; }
+    const last = db.prepare('SELECT sender_json FROM legal_letters WHERE tenant_id=? AND scope=? AND community_id IS NULL ORDER BY id DESC LIMIT 1').get(t.tid, t.scope);
     if (last) return cleanSender(parse(last.sender_json, {}));
-    if (t.scope === 'site') return { kind: 'committee', org: `${t.community.name}管理委員會`, rep_title: '主任委員', rep: '', address: t.community.address || '', entity_id: null };
     const e = entities(t.tid)[0]; const tn = db.prepare('SELECT name FROM tenants WHERE id=?').get(t.tid);
     return { kind: 'company', org: e?.name || tn?.name || '', rep_title: '負責人', rep: e?.owner || '', address: e?.address || '', entity_id: e?.id || null };
   }
@@ -107,7 +109,8 @@ module.exports = function registerLegalLetterRoutes(app, d) {
       if (KINDS[req.query.kind]) { where.push('kind=?'); args.push(req.query.kind); }
       if (q) { where.push('(title LIKE ? OR recipients_json LIKE ? OR body LIKE ?)'); args.push(`%${q}%`, `%${q}%`, `%${q}%`); }
       const rows = db.prepare(`SELECT * FROM legal_letters WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT 300`).all(...args).map(r => { const o = out(r); delete o.body; return o; });
-      res.json({ rows, scope: t.scope, community: t.community ? { id: t.community.id, name: t.community.name, address: t.community.address } : null, default_sender: defaultSender(t), entities: t.scope === 'company' ? entities(t.tid) : [] });
+      const prof = t.scope === 'site' && residents?.profileOf ? residents.profileOf(t.tid, t.cid) : null;
+      res.json({ rows, scope: t.scope, community: t.community ? { id: t.community.id, name: t.community.name, address: t.community.address } : null, profile: prof, profile_missing: prof ? [!prof.chair_name && '當屆主任委員', !prof.main_address && '社區代表地址', !prof.phone && '社區代表電話'].filter(Boolean) : [], default_sender: defaultSender(t), entities: t.scope === 'company' ? entities(t.tid) : [] });
     }));
     app.get(`${base}/legal-letters/:id`, mw, wrap((req, res) => { const t = ctxOf(req); res.json({ letter: out(find(t, req.params.id), true) }); }));
     app.post(`${base}/legal-letters`, mw, wrap((req, res) => {

@@ -62,6 +62,8 @@
 .ll-ask{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#FBF8F5;border-radius:10px;padding:10px 12px}.ll-ask span{font-weight:700;flex-basis:100%}.ll-ask button{margin:0}
 .ll-mf{display:grid;gap:10px}.ll-mf label{display:flex;flex-direction:column;gap:5px;font-weight:700;margin:0}.ll-mf input,.ll-mf select,.ll-in{margin:0;padding:9px 11px;border:1px solid #D8CECB;border-radius:8px;font:inherit;background:#fff;width:100%;box-sizing:border-box}
 .ll-plist{display:grid;gap:6px}.ll-pu{display:grid;gap:3px;text-align:left;border:1px solid #EFE6E2;border-radius:10px;padding:9px 12px;background:#fff;font:inherit;color:inherit;cursor:pointer;margin:0}.ll-pu:hover{border-color:#A44528}
+${SHEET_CSS('.ll-sheet')}
+.ll-sheet-wrap{position:relative;overflow:hidden;border:1px solid #d8ccc7;border-radius:6px;background:#fff}.ll-sheet{position:absolute;left:0;top:0;width:595.28pt;height:841.89pt;transform-origin:0 0;font-family:${KAI};color:#000;background:#fff}
 `;document.head.appendChild(s);if(!document.getElementById('llFont')){const l=document.createElement('link');l.id='llFont';l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&display=swap';document.head.appendChild(l);}}
 
   // ---------- 列表 ----------
@@ -123,7 +125,7 @@
       <div class="ll-card ll-pv"><div class="ll-pv-nav"><b style="flex:1">預覽</b><button type="button" class="secondary" id="llPrev">‹</button><span id="llPg"></span><button type="button" class="secondary" id="llNext">›</button></div><div id="llPaper"></div></div></div></div>`;
     const F=host.querySelector('#llForm');const q=s=>host.querySelector(s);
     if(locked)F.querySelectorAll('input,textarea,select').forEach(i=>i.disabled=true);
-    function drawSender(){const S=L.sender;q('#llSender').innerHTML=`<div class="ll-ri"><div><b>${esc(senderName(S))||'<span class="ll-muted">（尚未填寫）</span>'}</b><div class="ll-muted">${esc(S.address)||'（尚未填寫地址）'}</div></div></div>`;}
+    function drawSender(){const S=L.sender;const miss=!L.id&&site?(d.profile_missing||[]):[];q('#llSender').innerHTML=`<div class="ll-ri"><div><b>${esc(senderName(S))||'<span class="ll-muted">（尚未填寫）</span>'}</b><div class="ll-muted">${esc(S.address)||'（尚未填寫地址）'}${S.phone?`　電話 ${esc(S.phone)}`:''}</div></div></div>${site&&!locked?`<div class="ll-muted">${miss.length?`<span style="color:#a33131">⚠ 社區資訊還沒有設定：${esc(miss.join('、'))}。</span>請按「編輯」補上，或請經理、秘書到「社區資訊」設定，之後就會自動帶入。`:'已依「社區資訊」自動帶入（管委會抬頭、當屆主任委員、代表地址與電話），內容不對可以按「編輯」修改。'}</div>`:''}`;}
     function drawRcps(){
       for(const [sel,cc] of [['#llMain',false],['#llCc',true]]){
         const list=L.recipients.map((r,i)=>({r,i})).filter(x=>!!x.r.cc===cc);
@@ -137,7 +139,8 @@
       const main=L.recipients.filter(r=>!r.cc).length,cc=L.recipients.length-main,copies=L.recipients.length+2;
       q('#llCount').innerHTML=`目前 <b>${lay.lines.length}</b> 行、共 <b>${lay.pages}</b> 頁｜需準備 <b>${copies}</b> 份（收件人 ${main}${cc?`＋副本收件人 ${cc}`:''}＋郵局與寄件人各 1）`;
       q('#llPg').textContent=`第 ${page+1}／${lay.pages} 頁`;
-      q('#llPaper').innerHTML=`<div class="ll-paper"><div class="pt">郵局存證信函用紙</div><div class="pp">一、寄件人：${esc(senderName(L.sender))||'<span class="ll-muted">（未填）</span>'}<br>　　地址：${esc(L.sender.address)||'<span class="ll-muted">（未填）</span>'}${L.recipients.map(r=>`<br>${r.cc?'三、副本收件人':'二、收件人'}：${esc(r.name)}<br>　　地址：${esc(r.address)}`).join('')}</div>${gridHtml(lay.lines.slice(page*10,page*10+10),'ll-grid')}</div>`;
+      const box=q('#llPaper');box.innerHTML=`<div class="ll-sheet-wrap"><div class="ll-sheet">${sheet(L,lay,page,0)}</div></div>`;
+      const sc=()=>{const w=box.clientWidth;const sh=box.querySelector('.ll-sheet');if(!sh||!w)return;const k=w/(595.28*4/3);sh.style.transform=`scale(${k})`;box.querySelector('.ll-sheet-wrap').style.height=`${841.89*4/3*k}px`;};sc();requestAnimationFrame(sc);
     }
     const addRcps=list=>{for(const r of list){if(L.recipients.length>=12){alert('收件人（含副本）最多 12 位');break;}if(!L.recipients.some(x=>x.name===r.name&&x.address===r.address&&!!x.cc===!!r.cc))L.recipients.push(r);}drawRcps();paint();};
     F.querySelectorAll('[data-f]').forEach(i=>i.addEventListener('input',()=>{L[i.dataset.f]=i.value;if(i.dataset.f==='body')paint();}));
@@ -183,9 +186,9 @@
   }
   function senderDialog(S,d,done){
     const ents=d.scope==='company'?d.entities||[]:[];
-    const m=modal('寄件人資訊',`<div class="ll-mf">${ents.length>1?`<label>公司<select id="sdE">${ents.map(e=>`<option value="${e.id}" ${e.id===S.entity_id?'selected':''}>${esc(e.name)}</option>`).join('')}</select></label>`:''}<label>寄件人名稱<input id="sO" maxlength="80" value="${esc(S.org)}"></label><div class="ll-row"><label>代表人職稱<input id="sT" maxlength="20" value="${esc(S.rep_title)}" placeholder="${d.scope==='site'?'主任委員':'負責人'}"></label><label>代表人姓名<input id="sR" maxlength="40" value="${esc(S.rep)}" placeholder="例如：王大明"></label></div><label>詳細地址<input id="sA" maxlength="120" value="${esc(S.address)}" placeholder="含郵遞區號"></label></div><div class="ll-actions"><button type="button" id="sOk">確定</button></div>`);
+    const m=modal('寄件人資訊',`<div class="ll-mf">${ents.length>1?`<label>公司<select id="sdE">${ents.map(e=>`<option value="${e.id}" ${e.id===S.entity_id?'selected':''}>${esc(e.name)}</option>`).join('')}</select></label>`:''}<label>寄件人名稱<input id="sO" maxlength="80" value="${esc(S.org)}"></label><div class="ll-row"><label>代表人職稱<input id="sT" maxlength="20" value="${esc(S.rep_title)}" placeholder="${d.scope==='site'?'主任委員':'負責人'}"></label><label>代表人姓名<input id="sR" maxlength="40" value="${esc(S.rep)}" placeholder="例如：王大明"></label></div><label>詳細地址<input id="sA" maxlength="120" value="${esc(S.address)}" placeholder="含郵遞區號"></label><label>聯絡電話（印在地址後面，可留空）<input id="sP" maxlength="40" value="${esc(S.phone||'')}" inputmode="tel"></label></div><div class="ll-actions"><button type="button" id="sOk">確定</button></div>`);
     m.querySelector('#sdE')?.addEventListener('change',e=>{const en=ents.find(x=>String(x.id)===e.target.value);if(!en)return;m.querySelector('#sO').value=en.name;m.querySelector('#sR').value=en.owner||'';m.querySelector('#sA').value=en.address||'';});
-    m.querySelector('#sOk').onclick=()=>{const en=m.querySelector('#sdE');m.close();done({org:m.querySelector('#sO').value.trim(),rep_title:m.querySelector('#sT').value.trim(),rep:m.querySelector('#sR').value.trim(),address:m.querySelector('#sA').value.trim(),...(en?{entity_id:Number(en.value),kind:'company'}:{})});};
+    m.querySelector('#sOk').onclick=()=>{const en=m.querySelector('#sdE');m.close();done({org:m.querySelector('#sO').value.trim(),rep_title:m.querySelector('#sT').value.trim(),rep:m.querySelector('#sR').value.trim(),address:m.querySelector('#sA').value.trim(),phone:m.querySelector('#sP').value.trim(),...(en?{entity_id:Number(en.value),kind:'company'}:{})});};
   }
 
   // 管理費催繳：區分所有權人（一次選一戶；共有人一起帶入）
@@ -215,35 +218,64 @@
     m.querySelector('#vOk').onclick=async()=>{const g=id=>m.querySelector(id).value.trim();if(!g('#va')){alert('請填寫廠商地址');return;}try{await api('/api/staff/community-vendors',J('POST',{category:g('#vc'),service:g('#vs'),name:g('#vn'),tax_id:g('#vt'),owner:g('#vo'),contact:g('#vk'),phone:g('#vp'),address:g('#va'),contract_start:g('#v1'),contract_end:g('#v2')}));m.close();saved();}catch(e){alert(e.message);}};
   }
 
-  // ---------- 列印（A4，依份數重複整份） ----------
-  function printLetter(L,win){
-    const lay=layout(L.body);const copies=L.recipients.length+2;const N=lay.pages;
-    const party=(label,list)=>`<tr><th class="pl" rowspan="${Math.max(1,list.length)*2}">${label}</th>${list.length?list.map((r,i)=>`${i?'<tr>':''}<td class="k">姓名：</td><td class="v">${esc(r.name)}${label.includes('寄件人')?'<span class="seal">印</span>':''}</td></tr><tr><td class="k">詳細地址：</td><td class="v">${esc(r.address)}</td></tr>`).join(''):'<td class="k">姓名：</td><td class="v"></td></tr><tr><td class="k">詳細地址：</td><td class="v"></td></tr>'}`;
-    const sender=[{name:senderName(L.sender),address:L.sender.address}];
+  // ---------- 列印：以郵局「存證信函用紙」（10206 版）原稿為底圖，文字依原稿座標（pt）套印 ----------
+  // 底圖：/forms/post-certified-letter.png（由中華郵政官方 PDF 轉成 400dpi 黑白圖）。A4 = 595.28 × 841.89 pt。
+  const FORM={grid:{x:89.62,y:255.62,w:(563.75-89.62)/20,h:(595.75-255.62)/10},
+    sName:{x:325,y:93.5,w:185,h:12},sAddr:{x:343.5,y:117.2,w:218,h:21},
+    rName:{x:326,y:138.6,w:235,h:12},rAddr:{x:343.5,y:161.6,w:218,h:20},
+    cName:{x:326,y:181.8,w:235,h:12},cAddr:{x:343.5,y:197.4,w:218,h:12.5},
+    pages:{x:125.5,y:598.4,w:39,h:11},zheng:{x:50.9,y:96.6},fu:{x:33.6,y:96.8}};
+  const emw=t=>[...String(t||'')].reduce((a,c)=>a+(/[\x20-\x7e]/.test(c)?0.55:1),0);
+  // 依欄位寬度自動縮小字級；放不下就分兩行（地址欄）
+  function fit(t,box,base,min,maxLines){
+    t=String(t||'');if(!t)return '';
+    let lines=1,size=Math.min(base,box.w/Math.max(1,emw(t)));
+    if(size<min&&maxLines>1){lines=2;size=Math.min(base,box.h/2/1.12,box.w*2/Math.max(1,emw(t))*0.96);}
+    size=Math.max(size,lines>1?6:min);
+    return `<div class="f" style="left:${box.x}pt;top:${box.y}pt;width:${box.w}pt;height:${box.h}pt;font-size:${size.toFixed(2)}pt;line-height:${lines>1?1.1:box.h/size};${lines>1?'white-space:normal;word-break:break-all':'white-space:nowrap'}">${esc(t)}</div>`;
+  }
+  // 收件人欄：共有人同一地址就合併一列；不同地址只放第一位，其餘列在「另紙聯記」
+  function partyText(list){
+    if(!list.length)return {name:'',addr:'',extra:false};
+    const same=list.every(r=>r.address===list[0].address);
+    if(list.length===1||(same&&emw(list.map(r=>r.name).join('、'))<=24))return {name:list.map(r=>r.name).join('、'),addr:list[0].address,extra:false};
+    return {name:`${list[0].name}等${list.length}人（詳另紙聯記）`,addr:same?list[0].address:`${list[0].address}（其餘詳另紙聯記）`,extra:true};
+  }
+  // 一頁用紙的內容（列印與畫面預覽共用）
+  function sheet(L,lay,p,copy){
     const main=L.recipients.filter(r=>!r.cc),cc=L.recipients.filter(r=>r.cc);
-    const pageHtml=(p,copy)=>`<section class="pg"><div class="side">${copy===0?'正<br>本':'副<br>本'}</div><div class="top"><span>存證信函第＿＿＿＿＿號</span><h1>郵局存證信函用紙</h1><span class="pn">第 ${p+1} 頁／共 ${N} 頁</span></div>
-      <div class="note">〈寄件人如為機關、團體、學校、公司、商號請加蓋單位圖章及法定代理人簽名或蓋章〉</div>
-      <table class="parties">${party('一、寄件人',sender)}${party('二、收件人',main)}${party('三、副本收件人',cc)}</table>
-      <div class="note r">（本欄姓名、地址不敷填寫時，請另紙聯記）</div>
-      ${gridHtml(lay.lines.slice(p*10,p*10+10),'grid')}
-      <div class="foot"><div class="fee">本存證信函共 <u>${N}</u> 頁，正本＿＿份，存證費＿＿元，副本＿＿份，存證費＿＿元，附件＿＿張，存證費＿＿元，加具正本＿＿份，存證費＿＿元，加具副本＿＿份，存證費＿＿元，合計＿＿元。</div>
-      <div class="cert"><div>經　　　　　　郵局<br>　　年　　月　　日證明正本內容完全相同</div><div>郵戳</div><div>經辦員<br><br>主　管</div><div class="stamp">郵票或郵資券<br>黏貼處</div></div>
-      <div class="memo">備註：<br>一、存證信函需送交郵局辦理證明手續後始有效，自交寄之日起由郵局保存之副本，於三年期滿後銷燬之。<br>二、在＿＿頁＿＿行第＿＿格下塗改增刪＿＿字　印（如有修改應填註本欄並蓋用寄件人印章，但塗改增刪每頁至多不得逾二十字）。<br>三、每件一式三份，用不脫色筆或打字機複寫，或書寫後複印、影印，每格限書一字，色澤明顯、字跡端正。</div></div>
-      <div class="seam">騎縫郵戳</div></section>`;
-    let body='';for(let c=0;c<copies;c++)for(let p=0;p<N;p++)body+=pageHtml(p,c);
-    const CSS=`@page{size:A4;margin:9mm 10mm}body{margin:0;font-family:${KAI};color:#111}.pg{position:relative;page-break-after:always;padding-left:9mm;min-height:270mm;box-sizing:border-box}.pg:last-child{page-break-after:auto}
-.side{position:absolute;left:0;top:70mm;width:7mm;border:1px solid #333;text-align:center;font-size:12pt;line-height:1.5;padding:3mm 0}
-.top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2mm}.top h1{font-size:17pt;letter-spacing:.35em;margin:0}.top span{font-size:9.5pt}.pn{color:#555}
-.note{font-size:8.5pt;margin:1mm 0}.note.r{text-align:right}
-table{border-collapse:collapse;width:100%}.parties td,.parties th{border:1px solid #333;padding:1.3mm 2mm;font-size:10.5pt;text-align:left;vertical-align:middle}.parties th.pl{width:24mm;font-weight:400}.parties td.k{width:20mm;white-space:nowrap}.seal{float:right;color:#999;font-size:9pt;border:1px dashed #aaa;padding:0 2mm}
-.grid{table-layout:fixed;margin-top:2mm}.grid td,.grid th{border:1px solid #333;text-align:center;padding:0;height:8.6mm;font-size:14pt}.grid th{height:4.5mm;font-size:7.5pt;font-weight:400}.grid th.rh{width:7mm}
-.foot{font-size:9pt;margin-top:2mm}.fee{line-height:1.7}.cert{display:grid;grid-template-columns:1.6fr .6fr .8fr 1fr;border:1px solid #333;margin-top:2mm}.cert div{border-right:1px solid #333;padding:2mm;min-height:17mm;line-height:1.6}.cert div:last-child{border-right:0}.stamp{text-align:center;color:#555}
-.memo{margin-top:2mm;line-height:1.55;font-size:8.3pt}.seam{position:absolute;left:1mm;top:150mm;font-size:7.5pt;color:#777;writing-mode:vertical-rl;letter-spacing:.2em}`;
+    const pm=partyText(main),pc=partyText(cc);const S=L.sender;const N=lay.pages;
+    const sAddr=[S.address,S.phone?`電話：${S.phone}`:''].filter(Boolean).join('　');
+    const G=FORM.grid;
+    {let h=`<img class="bg" src="${location.origin}/forms/post-certified-letter.png" alt="">`;
+      const c=copy===0?FORM.zheng:FORM.fu;h+=`<div class="ring" style="left:${c.x-8.5}pt;top:${c.y-8.5}pt"></div>`;
+      h+=fit(senderName(S),FORM.sName,11,7,1)+fit(sAddr,FORM.sAddr,10.5,8,2)+fit(pm.name,FORM.rName,11,7,1)+fit(pm.addr,FORM.rAddr,10.5,8,2)+fit(pc.name,FORM.cName,11,7,1)+fit(pc.addr,FORM.cAddr,10,6.5,1);
+      const rows=lay.lines.slice(p*10,p*10+10);
+      rows.forEach((ln,r)=>[...ln].forEach((ch,i)=>{if(ch==='　')return;h+=`<div class="c" style="left:${(G.x+i*G.w).toFixed(2)}pt;top:${(G.y+r*G.h).toFixed(2)}pt">${esc(ch)}</div>`;}));
+      h+=`<div class="f" style="left:${FORM.pages.x}pt;top:${FORM.pages.y}pt;width:${FORM.pages.w}pt;height:${FORM.pages.h}pt;font-size:10.5pt;line-height:${FORM.pages.h}pt;text-align:center">${N}</div>`;
+      return h;}
+  }
+  const SHEET_CSS=(P)=>`${P} .bg{position:absolute;left:0;top:0;width:595.28pt;height:841.89pt}${P} .f{position:absolute;overflow:hidden;color:#000}
+${P} .c{position:absolute;width:${FORM.grid.w.toFixed(2)}pt;height:${FORM.grid.h.toFixed(2)}pt;line-height:${FORM.grid.h.toFixed(2)}pt;text-align:center;font-size:17pt}
+${P} .ring{position:absolute;width:17pt;height:17pt;border:1.1pt solid #000;border-radius:50%}`;
+  function printLetter(L,win){
+    const lay=layout(L.body);const N=lay.pages;const copies=L.recipients.length+2;
+    const main=L.recipients.filter(r=>!r.cc),cc=L.recipients.filter(r=>r.cc);
+    const pm=partyText(main),pc=partyText(cc);const S=L.sender;
+    const page=(p,copy)=>`<section class="pg">${sheet(L,lay,p,copy)}</section>`;
+    const annex=copy=>`<section class="pg annex"><h1>存證信函收件人另紙聯記</h1><p>寄件人：${esc(senderName(S))}　${esc(S.address)}</p><table><tr><th></th><th>姓名</th><th>詳細地址</th></tr>${main.map((r,i)=>`<tr><td>收件人${main.length>1?i+1:''}</td><td>${esc(r.name)}</td><td>${esc(r.address)}</td></tr>`).join('')}${cc.map((r,i)=>`<tr><td>副本收件人${cc.length>1?i+1:''}</td><td>${esc(r.name)}</td><td>${esc(r.address)}</td></tr>`).join('')}</table><p class="sm">（${copy===0?'正本':'副本'}）</p></section>`;
+    let body='';for(let c=0;c<copies;c++){for(let p=0;p<N;p++)body+=page(p,c);if(pm.extra||pc.extra)body+=annex(c);}
+    const CSS=`@page{size:A4;margin:0}html,body{margin:0;padding:0}body{font-family:${KAI};color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pg{position:relative;width:595.28pt;height:841.89pt;overflow:hidden;page-break-after:always;break-after:page}.pg:last-child{page-break-after:auto;break-after:auto}
+${SHEET_CSS('.pg')}
+.annex{padding:60pt 56pt;box-sizing:border-box}.annex h1{font-size:18pt;text-align:center;letter-spacing:.2em}.annex table{width:100%;border-collapse:collapse;font-size:12pt}.annex th,.annex td{border:1px solid #000;padding:6pt 8pt;text-align:left}.annex .sm{font-size:10pt;text-align:right}
+@media screen{body{background:#888}.pg{background:#fff;margin:12px auto;box-shadow:0 2px 10px rgba(0,0,0,.3)}}`;
     const w=win||window.open('','_blank');if(!w){alert('瀏覽器擋住了列印視窗，請允許彈出視窗後再試一次');return;}
     w.document.open();w.document.write(`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>存證信函 ${esc(L.title||'')}</title>${KAI_LINK}<style>${CSS}</style></head><body>${body}</body></html>`);w.document.close();
-    // 等字型（標楷體／楷書網路字型）載入後再開列印視窗
-    const go=()=>{try{w.focus();w.print();}catch{}};let done=false;const once=()=>{if(!done){done=true;go();}};
-    try{w.document.fonts.ready.then(()=>setTimeout(once,200));}catch{}setTimeout(once,2500);
+    // 等底圖與字型（標楷體／楷書網路字型）載入後再開列印視窗
+    let done=false;const go=()=>{if(done)return;done=true;try{w.focus();w.print();}catch{}};
+    const imgs=()=>Promise.all([...w.document.images].map(i=>i.complete?1:new Promise(r=>{i.onload=i.onerror=r;})));
+    try{Promise.all([w.document.fonts.ready,imgs()]).then(()=>setTimeout(go,250));}catch{}setTimeout(go,4000);
   }
 
   window.LegalLetterModule={render,layout,printLetter};
