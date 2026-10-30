@@ -45,9 +45,9 @@ const DEFAULT_SETTINGS = {
   hr_view: true,
   // 面試者一開始選的「應徵職務」：依職務把資料交給主管（primary）；主管 5 分鐘沒有回應自動轉給督導（backup）
   options: [
-    { id: 'admin_head', name: '行政主管', category: 'admin', hint: '社區經理、總幹事、主任秘書等管理職', positions: ['社區經理／總幹事', '社區副理', '主任秘書'], primary: ['property_head'], backup: ['region'] },
+    { id: 'admin_head', name: '行政主管', category: 'admin', hint: '社區經理、總幹事、主任秘書等管理職', positions: ['社區經理', '社區副理', '主任秘書'], primary: ['property_head'], backup: ['region'] },
     { id: 'admin_secretary', name: '行政秘書', category: 'admin', hint: '櫃台秘書、財務秘書、行政助理', positions: ['櫃台秘書', '財務秘書', '行政助理'], primary: ['secretary_head'], backup: ['secretary_manager'] },
-    { id: 'duty', name: '勤務人員', category: 'duty', hint: '日班、夜班、機動保全', positions: ['日班保全', '夜班保全', '機動保全', '保全隊長'], primary: ['duty_head'], backup: ['duty_day_manager', 'duty_night_manager'] },
+    { id: 'duty', name: '勤務人員', category: 'duty', hint: '日班、夜班、機動保全', positions: ['日班', '夜班', '機動', '主管'], primary: ['duty_head'], backup: ['duty_day_manager', 'duty_night_manager'] },
   ],
   escalate_minutes: 5,
   // 中文打字測驗（照著打一段文字）
