@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>面試填寫</title>
+<link rel="icon" type="image/png" href="favicon.png"><link rel="apple-touch-icon" href="brand/crane-icon-192.png">
 <meta name="robots" content="noindex">
 <style>
 :root{--bg1:#FBF6F0;--bg2:#F1E6DE;--card:#FFFDFB;--line:#EADBD2;--soft:#F7EEE8;--accent:#C0785B;--accent2:#8FA88A;--ink:#3E2E2A;--muted:#9B8079;--pink:#F3DDD5}
@@ -31,6 +32,7 @@ button{font:inherit;font-weight:700;border-radius:999px;padding:12px 30px;border
 button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shadow:none}button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
 .bar{display:flex;justify-content:space-between;gap:12px;margin-top:28px;align-items:center}
 .note{background:var(--soft);border-radius:18px;padding:16px 20px;color:#6B4A40;line-height:1.9}
+.miss{border-color:#D9826A!important;background:#FFF4F0!important}
 .err{background:#FBE7E0;border:1px solid #F0CDBF;color:#8A3B22;border-radius:14px;padding:10px 16px;margin:14px 0;display:none}
 .q{border:1px solid var(--line);border-radius:20px;padding:18px 22px;margin-bottom:14px;background:#fff}.q h3{margin:0 0 10px;font-size:1.05rem;font-weight:700;color:#5A3E36}.q .opt2{display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-radius:12px;cursor:pointer}.q .opt2:hover{background:var(--soft)}.q .opt2 input{width:auto;margin-top:6px}
 .q .pt{float:right;color:#B39A92;font-size:.82rem}
@@ -87,7 +89,7 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   // ---------- 面試帳號登入（由人事在面試電腦登入一次） ----------
   function login(msg){
     S=null;$('#foot').innerHTML='';$('#hd').textContent='面試登入';
-    app.innerHTML=`<div class="login"><div class="hello"><div class="leaf">🌿</div><h2>面試登入</h2><p>請公司人事用「面試專用帳號」登入這台電腦。</p></div>
+    app.innerHTML=`<div class="login"><div class="hello"><h2>面試登入</h2><p>請公司人事用「面試專用帳號」登入這台電腦。</p></div>
       ${msg?`<div class="err" style="display:block">${esc(msg)}</div>`:''}<div class="grid"><label>公司代碼<input id="lc"></label><label>面試帳號密碼<input id="lp" type="password"></label></div><div class="err" id="err"></div>
       <div class="bar" style="justify-content:center"><button id="lgo">登入</button></div><p class="sub center" style="margin-top:16px;font-size:.88rem">面試帳號由系統服務商建立；忘記密碼請洽系統服務商重新設定。</p></div>`;
     noAutofill();$('#lp').setAttribute('autocomplete','new-password');
@@ -105,7 +107,7 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   const ICON={admin_head:'🏡',admin_secretary:'☕',duty:'🛡️'};
   function start(){
     if(app._ac)app._ac.abort();S={};Object.keys(metrics).forEach(k=>metrics[k]=0);t0=Date.now();window.scrollTo(0,0);clearTimeout(idle);
-    app.innerHTML=`<div class="hello"><div class="leaf">🌿</div><h2>歡迎你來！</h2><p>放輕鬆，慢慢填就好。先選擇你想應徵的工作吧 😊</p></div>
+    app.innerHTML=`<div class="hello"><h2>歡迎你來！</h2><p>請選擇今天想應徵的職務😊</p></div>
       <div class="opts">${META.options.map(o=>`<div class="opt" data-o="${o.id}"><i>${ICON[o.id]||'🌸'}</i><b>${esc(o.name)}</b><span>${esc(o.hint)}</span></div>`).join('')}</div><div id="posBox"></div><div class="err" id="err"></div>
       <div class="bar"><span></span><button id="next" disabled>下一步</button></div>`;
     $('#foot').innerHTML='<a id="fPw">修改面試帳號密碼</a><a id="fOut">結束今天的面試（登出）</a>';
@@ -130,10 +132,10 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
     const workRow=(w={})=>`<tr><td><input data-k="company" value="${esc(w.company||'')}" placeholder="公司名稱"></td><td><input data-k="title" value="${esc(w.title||'')}" placeholder="職稱"></td><td><input data-k="start" type="month" value="${esc(w.start||'')}"></td><td><input data-k="end" type="month" value="${esc(w.end||'')}"></td><td><input data-k="duty" value="${esc(w.duty||'')}" placeholder="主要工作內容"></td><td><input data-k="reason" value="${esc(w.reason||'')}" placeholder="離職原因"></td></tr>`;
     app.innerHTML=`${steps(2)}<h2>個人履歷</h2><p class="sub">應徵：${esc(o.name)}${S.position?`｜${esc(S.position)}`:''}。標示 * 的欄位一定要填，其他想寫多少都可以。</p>
       <div class="sec">基本資料</div><div class="grid">
-        <label>姓名 *<input id="f-name" value="${esc(R.name||'')}"></label><label>性別<select id="f-gender"><option value="">請選擇</option><option value="M" ${R.gender==='M'?'selected':''}>男</option><option value="F" ${R.gender==='F'?'selected':''}>女</option></select></label><label>生日 *<input type="date" id="f-birthday" value="${esc(R.birthday||'')}"></label><label>手機 *<input id="f-phone" inputmode="tel" value="${esc(R.phone||'')}" placeholder="0912345678"></label>
-        <label>證件 *<select id="f-id_type"><option value="national">身分證</option><option value="arc" ${R.id_type==='arc'?'selected':''}>居留證</option><option value="passport" ${R.id_type==='passport'?'selected':''}>護照</option></select></label><label>證號 *<input id="f-id_no" value="${esc(R.id_no||'')}" placeholder="A123456789"></label><label class="w2" id="natL">國籍<input id="f-nationality" value="${esc(R.nationality||'')}"></label>
-        <label class="w2">Email<input id="f-email" type="email" value="${esc(R.email||'')}"></label><label class="w2">通訊地址<input id="f-address" value="${esc(R.address||'')}"></label>
-        <label>緊急聯絡人<input id="f-emergency_name" value="${esc(R.emergency_name||'')}"></label><label>關係<input id="f-emergency_relation" value="${esc(R.emergency_relation||'')}"></label><label>緊急聯絡電話<input id="f-emergency_phone" value="${esc(R.emergency_phone||'')}"></label><label>通勤方式<select id="f-transport">${['','機車','汽車','大眾運輸','步行／腳踏車'].map(x=>`<option ${R.transport===x?'selected':''}>${x}</option>`).join('')}</select></label></div>
+        <label>姓名 *<input id="f-name" value="${esc(R.name||'')}"></label><label>性別 *<select id="f-gender"><option value="">請選擇</option><option value="M" ${R.gender==='M'?'selected':''}>男</option><option value="F" ${R.gender==='F'?'selected':''}>女</option></select></label><label>生日 *<input type="date" id="f-birthday" value="${esc(R.birthday||'')}"></label><label>手機 *<input id="f-phone" inputmode="tel" value="${esc(R.phone||'')}" placeholder="0912345678"></label>
+        <label>證件 *<select id="f-id_type"><option value="national">身分證</option><option value="arc" ${R.id_type==='arc'?'selected':''}>居留證</option><option value="passport" ${R.id_type==='passport'?'selected':''}>護照</option></select></label><label>證號 *<input id="f-id_no" value="${esc(R.id_no||'')}" placeholder="A123456789"></label><label class="w2" id="natL">國籍 *<input id="f-nationality" value="${esc(R.nationality||'')}"></label>
+        <label class="w2">Email *<input id="f-email" type="email" value="${esc(R.email||'')}"></label><label class="w2">通訊地址 *<input id="f-address" value="${esc(R.address||'')}"></label>
+        <label>緊急聯絡人 *<input id="f-emergency_name" value="${esc(R.emergency_name||'')}"></label><label>關係 *<input id="f-emergency_relation" value="${esc(R.emergency_relation||'')}"></label><label>緊急聯絡電話 *<input id="f-emergency_phone" value="${esc(R.emergency_phone||'')}"></label><label>通勤方式 *<select id="f-transport">${['','機車','汽車','大眾運輸','步行／腳踏車'].map(x=>`<option value="${x}" ${R.transport===x?'selected':''}>${x||'請選擇'}</option>`).join('')}</select></label></div>
       <div class="sec">學歷</div><table><thead><tr><th>學校</th><th>科系</th><th>學歷</th><th>狀態</th></tr></thead><tbody id="edu">${(R.education?.length?R.education:[{}]).map(eduRow).join('')}</tbody></table><button class="sec2" id="eduAdd" style="padding:6px 16px;margin-top:6px">＋ 學歷</button>
       <div class="sec">工作經歷（最近的寫在最上面）</div><table><thead><tr><th>公司</th><th>職稱</th><th>開始</th><th>結束</th><th>工作內容</th><th>離職原因</th></tr></thead><tbody id="work">${(R.work?.length?R.work:[{},{}]).map(workRow).join('')}</tbody></table><button class="sec2" id="workAdd" style="padding:6px 16px;margin-top:6px">＋ 經歷</button>
       <div class="sec">證照與技能</div><div class="lic">${(o.licenses||[]).map(l=>`<label><input type="checkbox" name="lic" value="${esc(l)}" ${(R.licenses||[]).includes(l)?'checked':''}>${esc(l)}</label>`).join('')}</div><div class="grid" style="margin-top:10px"><label class="w4">其他證照或技能<input id="f-other_license" value="${esc(R.other_license||'')}"></label></div>
@@ -147,7 +149,11 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
     $('#next').onclick=async()=>{const v=id=>$('#f-'+id)?.value||'';const rows=sel=>[...app.querySelectorAll(sel+' tr')].map(tr=>Object.fromEntries([...tr.querySelectorAll('[data-k]')].map(i=>[i.dataset.k,i.value])));
       const r={name:v('name'),gender:v('gender'),birthday:v('birthday'),phone:v('phone'),id_type:v('id_type'),id_no:v('id_no'),nationality:v('nationality'),email:v('email'),address:v('address'),emergency_name:v('emergency_name'),emergency_relation:v('emergency_relation'),emergency_phone:v('emergency_phone'),transport:v('transport'),
         education:rows('#edu'),work:rows('#work'),licenses:[...app.querySelectorAll('[name=lic]:checked')].map(x=>x.value),other_license:v('other_license'),available_date:v('available_date'),expected_salary:v('expected_salary'),shift_pref:v('shift_pref'),intro:v('intro'),position:S.position||''};
-      S.resume=r;if(r.intro.trim().length<20)return showErr('自我介紹請至少寫 20 個字喔。');
+      S.resume=r;app.querySelectorAll('.miss').forEach(x=>x.classList.remove('miss'));
+      const need=[['name','姓名'],['gender','性別'],['birthday','生日'],['phone','手機'],['id_no','證號'],...(r.id_type!=='national'?[['nationality','國籍']]:[]),['email','Email'],['address','通訊地址'],['emergency_name','緊急聯絡人'],['emergency_relation','關係'],['emergency_phone','緊急聯絡電話'],['transport','通勤方式']].filter(([k])=>!String(r[k]||'').trim());
+      if(need.length){need.forEach(([k])=>$('#f-'+k)?.classList.add('miss'));$('#f-'+need[0][0])?.focus();return showErr('還有這些基本資料沒填：'+need.map(x=>x[1]).join('、'));}
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())){$('#f-email').classList.add('miss');return showErr('Email 格式好像不太對，請再看一下。');}
+      if(r.intro.trim().length<20)return showErr('自我介紹請至少寫 20 個字喔。');
       try{await api('/resume',{token:S.token,resume:r});tResume=Date.now()-tResume;META.typing?.enabled?typing():experience();}catch(e){if(e.status===410||e.status===401){alert(e.message);return e.status===401?login(e.message):start();}showErr(e.message);}};
   }
   // ---------- 中文打字小測驗 ----------
@@ -168,7 +174,7 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   function experience(){
     const o=opt();
     app.innerHTML=`${steps(4)}<h2>請問你有${esc(o.name)}相關的工作經驗嗎？</h2><p class="sub">${o.category==='duty'?'例如保全、警衛、門禁管理等工作。':'例如物業管理、社區秘書、櫃台、行政等工作。'}接下來的題目會依你的經驗出題。</p>
-      <div class="opts" style="grid-template-columns:1fr 1fr"><div class="opt" data-e="1"><i>🌱</i><b>有</b><span>做過相關工作</span></div><div class="opt" data-e="0"><i>✨</i><b>沒有</b><span>第一次做這類工作</span></div></div>
+      <div class="opts" style="grid-template-columns:1fr 1fr"><div class="opt" data-e="1"><b>有</b><span>做過相關工作</span></div><div class="opt" data-e="0"><b>沒有</b><span>第一次做這類工作</span></div></div>
       <div id="yrs" style="display:none;margin-top:16px" class="grid"><label>大約幾年<input type="number" id="f-years" min="0" max="60" step="0.5" value="1"></label></div><div class="err" id="err"></div>
       <div class="bar"><span></span><button id="next" disabled>開始作答</button></div>`;
     noAutofill();
@@ -193,7 +199,7 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   // 送出後：立刻清掉這位面試者的所有資料，倒數後回到開始畫面
   function done(){
     if(app._ac)app._ac.abort();S=null;clearTimeout(idle);window.scrollTo(0,0);let n=15;
-    app.innerHTML=`${steps(6)}<div class="hello"><div class="leaf">🌷</div><h2>完成了，辛苦你了！</h2><p>資料已經交給面試主管，請稍坐一下，主管會再跟你聊聊。</p><p class="sub" id="cd"></p><button id="again" class="sec2">回到開始畫面</button></div>`;
+    app.innerHTML=`${steps(6)}<div class="hello"><h2>完成了，辛苦你了！</h2><p>資料已經交給面試主管，請稍坐一下，主管會再跟你聊聊。</p><p class="sub" id="cd"></p><button id="again" class="sec2">回到開始畫面</button></div>`;
     const t=setInterval(()=>{n--;if($('#cd'))$('#cd').textContent=`${n} 秒後回到開始畫面`;if(n<=0){clearInterval(t);start();}},1000);$('#again').onclick=()=>{clearInterval(t);start();};
   }
   boot();
