@@ -43,12 +43,14 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
 .ty-box{font-size:1.15rem;line-height:2;letter-spacing:1px;min-height:150px}
 .ty-meta{display:flex;gap:18px;color:var(--muted);font-weight:600;margin-top:8px;flex-wrap:wrap}
 .login{max-width:440px;margin:30px auto}.login .grid{grid-template-columns:1fr}
+.leafbtn{position:relative;cursor:default;user-select:none;padding:2px 4px;border-radius:10px}.leafbtn.on{cursor:pointer}.leafbtn.on:hover{background:#F3E6DF}
+.lmenu{position:absolute;top:calc(100% + 8px);left:0;z-index:60;background:#FFFDFB;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px rgba(62,46,42,.14);padding:6px;min-width:220px;font-size:.92rem;font-weight:500;letter-spacing:0}.lmenu a{display:block;padding:9px 14px;border-radius:10px;color:#6B4A40;cursor:pointer;white-space:nowrap}.lmenu a:hover{background:var(--soft)}
 .foot{display:flex;justify-content:center;gap:14px;margin-top:16px;color:#B39A92;font-size:.85rem}.foot a{color:#B39A92;cursor:pointer;text-decoration:underline}
 .idle{position:fixed;inset:0;background:rgba(80,55,48,.35);display:flex;align-items:center;justify-content:center;z-index:50}.idle .card{max-width:440px;text-align:center}
 </style>
 </head>
 <body>
-<header><div class="brand"><span>🌿</span><span id="hd">面試填寫</span></div><small id="hd2">請使用電腦的鍵盤與滑鼠填寫</small></header>
+<header><div class="brand"><span class="leafbtn" id="leaf" title="">🌿<div class="lmenu" id="lmenu" hidden><a id="fPw">修改面試帳號密碼</a><a id="fOut">結束今天的面試（登出）</a></div></span><span id="hd">面試填寫</span></div><small id="hd2">請使用電腦的鍵盤與滑鼠填寫</small></header>
 <main><div class="card" id="app"><p>讀取中…</p></div><div class="foot" id="foot"></div></main>
 <script>
 (function(){
@@ -60,6 +62,8 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   const isDesktop=()=>{const coarse=matchMedia('(pointer:coarse)').matches&&!matchMedia('(pointer:fine)').matches;return !coarse&&window.innerWidth>=1000&&!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);};
   const STEPS=['應徵職務','個資告知','履歷','打字小測驗','工作經驗','考核題目','完成'];
   const steps=i=>`<div class="steps">${STEPS.map((s,k)=>`<span class="${k<i?'done':k===i?'on':''}">${s}</span>`).join('')}</div>`;
+  let MENU=false;function menu(on){MENU=on;const l=$('#leaf');l.classList.toggle('on',on);$('#lmenu').hidden=true;}
+  document.addEventListener('click',e=>{const m=$('#lmenu');if(!m)return;if(MENU&&e.target.id==='leaf'){m.hidden=!m.hidden;return;}if(!m.contains(e.target))m.hidden=true;});
   function showErr(m){const e=$('#err');if(e){e.textContent=m;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'center'});}else alert(m);}
   // 每位面試者的欄位名稱都不一樣，瀏覽器不會跳出上一位填過的內容
   function noAutofill(){const tag=Math.random().toString(36).slice(2,8);app.querySelectorAll('input,textarea,select').forEach((el,i)=>{el.setAttribute('autocomplete','off');el.setAttribute('autocorrect','off');el.setAttribute('spellcheck','false');if(!['radio','checkbox'].includes(el.type))el.name=`f${tag}${i}`;});}
@@ -88,7 +92,7 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   }
   // ---------- 面試帳號登入（由人事在面試電腦登入一次） ----------
   function login(msg){
-    S=null;$('#foot').innerHTML='';$('#hd').textContent='面試登入';
+    S=null;menu(false);$('#hd').textContent='面試登入';
     app.innerHTML=`<div class="login"><div class="hello"><h2>面試登入</h2><p>請公司人事用「面試專用帳號」登入這台電腦。</p></div>
       ${msg?`<div class="err" style="display:block">${esc(msg)}</div>`:''}<div class="grid"><label>公司代碼<input id="lc"></label><label>面試帳號密碼<input id="lp" type="password"></label></div><div class="err" id="err"></div>
       <div class="bar" style="justify-content:center"><button id="lgo">登入</button></div><p class="sub center" style="margin-top:16px;font-size:.88rem">面試帳號由系統服務商建立；忘記密碼請洽系統服務商重新設定。</p></div>`;
@@ -110,8 +114,8 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
     app.innerHTML=`<div class="hello"><h2>歡迎你來！</h2><p>請選擇今天想應徵的職務😊</p></div>
       <div class="opts">${META.options.map(o=>`<div class="opt" data-o="${o.id}"><i>${ICON[o.id]||'🌸'}</i><b>${esc(o.name)}</b><span>${esc(o.hint)}</span></div>`).join('')}</div><div id="posBox"></div><div class="err" id="err"></div>
       <div class="bar"><span></span><button id="next" disabled>下一步</button></div>`;
-    $('#foot').innerHTML='<a id="fPw">修改面試帳號密碼</a><a id="fOut">結束今天的面試（登出）</a>';
-    $('#fPw').onclick=()=>changePw(false);$('#fOut').onclick=async()=>{if(!confirm('要登出面試帳號嗎？登出後需要人事重新登入。'))return;try{await api('/logout',{});}catch{}login();};
+    menu(true);
+    $('#fPw').onclick=e=>{e.stopPropagation();$('#lmenu').hidden=true;changePw(false);};$('#fOut').onclick=async e=>{e.stopPropagation();$('#lmenu').hidden=true;if(!confirm('要登出面試帳號嗎？登出後需要人事重新登入。'))return;try{await api('/logout',{});}catch{}login();};
     app.querySelectorAll('[data-o]').forEach(el=>el.onclick=()=>{S.option=el.dataset.o;app.querySelectorAll('[data-o]').forEach(x=>x.classList.toggle('sel',x===el));const o=META.options.find(x=>x.id===S.option);S.position='';
       $('#posBox').innerHTML=`<p style="margin:24px 0 0;font-weight:700;color:#6B4A40">想應徵的職位（可以不選）</p><div class="pos">${o.positions.map(p=>`<label><input type="radio" name="pos" value="${esc(p)}">${esc(p)}</label>`).join('')}<label><input type="radio" name="pos" value="">還不確定</label></div>`;
       app.querySelectorAll('[name=pos]').forEach(r=>r.onchange=()=>{S.position=r.value;app.querySelectorAll('.pos label').forEach(l=>l.classList.toggle('sel',l.contains(r)));});$('#next').disabled=false;});
@@ -119,7 +123,7 @@ button.sec2{background:#fff;color:#7A5A50;border:1px solid var(--line);box-shado
   }
   const opt=()=>META.options.find(x=>x.id===S.option);
   function consent(){
-    $('#foot').innerHTML='';
+    menu(false);
     app.innerHTML=`${steps(1)}<h2>個人資料蒐集告知</h2><p class="sub">請看一下以下說明，同意後就可以開始填寫。</p><div class="note">${esc(META.consent).replace(/\n/g,'<br>')}</div>
       <label style="display:flex;gap:10px;align-items:center;margin-top:18px;font-weight:700"><input type="checkbox" id="ok" style="width:auto"> 我已閱讀並同意以上說明</label><div class="err" id="err"></div>
       <div class="bar"><button class="sec2" id="back">上一步</button><button id="next">同意，開始填寫</button></div>`;
