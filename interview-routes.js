@@ -64,10 +64,11 @@ module.exports = function registerInterviewRoutes(app, d) {
       escalate_minutes: Math.max(1, Math.min(1440, Math.round(Number(c.escalate_minutes) || D.escalate_minutes))),
       typing: { enabled: c.typing?.enabled === undefined ? D.typing.enabled : !!c.typing.enabled, seconds: Math.max(60, Math.min(900, Math.round(Number(c.typing?.seconds) || D.typing.seconds))), text: str(c.typing?.text || D.typing.text, 600) } };
   }
+  const OLD_POS = { '社區經理／總幹事': '社區經理', '日班保全': '日班', '夜班保全': '夜班', '機動保全': '機動', '保全隊長': '主管' };
   function normOpt(o, def) {
     const list = (v, d, m = 40) => Array.isArray(v) ? [...new Set(v.map(x => str(x, m)).filter(Boolean))].slice(0, 20) : d.slice();
     return { id: def.id, name: str(o?.name, 12) || def.name, category: def.category, hint: str(o?.hint ?? def.hint, 60), enabled: o?.enabled === undefined ? true : !!o.enabled,
-      positions: list(o?.positions, def.positions, 30), primary: list(o?.primary, def.primary), backup: list(o?.backup, def.backup) };
+      positions: list(o?.positions, def.positions, 30).map(p => OLD_POS[p] || p), primary: list(o?.primary, def.primary), backup: list(o?.backup, def.backup) };
   }
   function normQ(q, i) {
     const type = ['single', 'multi', 'text'].includes(q?.type) ? q.type : 'single'; const options = type === 'text' ? [] : (Array.isArray(q?.options) ? q.options : []).map(x => str(x, 200)).filter(Boolean).slice(0, 8);
@@ -216,6 +217,10 @@ module.exports = function registerInterviewRoutes(app, d) {
     const name = str(r.name, 30); if (!name) throw err('請填寫姓名');
     const phone = str(r.phone, 20); if (!/^09\d{8}$/.test(phone.replace(/[-\s]/g, '')) && !/^\+?\d{8,15}$/.test(phone.replace(/[-\s]/g, ''))) throw err('請填寫正確的手機號碼（例如 0912345678）');
     if (!isDate(r.birthday)) throw err('請填寫生日');
+    const NEED = [['gender', '性別'], ['email', 'Email'], ['address', '通訊地址'], ['emergency_name', '緊急聯絡人'], ['emergency_relation', '關係'], ['emergency_phone', '緊急聯絡電話'], ['transport', '通勤方式']];
+    const miss = NEED.filter(([k]) => !str(r[k], 120)).map(x => x[1]); if (r.id_type && r.id_type !== 'national' && !str(r.nationality, 30)) miss.push('國籍');
+    if (miss.length) throw err('請填寫：' + miss.join('、'));
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str(r.email, 80))) throw err('Email 格式不正確');
     const idType = ['national', 'arc', 'passport'].includes(r.id_type) ? r.id_type : 'national'; const idNo = str(r.id_no, 20).toUpperCase().replace(/\s/g, '');
     if (!idNo) throw err('請填寫身分證字號或居留證號碼');
     if (idType !== 'passport' && !idValid(idNo)) throw err('身分證字號或居留證號碼格式不正確，請再檢查');
