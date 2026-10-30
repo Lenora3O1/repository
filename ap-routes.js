@@ -436,7 +436,7 @@ const canDecide = (r, u) => { if (r.status !== 'pending' || r.applicant_id === u
       const dd = parse(it.data_json, {}); const u = staffRow(tid, it.staff_id); const m = u ? mi(u) : null;
       let cid = null; try { cid = u ? (getSiteAssignments(u)[0]?.community_id || null) : null; } catch {}
       const site = !!cid || ['site_manager', 'site_deputy', 'site_staff', 'mobile'].includes(m?.kind); if (m?.kind === 'mobile') cid = null;
-      const c = cid && contracts ? contracts.activeFor(tid, cid, monthEnd(run.month)) : null; const eid = c?.entity_id && ents.some(e => e.id === c.entity_id) ? c.entity_id : def.id;
+      const c = cid && contracts ? contracts.activeFor(tid, cid, monthEnd(run.month), m?.position?.id) : null; const eid = c?.entity_id && ents.some(e => e.id === c.entity_id) ? c.entity_id : def.id;
       const ee = dd.ins?.employee || {}, er = dd.ins?.employer || {};
       const salary = int(dd.gross) - int(dd.leave_deduct) - int(dd.attendance_deduct);
       const erIns = int(er.labor) + int(er.occupational) + int(er.health), erPen = int(er.pension);
