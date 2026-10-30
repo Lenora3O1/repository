@@ -215,10 +215,6 @@ function renderFormDesigner(){
         <div><label>公司後台標題</label><input id="companyTitle" value="${escapeAttr(u.companyTitle||'公司管理後台')}"></div>
         <div><label>公司後台副標題</label><input id="companySubtitle" value="${escapeAttr(u.companySubtitle||'物業管理公司')}"></div>
         <div class="wide"><label>公司後台首頁說明</label><textarea id="companyIntro">${escapeHtml(u.companyIntro||'')}</textarea></div>
-        <div><label>公司管理員登入標題</label><input id="companyLoginTitle" value="${escapeAttr(u.companyLoginTitle||'公司管理員登入')}"></div>
-        <div><label>公司管理員登入說明</label><textarea id="companyLoginHint">${escapeHtml(u.companyLoginHint||'')}</textarea></div>
-        <div><label>一般人員登入標題</label><input id="staffLoginTitle" value="${escapeAttr(u.staffLoginTitle||'物業人員登入')}"></div>
-        <div><label>一般人員登入說明</label><textarea id="staffLoginHint">${escapeHtml(u.staffLoginHint||'')}</textarea></div>
       </div>
     </div>`:`
     <div class="panel">
@@ -301,7 +297,7 @@ function addQuestion(){const f=dz();if(!f.pages.length)return;const p=f.pages[0]
 function changeQuestionPage(i,pageId){const f=dz();f.questions[i].pageId=pageId;const groups=groupNamesForPage(pageId);if(!groups.includes(f.questions[i].group))f.questions[i].group=groups[0]||'填寫資料';hoMark();renderQuestionsEditor()}
 function moveQuestionWithinGroup(i,d){const f=dz(),q=f.questions[i],same=f.questions.map((x,idx)=>({x,idx})).filter(o=>o.x.pageId===q.pageId&&(o.x.group||'填寫資料')===(q.group||'填寫資料')).map(o=>o.idx);const pos=same.indexOf(i),j=pos+d;if(j<0||j>=same.length)return;const target=same[j];[f.questions[i],f.questions[target]]=[f.questions[target],f.questions[i]];hoMark();renderQuestionsEditor()}
 function removeQuestion(i){const f=dz(),id=f.questions[i].id;const deps=f.questions.filter(x=>x.showIf&&x.showIf.q===id);if(deps.length&&!confirm(`有 ${deps.length} 題的顯示條件依賴這一題，刪除後那些題目會改成一律顯示。確定刪除嗎？`))return;for(const x of deps)delete x.showIf;f.questions.splice(i,1);hoMark();renderQuestionsEditor()}
-function captureManagerTexts(){if((state.hoRole||'manager')!=='manager'||!$('siteTitle'))return;state.config.title=$('siteTitle').value;state.config.subtitle=$('siteSubtitle').value;state.config.uiTexts={...(state.config.uiTexts||{}),companyTitle:$('companyTitle').value,companySubtitle:$('companySubtitle').value,companyIntro:$('companyIntro').value,companyLoginTitle:$('companyLoginTitle').value,companyLoginHint:$('companyLoginHint').value,staffLoginTitle:$('staffLoginTitle').value,staffLoginHint:$('staffLoginHint').value};}
+function captureManagerTexts(){if((state.hoRole||'manager')!=='manager'||!$('siteTitle'))return;state.config.title=$('siteTitle').value;state.config.subtitle=$('siteSubtitle').value;state.config.uiTexts={...(state.config.uiTexts||{}),companyTitle:$('companyTitle').value,companySubtitle:$('companySubtitle').value,companyIntro:$('companyIntro').value};}
 async function saveFormConfig(){
   const msg=$('formSaveMsg'),role=state.hoRole||'manager',f=dz();
   if(role==='manager')captureManagerTexts();else{f.title=$('hoFormTitle')?.value||f.title;f.subtitle=$('hoFormSubtitle')?.value??f.subtitle;}
