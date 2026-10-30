@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const { DATA_DIR } = require('./data-dir');
 const db = new Database(path.join(DATA_DIR, 'data.sqlite'));
 db.pragma('foreign_keys = ON');
+// WAL：讀寫可同時進行，多人操作時讀取不必等寫入完成；NORMAL 在 WAL 下仍可保證資料一致
+try { db.pragma('journal_mode = WAL'); db.pragma('synchronous = NORMAL'); db.pragma('busy_timeout = 5000'); db.pragma('cache_size = -32000'); } catch (e) { console.warn('[db] WAL 設定失敗：', e.message); }
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS submissions (
@@ -300,6 +302,17 @@ function verifyPassword(password, salt, hash) {
     const candidate = crypto.scryptSync(password, salt, 64).toString('hex');
     return crypto.timingSafeEqual(Buffer.from(candidate, 'hex'), Buffer.from(hash, 'hex'));
   } catch { return false; }
+}
+
+function verifyPasswordAsync(password, salt, hash) {
+  return new Promise(resolve => {
+    try {
+      crypto.scrypt(String(password), salt, 64, (e, key) => {
+        if (e) return resolve(false);
+        try { const h = Buffer.from(hash, 'hex'); resolve(h.length === key.length && crypto.timingSafeEqual(key, h)); } catch { resolve(false); }
+      });
+    } catch { resolve(false); }
+  });
 }
 
 function createStaff(employeeId, name, password, role='staff', tenantId=null) {
@@ -674,7 +687,7 @@ function repairDuplicateNamedTenants() {
     const backupDir = path.join(DATA_DIR, 'backups');
     fs.mkdirSync(backupDir, { recursive: true });
     const backupFile = path.join(backupDir, `data.sqlite.before-v5.6.2-${Date.now()}.bak`);
-    try { fs.copyFileSync(dbFile, backupFile); } catch (e) {
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); fs.copyFileSync(dbFile, backupFile); } catch (e) {
       console.error('[V5.6.2] 無法建立資料庫備份，取消 tenant 合併：', e.message);
       continue;
     }
@@ -741,3 +754,4 @@ CREATE INDEX IF NOT EXISTS idx_gifts_active ON gifts(is_active,sort_order,id);`)
 module.exports = db;
 module.exports.makePassword = makePassword;
 module.exports.verifyPassword = verifyPassword;
+module.exports.verifyPasswordAsync = verifyPasswordAsync;

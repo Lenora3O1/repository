@@ -219,9 +219,15 @@ const sopUpload=multer({
 });
 
 
+const perf=require('./perf');
+app.use(perf.timing);
 app.use(express.json({ limit: '2mb' }));
-// HTML 一律重新驗證，避免瀏覽器沿用舊頁面而載入舊版程式（JS/CSS 以 ?v= 版本號控制快取）
-app.use(express.static(path.join(__dirname, 'public'),{setHeaders:(res,file)=>{if(file.endsWith('.html'))res.setHeader('Cache-Control','no-cache');}}));
+// HTML 一律重新驗證；帶 ?v= 版本號的 JS/CSS 長期快取（改版時版本號會變）；文字檔以 gzip 傳送
+const staticGz=perf.staticGzip(path.join(__dirname, 'public'));
+app.use(staticGz);
+setTimeout(()=>staticGz.warm(),2000).unref?.();
+app.use(express.static(path.join(__dirname, 'public'),{setHeaders:perf.staticHeaders}));
+app.use('/api',perf.jsonGzip);
 app.use(session({
   secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
   resave: false, saveUninitialized: false,
@@ -779,7 +785,7 @@ function getUser(req){
   if(req.session?.employeeId && req.session?.tenantId) return db.prepare('SELECT * FROM staff_users WHERE employee_id=? AND tenant_id=?').get(req.session.employeeId, Number(req.session.tenantId));
   return null;
 }
-function authenticateStaff(employeeId, password, tenantCode='', entry='staff', accountId=0) {
+async function authenticateStaff(employeeId, password, tenantCode='', entry='staff', accountId=0) {
   const eid=String(employeeId||'').trim();
   const pass=String(password||'');
   const code=String(tenantCode||'').trim().toLowerCase();
@@ -794,7 +800,12 @@ function authenticateStaff(employeeId, password, tenantCode='', entry='staff', a
     const ids=LI.staffIdsByMobile(eid);
     if(ids.length){const seen=new Set(rows.map(u=>u.id));for(const u of db.prepare(`${SEL} WHERE u.id IN (${ids.map(()=>'?').join(',')})${code?' AND lower(t.code)=?':''}`).all(...ids,...(code?[code]:[])))if(!seen.has(u.id))rows.push(u);}
   }
-  const matches=rows.filter(u=>u.is_active && u.tenant_status==='active' && db.verifyPassword(pass,u.password_salt,u.password_hash));
+  // 密碼比對改為非同步（在背景執行緒計算），多人同時登入時不會卡住其他人的操作
+  let cand=rows.filter(u=>u.is_active && u.tenant_status==='active');
+  // 已選定公司時只比對那一個帳號，不必逐一計算其他公司的密碼
+  if(accountId&&cand.some(u=>u.id===Number(accountId)))cand=cand.filter(u=>u.id===Number(accountId));
+  const ok=await Promise.all(cand.map(u=>db.verifyPasswordAsync(pass,u.password_salt,u.password_hash)));
+  const matches=cand.filter((u,i)=>ok[i]);
   if(matches.length===0) return {error:FAIL};
   let eligible=matches.filter(u=> loginEntry==='company' ? hasCompanyAccess(u) : (hasSiteAccess(u) || isSiteManager(u)));
   if(eligible.length===0){
@@ -1001,10 +1012,11 @@ app.get('/api/staff/todos/archived',requireStaffFiller,(req,res)=>{
 
 
 // ===== 員編登入 / 登出 =====
-app.post('/api/staff/login',(req,res)=>{
+app.post('/api/staff/login',(req,res,next)=>{staffLoginHandler(req,res).catch(next);});
+async function staffLoginHandler(req,res){
   const {employeeId,password,tenantCode,entry,accountId}=req.body||{};
   const loginEntry=entry==='company'?'company':'staff';
-  const auth=authenticateStaff(employeeId,password,tenantCode,loginEntry,accountId);
+  let auth;try{auth=await authenticateStaff(employeeId,password,tenantCode,loginEntry,accountId);}catch(e){console.error('[login]',e);return res.status(500).json({error:'登入暫時失敗，請稍後再試'});}
   if(auth.error) return res.status(auth.ambiguous?409:401).json({error:auth.error,needsChoice:!!auth.ambiguous,choices:auth.choices||undefined});
   const user=auth.user;
   if(entry==='staff' && user.role!=='company_admin' && !(hasSiteAccess(user) || isSiteManager(user))) return res.status(403).json({error:'此帳號目前沒有可用的工作身分。'});
@@ -1019,7 +1031,7 @@ app.post('/api/staff/login',(req,res)=>{
   req.session.userId=user.id; req.session.entry=entry||'staff'; req.session.employeeId=user.employee_id; req.session.employeeName=user.name; req.session.tenantId=user.tenant_id; req.session.role=user.role||'staff';
   db.prepare('UPDATE staff_users SET last_login_at=? WHERE id=?').run(now(),user.id);
   res.json({success:true,user:{id:user.id,must_change_password:!!user.must_change_password,employee_id:user.employee_id,name:user.name,role:user.role||'staff',admin_level:user.admin_level||'admin',tenant_id:user.tenant_id,tenant_name:user.tenant_name,tenant_code:user.tenant_code,login_mode:user.login_mode||'both',position:user.position||'',work_type:user.work_type||'site',job_category:user.job_category||'',job_level:user.job_level||'',permissions:parsePermissions(user),job_categories:getJobCategories(user),site_assignments:getSiteAssignments(user),company_assignment:getCompanyAssignment(user)}});
-});
+}
 app.post('/api/staff/logout',(req,res)=>{
   delete req.session.staffUserId; delete req.session.staffEmployeeId; delete req.session.staffEmployeeName; delete req.session.staffTenantId;
   if(req.session.entry==='staff'){req.session.userId=null;req.session.employeeId=null;req.session.employeeName=null;req.session.tenantId=null;req.session.role=null;req.session.entry=req.session.companyUserId?'company':'';}
@@ -1331,6 +1343,8 @@ app.post('/api/submissions',requireStaffFiller,(req,res)=>{
 });
 
 // ===== 總後臺 =====
+// 效能監看（總後台）：各 API 的次數、平均、P95、最大耗時與記憶體
+app.get('/api/admin/perf',requireSuperAdmin,(req,res)=>res.json(perf.report()));
 app.post('/api/admin/login',(req,res)=>{const {username,password}=req.body||{};if(username===ADMIN_USER&&password===ADMIN_PASS){req.session.isAdmin=true;req.session.employeeId=null;req.session.tenantId=null;req.session.role='super_admin';return res.json({success:true});}res.status(401).json({error:'帳號或密碼錯誤'});});
 app.post('/api/admin/logout',(req,res)=>{req.session.destroy(()=>res.json({success:true}));});
 app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin}));
