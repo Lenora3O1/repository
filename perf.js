@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 
 const TEXT = { '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.mjs': 'application/javascript; charset=utf-8' };
 const LONG = 'public, max-age=31536000, immutable';
@@ -10,10 +11,22 @@ const WEEK = 'public, max-age=604800';
 
 const acceptsGzip = req => /\bgzip\b/.test(req.headers['accept-encoding'] || '');
 
-// 依網址決定快取：HTML 每次驗證；帶 ?v= 版本號的檔案長期快取（改版時版本號會變）；圖片字型等一週
+// 檔案內容指紋：內容一改，網址上的 ?v= 就跟著變，瀏覽器不會用到舊檔
+const hashes = new Map();
+function hashOf(file) {
+  try {
+    const st = fs.statSync(file); const h = hashes.get(file);
+    if (h && h.mtime === st.mtimeMs && h.size === st.size) return h.v;
+    const v = crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex').slice(0, 10);
+    hashes.set(file, { mtime: st.mtimeMs, size: st.size, v }); return v;
+  } catch { return null; }
+}
+
+// 依網址決定快取：HTML 每次驗證；?v= 等於檔案內容指紋的才長期快取（手動寫的舊版本號一律重新驗證）；圖片字型等一週
 function cacheFor(req, file) {
   if (file.endsWith('.html')) return 'no-cache';
-  if (/[?&]v=/.test(req.originalUrl || req.url)) return LONG;
+  const v = /[?&]v=([^&]+)/.exec(req.originalUrl || req.url || '');
+  if (v && v[1] === hashOf(file)) return LONG;
   if (/\.(png|jpe?g|gif|webp|ico|svg|woff2?|ttf|otf)$/i.test(file)) return WEEK;
   return 'no-cache';
 }
@@ -30,13 +43,35 @@ function staticGzip(root) {
     const done = (e, v) => { if (e) cache.delete(file); const w = c.wait; c.wait = []; w.forEach(f => f(e, v)); };
     fs.readFile(file, (e2, buf) => { if (e2) return done(e2); zlib.gzip(buf, { level: 9 }, (e3, gz) => { if (e3) return done(e3); c.gz = gz; done(null, c); }); });
   }
+  // HTML：把頁面裡引用的 JS/CSS 的 ?v= 自動換成內容指紋（快取最多 3 秒，避免每次都重算）
+  const htmlCache = new Map();
+  function htmlOf(file) {
+    const now = Date.now(); const st = fs.statSync(file); const h = htmlCache.get(file);
+    if (h && h.mtime === st.mtimeMs && now - h.at < 3000) return h;
+    const dir = path.dirname(file);
+    const body = fs.readFileSync(file, 'utf8').replace(/((?:src|href)=")([^"?#:]+)\?v=[^"]*"/g, (m, a, u) => {
+      const f = path.resolve(u.startsWith('/') ? rootAbs : dir, '.' + (u.startsWith('/') ? u : '/' + u));
+      if (!f.startsWith(rootAbs + path.sep)) return m; const v = hashOf(f); return v ? `${a}${u}?v=${v}"` : m;
+    });
+    const buf = Buffer.from(body); const etag = `W/"h${crypto.createHash('md5').update(buf).digest('hex').slice(0, 16)}"`;
+    const c = { mtime: st.mtimeMs, at: now, buf, etag, gz: h && h.etag === etag ? h.gz : zlib.gzipSync(buf, { level: 9 }) };
+    htmlCache.set(file, c); return c;
+  }
   const mw = (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-    if (!acceptsGzip(req)) return next();
     let rel; try { rel = decodeURIComponent(req.path); } catch { return next(); }
     if (rel.endsWith('/')) rel += 'index.html';
     const ext = path.extname(rel).toLowerCase(); const type = TEXT[ext]; if (!type) return next();
     const file = path.resolve(rootAbs, '.' + rel); if (!file.startsWith(rootAbs + path.sep)) return next();
+    if (ext === '.html') {
+      let c; try { c = htmlOf(file); } catch { return next(); }
+      const gz = acceptsGzip(req); const out = gz ? c.gz : c.buf;
+      res.setHeader('Content-Type', type); res.setHeader('Vary', 'Accept-Encoding'); res.setHeader('Cache-Control', 'no-cache'); res.setHeader('ETag', c.etag);
+      if (req.headers['if-none-match'] === c.etag) { res.statusCode = 304; return res.end(); }
+      if (gz) res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Content-Length', out.length); if (req.method === 'HEAD') return res.end(); return res.end(out);
+    }
+    if (!acceptsGzip(req)) return next();
     fs.stat(file, (e, st) => {
       if (e || !st.isFile() || st.size < 1024) return next();
       getGz(file, st, (e2, c) => {
