@@ -49,7 +49,10 @@ module.exports = function registerPayrollRoutes(app, d) {
       if (!cols.includes(c)) db.exec(`ALTER TABLE hr_profiles ADD COLUMN ${c} ${def}`); }
 
   // 公司保險費（團險、誠實險、意外險等）：公司設定一次，新人到職自動套用，個別人員可以排除
-  { const cols = db.prepare('PRAGMA table_info(payroll_settings)').all().map(c => c.name); if (!cols.includes('company_ins_json')) db.exec("ALTER TABLE payroll_settings ADD COLUMN company_ins_json TEXT DEFAULT '[]'"); }
+  { const cols = db.prepare('PRAGMA table_info(payroll_settings)').all().map(c => c.name); if (!cols.includes('company_ins_json')) db.exec("ALTER TABLE payroll_settings ADD COLUMN company_ins_json TEXT DEFAULT '[]'"); if (!cols.includes('show_employer_cost')) db.exec('ALTER TABLE payroll_settings ADD COLUMN show_employer_cost INTEGER DEFAULT 1'); }
+  // 薪資單是否讓員工看到「公司另為您負擔」（勞保、職災、健保、勞退、公司保險的公司負擔）：由老闆決定，預設顯示
+  const showEmployerCost = tid => { const r = db.prepare('SELECT show_employer_cost FROM payroll_settings WHERE tenant_id=?').get(tid); return !r || r.show_employer_cost == null || !!r.show_employer_cost; };
+  const isBoss = u => { if (u?.role === 'company_admin') return true; try { return ['owner', 'gm'].includes(d.org?.memberInfo(u)?.kind); } catch { return false; } };
   { const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name); if (!cols.includes('ins_exclude_json')) db.exec("ALTER TABLE hr_profiles ADD COLUMN ins_exclude_json TEXT DEFAULT '[]'"); }
   { const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name);
     for (const [c, def] of [['id_type', "TEXT DEFAULT 'national'"], ['id_no', "TEXT DEFAULT ''"], ['nationality', "TEXT DEFAULT ''"]]) if (!cols.includes(c)) db.exec(`ALTER TABLE hr_profiles ADD COLUMN ${c} ${def}`); }
@@ -349,6 +352,12 @@ module.exports = function registerPayrollRoutes(app, d) {
     db.prepare('INSERT INTO payroll_settings (tenant_id,company_ins_json,updated_at) VALUES (?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET company_ins_json=excluded.company_ins_json,updated_at=excluded.updated_at').run(tid, JSON.stringify(list), now());
     res.json({ success: true, items: list });
   }));
+  app.put(`${C}/payroll/slip-settings`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
+    if (!isBoss(getUser(req))) return bad(res, '這項設定由老闆或總經理決定', 403);
+    const v = req.body?.show_employer_cost ? 1 : 0;
+    db.prepare('INSERT INTO payroll_settings (tenant_id,show_employer_cost,updated_at) VALUES (?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET show_employer_cost=excluded.show_employer_cost,updated_at=excluded.updated_at').run(tenantId(req), v, now());
+    res.json({ success: true, show_employer_cost: !!v });
+  }));
   app.put(`${C}/payroll/settings`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     const r = Number(req.body?.occupational_rate); if (!(r >= 0 && r < 0.05)) return bad(res, '職災費率請輸入 0～5% 之間');
     db.prepare('INSERT INTO payroll_settings (tenant_id,occupational_rate,updated_at) VALUES (?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET occupational_rate=excluded.occupational_rate,updated_at=excluded.updated_at').run(tenantId(req), r, now());
@@ -402,7 +411,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     const tid = tenantId(req);
     const runs = db.prepare(`SELECT r.id,r.month,r.status,r.published_at,r.published_by,(SELECT COUNT(*) FROM payroll_items i WHERE i.run_id=r.id) people,(SELECT COALESCE(SUM(net),0) FROM payroll_items i WHERE i.run_id=r.id) net,(SELECT COALESCE(SUM(employer_cost),0) FROM payroll_items i WHERE i.run_id=r.id) cost FROM payroll_runs r WHERE r.tenant_id=? ORDER BY r.month DESC LIMIT 36`).all(tid);
     const t = tables.forMonth(monthTW());
-    res.json({ runs, today_month: monthTW(), table: { year: t.year, exact: t.exact }, occupational_rate: occupationalRate(tid, t) });
+    res.json({ runs, today_month: monthTW(), table: { year: t.year, exact: t.exact }, occupational_rate: occupationalRate(tid, t), show_employer_cost: showEmployerCost(tid), can_set_slip: isBoss(getUser(req)) });
   }));
   app.get(`${C}/payroll/runs/:month`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     if (!isMonth(req.params.month)) return bad(res, '月份格式不正確');
@@ -498,6 +507,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     if (!it) return bad(res, '找不到這份薪資單', 404);
     if (!it.viewed_at) db.prepare('UPDATE payroll_items SET viewed_at=? WHERE id=?').run(now(), it.id);
     const data = parse(it.data_json, {}); delete data.bank_account;
+    if (!showEmployerCost(u.tenant_id)) { if (data.ins) delete data.ins.employer; if (Array.isArray(data.company_ins)) data.company_ins = data.company_ins.map(x => ({ ...x, company: 0 })); data.hide_employer_cost = true; }
     res.json({ payslip: { id: it.id, month: it.month, published_at: it.published_at, employee_id: it.employee_id, name: it.name, position: it.position, confirmed_at: it.confirmed_at, ...data } });
   }
   function confirmPayslip(req, res) {

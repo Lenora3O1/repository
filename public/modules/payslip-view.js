@@ -36,7 +36,7 @@
       <div class="ps-cols"><div class="ps-box"><h4>應發項目</h4>${plus}<div class="ps-row total"><span>應發合計</span><b>${money(p.gross)}</b></div></div>
       <div class="ps-box minus"><h4>應扣項目</h4>${minus}<div class="ps-row total"><span>應扣合計</span><b>${money(p.deduct_total)}</b></div></div></div>
       ${p.note?`<div class="ps-note">備註：${esc(p.note)}</div>`:''}
-      <div class="ps-note">公司另為您負擔：勞保 ${money(ins.employer?.labor)}、職災 ${money(ins.employer?.occupational)}、健保 ${money(ins.employer?.health)}、勞退 6% ${money(ins.employer?.pension)} 元${(p.company_ins||[]).filter(x=>n(x.company)).map(x=>`、${esc(x.name)} ${money(x.company)}`).join('')}。<br>如有疑問請洽公司會計。</div></div>`;
+      ${p.hide_employer_cost?'<div class="ps-note">如有疑問請洽公司會計。</div>':`<div class="ps-note">公司另為您負擔：勞保 ${money(ins.employer?.labor)}、職災 ${money(ins.employer?.occupational)}、健保 ${money(ins.employer?.health)}、勞退 6% ${money(ins.employer?.pension)} 元${(p.company_ins||[]).filter(x=>n(x.company)).map(x=>`、${esc(x.name)} ${money(x.company)}`).join('')}。<br>如有疑問請洽公司會計。</div>`}</div>`;
   }
   window.PayslipView={html,money,monthLabel};
 })();
