@@ -179,10 +179,10 @@ module.exports = function createHandoverForms({ fs, path, DATA_DIR, readFormConf
     try { return { ...row, data: JSON.parse(row.data) }; } catch { return null; }
   }
 
-  function register(app, { db, getUser, tenantId, requireStaffFiller, requireSuperAdmin, getAccessibleCommunity }) {
+  function register(app, { db, getUser, tenantId, requireStaffFiller, requireSuperAdmin, getAccessibleCommunity, staffCommunityRows }) {
     const send = (res, err) => res.status(err.status || 500).json({ error: err.status ? err.message : '操作失敗，請稍後再試' });
     const lastSubmission = (req, type, cid) => lastSubmissionFor(db, tenantId(req), cid, type);
-    const myCommunities = req => db.prepare(`SELECT c.* FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name`).all(tenantId(req), getUser(req).id);
+    const myCommunities = req => staffCommunityRows ? staffCommunityRows(getUser(req)) : db.prepare(`SELECT c.* FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name`).all(tenantId(req), getUser(req).id);
 
     app.get('/api/staff/handover/forms', requireStaffFiller, (req, res) => {
       const counts = Object.fromEntries(db.prepare("SELECT COALESCE(form_type,'manager') t,COUNT(*) c FROM drafts WHERE employee_id=? AND tenant_id=? GROUP BY t").all(req.session.employeeId, tenantId(req)).map(r => [r.t, r.c]));

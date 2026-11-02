@@ -3,7 +3,7 @@
 // - 設定精靈：經理或秘書第一次使用住戶名冊時填寫，系統依設定產生全社區戶別清單（例如 2A1 = A 棟 2 樓之 1）。
 (function(){
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  async function api(url,o={}){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',...o});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||'操作失敗');return d;}
+  async function api(url,o={}){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',...o});let d={};try{d=await r.json()}catch{}if(!r.ok)throw Object.assign(new Error(d.error||'操作失敗'),{status:r.status});return d;}
   const J=(m,b)=>({method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   function css(){if(document.getElementById('clCss'))return;const s=document.createElement('style');s.id='clCss';s.textContent=`
 .cl-wrap{display:grid;gap:14px}.cl-com{display:grid;gap:10px;border:1px solid #E6DCD8;border-radius:14px;padding:12px 14px;background:#FBF8F5}.cl-com-h{display:flex;align-items:center;gap:8px}.cl-com-h b{flex:1}.cl-com-h button{margin:0;padding:5px 12px;min-height:0}.cl-kv .hint{display:block;margin-top:3px;font-size:.8rem}.cl-lay{border:1px solid #E9E3E1;border-radius:14px;padding:10px 14px;background:#fff}.cl-lay summary{cursor:pointer;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}.cl-lay[open] summary{margin-bottom:10px}.cl-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cl-form .w{grid-column:1/-1}.cl-form label{display:flex;flex-direction:column;gap:5px;font-weight:700;margin:0}.cl-form input:not([type=checkbox]){margin:0;padding:9px 11px;border:1px solid #D8CECB;border-radius:8px;font:inherit;background:#fff;width:100%;box-sizing:border-box;height:auto}.cl-form label.ck{flex-direction:row;align-items:center;font-weight:600}.cl-form label.ck input{width:auto;margin:0}.cl-form fieldset{border:1px solid #E6DCD8;border-radius:10px;padding:8px 12px;display:grid;gap:6px}@media(max-width:560px){.cl-form{grid-template-columns:1fr}}.cl-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
@@ -25,7 +25,10 @@
   const floorsText=b=>b.type==='list'?'—':`${b.floor_from}～${b.floor_to} 樓`;
   const num=(v,u)=>v===null||v===undefined||v===''?'—':`${Number(v).toLocaleString('en-US')} ${u}`;
   async function renderInfo(el,label){
-    css();const d=await api('/api/staff/residents/layout');const L=d.layout,c=d.community||{},P=d.profile||{};
+    css();let d;
+    // 沒有住戶名冊權限的人（例如保全）只看社區基本資料，不顯示棟別門牌設定
+    try{d=await api('/api/staff/residents/layout');}catch(e){if(e.status!==403)throw e;const b=await api('/api/staff/community/profile');d={...b,basic_only:true,layout:{configured:false,buildings:[]},can_edit:false,formats:{},sample:[],total:0};}
+    const L=d.layout,c=d.community||{},P=d.profile||{};
     const kv=(k,v,h='')=>`<div><small>${k}</small><b>${v}</b>${h?`<span class="hint">${h}</span>`:''}</div>`;
     const yn=v=>v?'可以':'不可以';
     el.innerHTML=`<div class="panel"><div class="eyebrow">🏢 社區資訊</div><h1>${esc(c.name||label||'社區資訊')}</h1>
@@ -34,11 +37,11 @@
         ${kv('總戶數',num(P.units_total,'戶'),P.layout_units?`棟別門牌設定共 ${P.layout_units} 戶`:'')}${kv('樓層',`地上 ${P.floors_up??'—'} 層／地下 ${P.floors_down??'—'} 層`)}${kv('汽車位',num(P.car_spaces,'個'))}${kv('機車位',num(P.moto_spaces,'個'))}
         ${kv('管理委員資格',`承租人：${yn(P.tenant_eligible)}｜出租戶（屋主）：${yn(P.landlord_eligible)}`,'依社區規約設定；「本屆委員」選人時會依此判斷')}</div>
         ${P.updated_at?`<div class="hint">最後更新：${esc(tw(P.updated_at))} ${esc(P.updated_by)}</div>`:''}</div>
-      <details class="cl-lay" ${L.configured?'':'open'}><summary><b>🏗 棟別門牌設定</b><span class="hint">（住戶名冊用來對應門牌地址${L.configured?`；共 ${d.total} 戶`:'；尚未設定'}）</span></summary>
+      ${d.basic_only?'':`<details class="cl-lay" ${L.configured?'':'open'}><summary><b>🏗 棟別門牌設定</b><span class="hint">（住戶名冊用來對應門牌地址${L.configured?`；共 ${d.total} 戶`:'；尚未設定'}）</span></summary>
       ${L.configured?`<div style="overflow:auto;border:1px solid #E9E3E1;border-radius:12px"><table class="cl-t"><thead><tr><th>棟別</th><th>位置</th><th>門牌</th><th>樓層</th><th>每層戶號</th><th>戶數</th></tr></thead><tbody>${L.buildings.map(b=>`<tr><td><b>${esc(b.name)}</b> <small style="color:#7A5F58">（${esc(b.code)}）</small></td><td>${b.zone?`<span class="cl-zone">${esc(b.zone)}</span>`:''}</td><td>${esc(b.type==='list'?(b.door?`${b.door}（逐戶）`:'逐戶指定'):b.door)}</td><td>${floorsText(b)}</td><td>${esc(unitsText(b))}</td><td>${d.counts[b.code]||0}</td></tr>`).join('')}</tbody></table></div>
         <div class="hint">戶別代號格式：${esc(d.formats[L.code_format]||'')}。例如：${d.sample.slice(0,2).map(x=>`${esc(x.code)} = ${esc(x.address)}`).join('；')}</div>`
       :`<p class="hint" style="margin:6px 0">設定每一棟的門牌、樓層和每層戶號後，住戶名冊上傳時會自動對到門牌地址。</p>`}
-      ${d.can_edit?`<div style="margin-top:8px"><button type="button" class="secondary" id="clEdit">${L.configured?'✏️ 修改棟別門牌設定':'🏗 開始設定棟別門牌'}</button></div>`:''}</details>
+      ${d.can_edit?`<div style="margin-top:8px"><button type="button" class="secondary" id="clEdit">${L.configured?'✏️ 修改棟別門牌設定':'🏗 開始設定棟別門牌'}</button></div>`:''}</details>`}
       <p class="hint" style="margin:0">社區基本資料、棟別門牌由經理或秘書設定；管理委員會資料請到「管理委員會 → 本屆委員」。</p></div></div>`;
     el.querySelector('#clEdit')?.addEventListener('click',()=>openEditor({onSaved:()=>renderInfo(el,label)}));
     el.querySelector('#clBasic')?.addEventListener('click',()=>editBasic(P,()=>renderInfo(el,label)));

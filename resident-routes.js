@@ -495,6 +495,14 @@ module.exports = function registerResidentRoutes(app, d) {
     res.json({ community: c, profile: profileOf(t.tid, t.cid), layout: CL.layout(t.tid, t.cid), formats: Object.fromEntries(Object.entries(CL.FORMATS).map(([k, v]) => [k, v.label])), counts: per, total: U.length, can_edit: residentCanEdit(t.u),
       sample: U.slice(0, 3).concat(U.slice(-2)).map(u => ({ code: u.code, address: u.address })) });
   });
+  // 社區基本資料（地址、電話、戶數、車位等，不含住戶）：駐點在這個社區的人都可以看；保全等沒有住戶名冊權限的人也能看
+  app.get('/api/staff/community/profile', requireStaffFiller, (req, res) => {
+    const u = getUser(req);
+    if (!u || !u.is_active || u.role === 'company_admin' || ['left', 'blacklist', 'disabled'].includes(String(u.person_status || ''))) return res.status(403).json({ error: '這個帳號沒有權限' });
+    const c = residentActiveCommunity(req); if (!c) return res.status(400).json({ error: '請先選擇社區' });
+    res.set('Cache-Control', 'no-store');
+    res.json({ community: { id: c.id, name: c.name }, profile: profileOf(tenantId(req), c.id) });
+  });
   // 社區基本資料（經理、秘書）
   app.put('/api/staff/residents/profile', requireStaffFiller, (req, res) => {
     req.body = { ...(req.body || {}), category: 'residents-contact' }; const t = ctx(req, res, { edit: true }); if (!t) return;
