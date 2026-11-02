@@ -137,7 +137,7 @@
           btn.addEventListener('click',()=>{
             const open=btn.getAttribute('aria-expanded')!=='false';
             // 有子目錄但本身也是頁面（代辦事項、社區資訊）：點母目錄也會打開該頁
-            if(String(item.action||'')==='todo'||(String(item.action||'')==='community-info'&&!open)){
+            if(String(item.action||'')==='todo'||(['community-info',...(scopeOf()==='staff'?['company-resources']:[])].includes(String(item.action||''))&&!open)){
               document.dispatchEvent(new CustomEvent('workspace-menu',{detail:{action:item.action,id:item.id,label:item.label}}));
             }
             // 手機／桌機都採用手風琴式目錄：開啟新的母目錄時，其他母目錄自動收起。
