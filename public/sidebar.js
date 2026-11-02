@@ -67,8 +67,15 @@
   const baseUrl=()=>location.pathname+location.search;
   const menuUrl=d=>`${baseUrl()}#m=${encodeURIComponent(keyOf(d))}`;
   try{if(!history.state&&!/^#m=/.test(location.hash))history.replaceState({home:true},'',baseUrl());}catch(e){}
+  // ---------- 系統更新偵測：部署新版後，還開著的舊頁面在點下一個功能時自動重新整理成新版 ----------
+  // 伺服器每個 API 回應都帶 X-App-Version；和頁面載入時的版本不同，就代表程式已經更新。
+  let appVer=null,appStale=false;
+  try{const of=window.fetch.bind(window);window.fetch=async(...args)=>{const r=await of(...args);try{const v=r.headers.get('x-app-version');if(v){if(appVer===null)appVer=v;else if(v!==appVer&&!appStale){appStale=true;showUpdateBar();}}}catch(e){}return r;};}catch(e){}
+  function showUpdateBar(){if(document.getElementById('appUpdateBar'))return;const b=document.createElement('div');b.id='appUpdateBar';b.setAttribute('role','status');b.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9999;background:#5F403B;color:#fff;padding:10px 18px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-size:15px;cursor:pointer;max-width:92vw;text-align:center';b.textContent='🔄 系統已更新，點這裡重新整理（下一次點選功能也會自動更新）';b.onclick=()=>location.reload();document.body.appendChild(b);}
   document.addEventListener('workspace-menu',e=>{
     const d=e.detail||{};if(d.fromHistory)return;
+    // 程式已更新：直接用新版打開這個功能（網址帶 #m=…，重新整理後會自動開啟），避免舊程式看不懂新功能
+    if(appStale&&keyOf(d)&&!isHome(d)){e.stopImmediatePropagation();try{location.replace(menuUrl(d));}catch(_){}location.reload();return;}
     try{
       const st=history.state;
       if(isHome(d)){if(!st||st.home)history.replaceState({home:true},'',baseUrl());else history.pushState({home:true},'',baseUrl());return;}

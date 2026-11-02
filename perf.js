@@ -137,4 +137,13 @@ function report() {
   return { since: new Date(started).toISOString(), uptime_min: Math.round((Date.now() - started) / 60000), memory_mb: { rss: Math.round(m.rss / 1048576), heap: Math.round(m.heapUsed / 1048576) }, routes: rows };
 }
 
-module.exports = { staticGzip, staticHeaders, jsonGzip, timing, report };
+// 目前程式版本（啟動時依前端檔案內容計算）：API 回應帶 X-App-Version，前端用來發現「系統已更新」
+let APP_VERSION = '';
+function appVersion(root) {
+  if (APP_VERSION) return APP_VERSION;
+  const h = crypto.createHash('md5'); const walk = d => { for (const n of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const f = path.join(d, n.name); if (n.isDirectory()) walk(f); else if (/\.(js|css|html)$/.test(n.name)) { const st = fs.statSync(f); h.update(`${f}:${st.size}:${st.mtimeMs}`); } } };
+  try { walk(path.resolve(root)); } catch {}
+  APP_VERSION = h.digest('hex').slice(0, 12); return APP_VERSION;
+}
+const versionHeader = root => (req, res, next) => { res.setHeader('X-App-Version', appVersion(root)); next(); };
+module.exports = { appVersion, versionHeader, staticGzip, staticHeaders, jsonGzip, timing, report };

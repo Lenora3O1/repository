@@ -228,6 +228,7 @@ app.use(staticGz);
 setTimeout(()=>staticGz.warm(),2000).unref?.();
 app.use(express.static(path.join(__dirname, 'public'),{setHeaders:perf.staticHeaders}));
 app.use('/api',perf.jsonGzip);
+app.use('/api',perf.versionHeader(path.join(__dirname,'public')));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
   resave: false, saveUninitialized: false,
