@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 13;
+const VERSION = 14;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -28,6 +28,8 @@ COMPANY.unshift({ parent: null, children: [{ id: 'company-expense', label: '公�
 // 方案與費用：只給公司高層（老闆、總經理、公司管理員），開通會計模組時會計也看得到
 COMPANY.push({ parent: null, children: [{ id: 'company-plan', label: '方案與費用', action: 'plan-billing', exact: ['方案與費用', '方案與計費', '使用方案'], after: 'company-schedule', icon: '💳' }] });
 COMPANY.push({ parent: null, children: [{ id: 'company-interviews', label: '面試管理', action: 'interviews', exact: ['面試管理', '面試人員', '招募管理'], after: 'company-hr', icon: '📝' }] });
+// 工作日誌管理：舊版或各公司自訂的目錄可能沒有正確的功能代碼，點了只會看到「建置中」；依名稱補回 work-journal
+COMPANY.push({ parent: null, children: [{ id: 'company-work-journal', label: '工作日誌管理', action: 'work-journal', exact: ['工作日誌管理', '工作日誌', '日誌管理'], after: 'company-templates', icon: '📝' }] });
 // 出勤與巡邏：出勤（打卡點設定、紀錄、補打卡）與巡邏（巡邏點設定、紀錄）分開排列，名稱直接說明用途
 COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', labels: ['出勤與巡邏'], icon: '📍', action: 'attendance' }, children: [
   { id: 'company-attendance-locations', label: '出勤打卡點設定', action: 'attendance-locations', exact: ['出勤打卡'], rename: ['出勤打卡'] },
