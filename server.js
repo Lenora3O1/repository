@@ -583,6 +583,15 @@ function getSiteAssignments(u){
   const legacy=db.prepare(`SELECT c.id,c.name FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE sc.staff_id=? AND c.tenant_id=? AND c.status='active' ORDER BY c.name`).all(u.id,u.tenant_id);
   return legacy.map(c=>({community_id:c.id,community_name:c.name,job_categories:getJobCategories(u),job_level:u.job_level||'',permissions:effectivePermissions(u)}));
 }
+// 人員可以進入的社區：新版駐點設定（staff_work_assignments）＋舊版 staff_communities，兩邊合併
+function staffCommunityRows(u){
+  if(!u) return [];
+  if(u.role==='company_admin') return db.prepare("SELECT * FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(u.tenant_id);
+  const ids=new Set();try{for(const a of getSiteAssignments(u))if(a.community_id)ids.add(Number(a.community_id));}catch{}
+  for(const r of db.prepare("SELECT community_id FROM staff_communities WHERE staff_id=?").all(u.id))ids.add(Number(r.community_id));
+  if(!ids.size) return [];
+  return db.prepare(`SELECT * FROM communities WHERE tenant_id=? AND status='active' AND id IN (${[...ids].map(()=>'?').join(',')}) ORDER BY name`).all(u.tenant_id,...ids);
+}
 function getCompanyAssignment(u){
   if(!u) return null;
   const r=db.prepare(`SELECT * FROM staff_work_assignments WHERE staff_id=? AND tenant_id=? AND scope_type='company' ORDER BY id LIMIT 1`).get(u.id,u.tenant_id);
@@ -743,6 +752,8 @@ function resolveMenu(scope,tenantIdValue,staffUser=null){
     items=items.filter(item=>{
       const key=menuPermissionKey(item,scope);
       if(scope==='company' && String(item.action||'')==='interviews') return !!interviewApi?.isReviewer(staffUser);
+      // 存證信函以管委會名義寄出，只有經理、秘書能用；其他人（保全等）不顯示，免得點進去才說不能用
+      if(scope==='staff' && String(item.action||'')==='legal-letter') return residentCanEdit(staffUser);
       if(!key) return true;
       // 現場班表是案場營運的基本功能。權限必須以實際駐點關係為準，
       // 不可因員工主檔與 staff_work_assignments 的職務欄位不同步而把整個班表目錄藏起來。
@@ -841,7 +852,7 @@ app.get('/api/staff/manager-checklist',requireStaffFiller,(req,res)=>{
     if(!Array.isArray(config.pages)||!config.pages.length||!Array.isArray(config.questions)||!config.questions.length){
       return res.status(500).json({error:'中央交接清冊設定不完整，請到總後臺檢查交接清冊頁面與題目設定。'});
     }
-    const communities=db.prepare(`SELECT c.* FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name`).all(tenantId(req),getUser(req).id);
+    const communities=staffCommunityRows(getUser(req));
     res.json({
       version:'central-manager',
       formConfig:{title:config.title||'社區交接清冊',subtitle:config.subtitle||'',pages:config.pages,questions:config.questions},
@@ -1286,10 +1297,7 @@ app.get('/api/staff/profile',requireStaff,(req,res)=>{
 });
 
 app.get('/api/staff/communities',requireStaff,(req,res)=>{
-  const u=getUser(req); let rows;
-  if(u.role==='company_admin') rows=db.prepare("SELECT * FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tenantId(req));
-  else rows=db.prepare("SELECT c.* FROM communities c JOIN staff_communities sc ON sc.community_id=c.id WHERE c.tenant_id=? AND c.status='active' AND sc.staff_id=? ORDER BY c.name").all(tenantId(req),u.id);
-  res.json(rows);
+  res.json(staffCommunityRows(getUser(req)));
 });
 
 // ===== 員工草稿 =====
@@ -2760,7 +2768,7 @@ require('./account-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCom
 const leaveApi=require('./leave-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments,payroll,org:orgApi,redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));if(!c)scheduleTaiwanHolidayDates(Number(y)).catch(()=>{});return c||scheduleFallbackRedDates(y);}});
 const punchFixApi=require('./punch-fix-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,effectivePermissions});
 // ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
-handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity});
+handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity,staffCommunityRows});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
 
 // ===== 代班／調假／加班（依組織架構調度，連動班表與薪資）=====
