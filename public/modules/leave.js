@@ -98,10 +98,12 @@
   // ---------- 申請 ----------
   async function renderApply(box){
     const m=S.meta;const T0=m.types[0];
+    // 特休還沒有天數（人事未登記到職日、或已用完）時，預設改選下一個假別，避免一打開就看到錯誤
+    const defKey=(T0?.key!=='annual'||(m.balances?.annual?.days&&m.balances.annual.left>0))?T0?.key:(m.types.find(t=>t.key!=='annual')||T0)?.key;
     box.innerHTML=`${balanceCards(m.balances,m.hours_per_day)}
       ${m.gender_missing?'<div class="lv-prev err" style="margin-bottom:10px">人事資料尚未登記您的性別，生理假、產假、產檢假暫時無法選擇；如需申請請洽人事。</div>':''}
       <form class="lv-form" id="lvForm">
-        <label class="wide">假別<select name="type">${m.types.map(t=>`<option value="${esc(t.key)}">${esc(t.name)}</option>`).join('')}</select></label>
+        <label class="wide">假別<select name="type">${m.types.map(t=>`<option value="${esc(t.key)}" ${t.key===defKey?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label>
         <div class="wide lv-type-info" id="lvInfo"></div>
         <label id="lvSubWrap" class="wide"><span class="lt">類別</span><select name="sub"></select></label>
         <label id="lvEventWrap" class="req"><span class="lt">事由日期</span><input type="date" name="event_date"></label>

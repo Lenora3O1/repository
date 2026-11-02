@@ -89,7 +89,9 @@
     const m=location.hash.match(/^#m=(.+)$/);if(!m||window.__deepLinkDone)return false;window.__deepLinkDone=true;
     const key=decodeURIComponent(m[1]);
     const items=await Promise.race([menuReady,new Promise(r=>setTimeout(()=>r(menuItems||[]),6000))]);
-    const it=(items||[]).find(x=>String(x.id)===key)||(items||[]).find(x=>String(x.action||'')===key);
+    let it=(items||[]).find(x=>String(x.id)===key)||(items||[]).find(x=>String(x.action||'')===key);
+    // 公司端的母目錄（例如「會計」「總務管理」）本身沒有頁面：直接打開第一個子項目
+    if(it&&/company\.html/.test(location.pathname)){const kids=(items||[]).filter(x=>String(x.parentId||'')===String(it.id)&&x.enabled!==false);if(kids.length&&['finance','company-resources'].includes(String(it.action||'')))it=kids[0];}
     if(!it){try{history.replaceState({home:true},'',baseUrl());}catch(e){}return false;}
     const parent=it.parentId?items.find(x=>String(x.id)===String(it.parentId)):null;
     const d={action:it.action,id:it.id,label:it.label,parentId:it.parentId||null,parentLabel:parent?.label||''};
