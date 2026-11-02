@@ -19,6 +19,8 @@
       ({r,d}=await post({...payload,accountId:id}));
     }
     if(!r.ok){const e=new Error(d.error||'登入失敗');e.data=d;throw e;}
+    // 兩步驟驗證（公司管理員、老闆、會計登入內勤後台）
+    if((d.need_2fa||d.setup_2fa)&&window.TwoFA)d=await window.TwoFA.run(d,'/api/staff/login-2fa');
     return d;
   }
   window.LoginChoice={login,choose};

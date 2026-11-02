@@ -203,3 +203,24 @@
   function sync(){const home=document.getElementById('homeView');const logged=main?getComputedStyle(main).display!=='none':home?getComputedStyle(home).display!=='none':(login?getComputedStyle(login).display==='none':true);document.body.classList.toggle('is-authenticated',logged);if(logged){const scope=location.pathname.includes('company.html')?'company':location.pathname.endsWith('/')||location.pathname.includes('index.html')?'staff':null;if(scope)setTimeout(()=>loadDynamicSidebar(scope),30)}}
   if(login||main){sync();const mo=new MutationObserver(sync);if(login)mo.observe(login,{attributes:true,attributeFilter:['style','class']});const hv=document.getElementById('homeView');if(hv&&!main)mo.observe(hv,{attributes:true,attributeFilter:['style','class']});if(main)mo.observe(main,{attributes:true,attributeFilter:['style','class']})}
 })();
+
+// ---------- 閒置自動登出（公司內勤後台、系統總後台） ----------
+// 30 分鐘沒有任何操作就自動登出，避免電腦離開座位時被別人看到資料。多個分頁共用「最後操作時間」，在任一分頁操作都算數。
+(function(){
+  const p=location.pathname;const scope=/company\.html/.test(p)?'company':/admin\.html/.test(p)?'admin':'';if(!scope)return;
+  const LIMIT=30*60*1000,KEY='lastActivity:'+scope,MSG='idleLogout:'+scope;
+  let last=Date.now(),wrote=0;
+  const save=t=>{try{localStorage.setItem(KEY,String(t));}catch(e){}};
+  const act=()=>{const t=Date.now();last=t;if(t-wrote>15000){wrote=t;save(t);}};
+  ['mousedown','keydown','touchstart','wheel','mousemove','scroll'].forEach(e=>window.addEventListener(e,act,{passive:true,capture:true}));
+  save(last);
+  try{if(sessionStorage.getItem(MSG)){sessionStorage.removeItem(MSG);const d=document.createElement('div');d.setAttribute('role','status');d.style.cssText='position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:10000;background:#5F403B;color:#fff;padding:12px 18px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-weight:600;max-width:92vw';d.textContent='為了資料安全，閒置超過 30 分鐘已自動登出，請重新登入。';document.addEventListener('DOMContentLoaded',()=>document.body.appendChild(d));if(document.body)document.body.appendChild(d);setTimeout(()=>d.remove(),10000);}}catch(e){}
+  setInterval(async()=>{
+    if(!document.body.classList.contains('is-authenticated'))return;
+    let t=last;try{t=Math.max(last,Number(localStorage.getItem(KEY))||0);}catch(e){}
+    if(Date.now()-t<LIMIT)return;
+    try{await fetch(scope==='admin'?'/api/admin/logout':'/api/company/logout',{method:'POST',credentials:'same-origin'});}catch(e){}
+    try{sessionStorage.setItem(MSG,'1');}catch(e){}
+    location.replace(location.pathname);
+  },20000);
+})();

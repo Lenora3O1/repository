@@ -162,6 +162,7 @@ module.exports = function registerPlans(app, d) {
   function menuAllowed(tid, item, u, scope) {
     const a = String(item?.action || '');
     if (scope === 'company' && a === 'plan-billing') return canViewPlan(u);
+    if (scope === 'company' && a === 'security-center') { const x = acct(); return !!(u && (u.role === 'company_admin' || x?.isBoss?.(u))); }
     const k = scope === 'company' ? MENU_MODULE[a] : null;
     return k ? isOn(tid, k) : true;
   }

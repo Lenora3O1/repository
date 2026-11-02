@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 // 在正式主機上（Render／Zeabur 或 NODE_ENV=production）
-const isHosted = () => !!(process.env.RENDER || process.env.ZEABUR || process.env.ZEABUR_SERVICE_ID || process.env.NODE_ENV === 'production');
+const isHosted = () => process.env.SECURITY_MODE === 'development' ? false : !!(process.env.RENDER || Object.keys(process.env).some(k => k.startsWith('ZEABUR')) || process.env.NODE_ENV === 'production' || process.env.SECURITY_MODE === 'production');
 
 // ---------- Session 金鑰 ----------
 // 沒有設定 SESSION_SECRET 時，不再使用寫死在程式裡的預設值；改為隨機產生並保存在資料夾（只有主機能讀）。
@@ -37,7 +37,7 @@ function headers(req, res, next) {
 // 同一個 IP＋帳號 15 分鐘內錯 5 次 → 鎖 15 分鐘；同一個 IP 15 分鐘內錯 30 次（不分帳號）→ 整個 IP 鎖 15 分鐘。
 const WINDOW = 15 * 60 * 1000, PER_ACCOUNT = 5, PER_IP = 30, LOCK = 15 * 60 * 1000;
 const fails = new Map(); // key -> { n, first, until }
-const LOGIN_PATH = /^\/api\/(?:[a-z0-9-]+\/)*login$/;
+const LOGIN_PATH = /^\/api\/(?:[a-z0-9-]+\/)*login(?:-2fa)?$/;
 const ipOf = req => String(req.ip || req.socket?.remoteAddress || '');
 const acctOf = req => { const b = req.body || {}; return String(b.employeeId || b.username || b.phone || b.code || b.loginCode || b.tenantCode || '').trim().toLowerCase().slice(0, 80); };
 function hit(key, now) {
@@ -58,7 +58,8 @@ function loginGuard(req, res, next) {
     const t = Date.now();
     if (res.statusCode === 401 || res.statusCode === 403) {
       const a = hit(ka, t), i = hit(ki, t);
-      if (a.n >= PER_ACCOUNT) { a.until = t + LOCK; console.warn(`[資安] 登入連續失敗已鎖定 ${LOCK / 60000} 分鐘：${req.path} 帳號=${acctOf(req) || '(空)'} IP=${ip}`); }
+      // 現場／內勤帳號改由資料庫鎖定（錯 5 次上鎖、需主管解鎖），這裡只處理總後台與面試機
+      if (a.n >= PER_ACCOUNT && req.path !== '/api/staff/login') { a.until = t + LOCK; console.warn(`[資安] 登入連續失敗已鎖定 ${LOCK / 60000} 分鐘：${req.path} 帳號=${acctOf(req) || '(空)'} IP=${ip}`); }
       if (i.n >= PER_IP) { i.until = t + LOCK; console.warn(`[資安] 同一 IP 大量登入失敗已鎖定：IP=${ip}`); }
     } else if (res.statusCode === 200) fails.delete(ka);
   });
@@ -83,4 +84,23 @@ function adminPasswordProblem(pass) {
   return '';
 }
 
-module.exports = { isHosted, sessionSecret, headers, loginGuard, safeEqual, adminPasswordProblem, _fails: fails };
+// ---------- 密碼規則 ----------
+// 至少 8 碼、英文和數字都要有、不能和帳號或手機相同、不能是常見密碼或連續／重複的字
+const COMMON = new Set(['password', 'password1', 'passw0rd', 'qwerty123', 'abc12345', 'abcd1234', 'a1234567', 'aa123456', 'pass1234', 'admin123', 'iloveyou1', 'qwer1234', 'asdf1234', 'zxcv1234', 'test1234', 'user1234', 'abc123456', '1qaz2wsx', 'qaz123456', 'a12345678', 'p@ssw0rd']);
+function passwordProblem(pw, { account = '', mobile = '' } = {}) {
+  pw = String(pw || '');
+  if (pw.length < 8) return '密碼至少 8 碼';
+  if (pw.length > 64) return '密碼太長（最多 64 碼）';
+  if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) return '密碼要同時有英文字母和數字';
+  const low = pw.toLowerCase();
+  if (account && low.includes(String(account).toLowerCase()) && String(account).length >= 3) return '密碼不能包含帳號';
+  const dg = s => String(s || '').replace(/\D/g, '');
+  if (mobile && dg(mobile).length >= 9 && dg(pw).includes(dg(mobile).slice(-9))) return '密碼不能包含手機號碼';
+  if (COMMON.has(low)) return '這個密碼太常見、容易被猜到，請換一個';
+  if (/^(.)\1+$/.test(pw) || /(.)\1{4,}/.test(pw)) return '密碼不能是同一個字重複';
+  const seq = '01234567890abcdefghijklmnopqrstuvwxyz'; const alnum = low.replace(/[^a-z0-9]/g, '');
+  if (alnum.length >= 8 && (seq.includes(alnum) || seq.split('').reverse().join('').includes(alnum))) return '密碼不能是連續的字（例如 abcd1234）';
+  return '';
+}
+
+module.exports = { passwordProblem, isHosted, sessionSecret, headers, loginGuard, safeEqual, adminPasswordProblem, _fails: fails };

@@ -9,14 +9,11 @@ module.exports = function registerAccountRoutes(app, d) {
   db.exec('CREATE TRIGGER IF NOT EXISTS trg_staff_users_must_change AFTER INSERT ON staff_users BEGIN UPDATE staff_users SET must_change_password=1 WHERE id=NEW.id; END;');
 
   const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
-  function rule(pw, u) {
-    if (pw.length < 6) return '新密碼至少 6 碼';
-    if (pw.length > 64) return '新密碼太長';
-    if (pw === u.employee_id) return '新密碼不能與帳號相同';
-    { const dg = s => String(s || '').replace(/\D/g, ''); let m = ''; try { m = db.prepare('SELECT mobile FROM hr_profiles WHERE staff_id=?').get(u.id)?.mobile || ''; } catch {} if (m && dg(pw).length >= 9 && dg(pw).slice(-9) === dg(m).slice(-9) && pw.replace(/[\d\s+-]/g, '') === '') return '新密碼不能與帳號（手機號碼）相同'; }
-    if (/^(\d)\1+$/.test(pw) || ['123456', '1234567', '12345678', '000000', '111111', 'password'].includes(pw.toLowerCase())) return '這個密碼太容易被猜到，請換一個';
-    return '';
-  }
+  const security = require('./security');
+  const mobileOf = u => { try { return db.prepare('SELECT mobile FROM hr_profiles WHERE staff_id=?').get(u.id)?.mobile || ''; } catch { return ''; } };
+  const rule = (pw, u) => security.passwordProblem(pw, { account: u.employee_id, mobile: mobileOf(u) });
+  // 登入成功時檢查：原本的密碼不符合新規則（例如 123456、pass1234），下一步就要求本人改密碼
+  d.checkWeakOnLogin = (u, pw) => { if (!u || u.must_change_password) return; if (rule(pw, u)) db.prepare('UPDATE staff_users SET must_change_password=1 WHERE id=?').run(u.id); };
   function change(req, res) {
     const u = getUser(req); if (!u) return bad(res, '尚未登入', 401);
     const cur = String(req.body?.current_password || ''), next = String(req.body?.new_password || '');
@@ -40,7 +37,17 @@ module.exports = function registerAccountRoutes(app, d) {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
     const temp = Array.from(crypto.randomBytes(8), b => alphabet[b % alphabet.length]).join('');
     const p = db.makePassword(temp);
-    db.prepare('UPDATE staff_users SET password_hash=?,password_salt=?,must_change_password=1,updated_at=? WHERE id=?').run(p.hash, p.salt, now(), u.id);
+    db.prepare("UPDATE staff_users SET password_hash=?,password_salt=?,must_change_password=1,failed_logins=0,locked_at='',updated_at=? WHERE id=?").run(p.hash, p.salt, now(), u.id);
     res.json({ success: true, temp_password: temp, employee_id: u.employee_id, name: u.name });
+  });
+  // 解鎖：密碼連續錯 5 次被鎖的帳號，由有「人員管理」權限的主管解鎖（公司負責人只能由總後台重發密碼）
+  app.post('/api/company/staff/:id/unlock', requireCompanyAdmin, requireCompanyPermission('manage-staff'), (req, res) => {
+    const me = getUser(req); const u = db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(Number(req.params.id), tenantId(req));
+    if (!u) return bad(res, '找不到人員', 404);
+    if (u.role === 'company_admin' && (u.admin_level || 'admin') === 'owner') return bad(res, '公司負責人帳號請聯絡系統服務商（總後台）重新核發密碼', 403);
+    if (u.role === 'company_admin' && (me.role !== 'company_admin' || (me.admin_level || 'admin') !== 'owner')) return bad(res, '公司管理員帳號只能由公司負責人解鎖', 403);
+    db.prepare("UPDATE staff_users SET failed_logins=0,locked_at='',updated_at=? WHERE id=?").run(now(), u.id);
+    try { db.prepare('INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(u.tenant_id, me.employee_id, me.name, 'account_unlocked', 'security', 'staff_user', String(u.id), `解鎖 ${u.name}（${u.employee_id}）`, now()); } catch {}
+    res.json({ success: true });
   });
 };
