@@ -2813,7 +2813,7 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
 
 // ===== 工作日誌（每日／每週）：路由在 journal-routes.js =====
 // ===== 人事管理、借資、人員薪資統計表、人員薪資單、投保級距表 =====
-const payroll=require('./payroll-routes')(app,{db,fs,path,DATA_DIR,XLSX,getUser,tenantId,now,effectivePermissions,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments});
+const payroll=require('./payroll-routes')(app,{org:orgApi,db,fs,path,DATA_DIR,XLSX,getUser,tenantId,now,effectivePermissions,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments});
 // ===== 組織架構（職位、區域、上下級）與帳號密碼 =====
 orgApi=require('./org-routes')(app,{db,LI,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,requireSuperAdmin,getSiteAssignments,syncWorkAssignments,guardSensitivePermissions,parsePermissions,PERMISSION_LABELS:STAFF_PERMISSION_LABELS,COMPANY_KEYS:COMPANY_PERMISSION_KEYS,SITE_KEYS:SITE_PERMISSION_KEYS});
 require('./account-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,requireCompanyPermission,requireSuperAdmin});
