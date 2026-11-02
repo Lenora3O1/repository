@@ -290,12 +290,14 @@ module.exports = function registerDutyRoutes(app, d) {
   app.get('/api/company/duty-logs', requireCompanyAdmin, wrap((req, res) => {
     const c = companyCtx(req); const q = req.query || {}; const from = isDate(q.from) ? q.from : '0000-00-00', to = isDate(q.to) ? q.to : '9999-12-31';
     const cid = Number(q.community_id || 0);
-    const rows = db.prepare(`SELECT * FROM duty_logs WHERE tenant_id=? AND status='submitted' AND date BETWEEN ? AND ? ${cid ? 'AND community_id=?' : ''} ${q.flagged === '1' ? 'AND flagged=1' : ''} ORDER BY date DESC, shift DESC LIMIT 500`).all(...[c.tid, from, to, ...(cid ? [cid] : [])]);
+    const sc = d.companyCommunityScope ? d.companyCommunityScope(c.u) : null; // 區域督導只看負責區域
+    const rows = db.prepare(`SELECT * FROM duty_logs WHERE tenant_id=? AND status='submitted' AND date BETWEEN ? AND ? ${cid ? 'AND community_id=?' : ''} ${q.flagged === '1' ? 'AND flagged=1' : ''} ORDER BY date DESC, shift DESC LIMIT 500`).all(...[c.tid, from, to, ...(cid ? [cid] : [])]).filter(l => !sc || sc.has(l.community_id));
     res.set('Cache-Control', 'no-store');
-    res.json({ communities: db.prepare("SELECT id,name FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(c.tid), rows: rows.map(l => logOut(l, { full: false })) });
+    res.json({ communities: db.prepare("SELECT id,name FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(c.tid).filter(x => !sc || sc.has(x.id)), rows: rows.map(l => logOut(l, { full: false })) });
   }));
   app.get('/api/company/duty-logs/:id', requireCompanyAdmin, wrap((req, res) => {
     const c = companyCtx(req); const l = db.prepare("SELECT * FROM duty_logs WHERE id=? AND tenant_id=? AND status='submitted'").get(Number(req.params.id), c.tid); if (!l) throw err('找不到這份勤務日誌', 404);
+    { const sc = d.companyCommunityScope ? d.companyCommunityScope(c.u) : null; if (sc && !sc.has(l.community_id)) throw err('這個社區不在您負責的區域', 403); }
     res.json({ log: logOut(l) });
   }));
 

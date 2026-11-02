@@ -13,6 +13,7 @@ const WEEKLY_KEYS=new Set(['summary','construction','committee','next_week','ext
 
 module.exports=function registerJournalRoutes(app,d){
   const {db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin}=d;
+  const scopeOf=u=>{try{return d.companyCommunityScope?d.companyCommunityScope(u):null;}catch{return null;}}; // 區域督導只看負責區域
   // 平台預設範本（總後台設定）；沒有傳入檔案路徑時（測試）只用內建預設
   const template=d.fs&&d.path?JT(d):{read:()=>JT.normalizeTemplate(null),write:()=>{throw new Error('範本無法儲存');},reset:()=>JT.normalizeTemplate(null)};
 
@@ -311,7 +312,7 @@ module.exports=function registerJournalRoutes(app,d){
 
   // ---------- 公司內勤 API（唯讀＋社區設定） ----------
   const C='/api/company/journal';
-  app.get(`${C}/communities`,requireCompanyAdmin,wrap((req,res)=>{const c=companyCtx(req,res);if(!c)return;const rows=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,name").all(c.tid);const last=db.prepare('SELECT MAX(period_date) d FROM journals WHERE tenant_id=? AND community_id=?');const T=template.read();res.json({communities:rows.map(r=>{const st=settingsFor(c.tid,r.id);return {...r,mode:st.mode,mode_inherited:st.inherited.mode,last_journal:last.get(c.tid,r.id).d||''};}),today:todayTW(),platform_mode:T.mode});}));
+  app.get(`${C}/communities`,requireCompanyAdmin,wrap((req,res)=>{const c=companyCtx(req,res);if(!c)return;const sc=scopeOf(c.u);const rows=db.prepare("SELECT id,name,status FROM communities WHERE tenant_id=? ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,name").all(c.tid).filter(r=>!sc||sc.has(Number(r.id)));const last=db.prepare('SELECT MAX(period_date) d FROM journals WHERE tenant_id=? AND community_id=?');const T=template.read();res.json({communities:rows.map(r=>{const st=settingsFor(c.tid,r.id);return {...r,mode:st.mode,mode_inherited:st.inherited.mode,last_journal:last.get(c.tid,r.id).d||''};}),today:todayTW(),platform_mode:T.mode});}));
   app.get(`${C}/list`,requireCompanyAdmin,wrap((req,res)=>{
     const c=companyCtx(req,res);if(!c)return;const params=[c.tid];let sql='SELECT j.id,j.community_id,cm.name community_name,j.kind,j.period_date,j.status,j.updated_at,j.updated_by,j.submitted_at,j.submitted_by FROM journals j JOIN communities cm ON cm.id=j.community_id WHERE j.tenant_id=?';
     if(Number(req.query.community_id)){sql+=' AND j.community_id=?';params.push(Number(req.query.community_id));}
@@ -319,10 +320,10 @@ module.exports=function registerJournalRoutes(app,d){
     if(['draft','submitted'].includes(req.query.status)){sql+=' AND j.status=?';params.push(req.query.status);}
     if(isDate(req.query.from)){sql+=' AND j.period_date>=?';params.push(req.query.from);}
     if(isDate(req.query.to)){sql+=' AND j.period_date<=?';params.push(req.query.to);}
-    res.json({rows:db.prepare(sql+' ORDER BY j.period_date DESC,cm.name LIMIT 300').all(...params)});
+    const sc=scopeOf(c.u);res.json({rows:db.prepare(sql+' ORDER BY j.period_date DESC,cm.name LIMIT 300').all(...params).filter(r=>!sc||sc.has(Number(r.community_id)))});
   }));
   app.get(`${C}/view/:id`,requireCompanyAdmin,wrap((req,res)=>{
-    const c=companyCtx(req,res);if(!c)return;const r=db.prepare('SELECT * FROM journals WHERE id=? AND tenant_id=?').get(Number(req.params.id),c.tid);if(!r)return bad(res,'找不到這份日誌',404);
+    const c=companyCtx(req,res);if(!c)return;const r=db.prepare('SELECT * FROM journals WHERE id=? AND tenant_id=?').get(Number(req.params.id),c.tid);if(!r)return bad(res,'找不到這份日誌',404);{const sc=scopeOf(c.u);if(sc&&!sc.has(Number(r.community_id)))return bad(res,'這個社區不在您負責的區域',403);}
     const community=db.prepare('SELECT id,name FROM communities WHERE id=?').get(r.community_id);
     res.json({...(r.kind==='weekly'?weeklyPayload(c.tid,r.community_id,r.period_date):dailyPayload(c.tid,r.community_id,r.period_date)),community});
   }));
