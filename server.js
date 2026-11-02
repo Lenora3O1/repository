@@ -618,6 +618,7 @@ function menuPermissionKey(item,scope='staff'){
   // SOP 在公司後台與現場工作台是兩種不同權限；不能讓「案場 SOP」被誤判成公司 SOP 管理。
   if(scope==='staff' && (String(item?.action||'')==='sop'||String(item?.action||'')==='sop-admin'||String(item?.action||'')==='sop-duty'||String(item?.action||'')==='sop-company'||String(item?.action||'')==='sop-community')) return 'sop';
   if(scope==='company' && (String(item?.action||'')==='sop'||String(item?.id||'')==='company-sop')) return 'manage-sop';
+  if(scope==='company' && String(item?.action||'')==='duty-logs') return 'work-journal';
   if(scope==='company' && (String(item?.action||'')==='contracts'||/社區合約/.test(String(item?.label||'')))) return 'company-general-affairs';
   if(scope==='company' && (/^acct-(ledger|ar|ap|feedback)$/.test(String(item?.action||''))||/傳票|帳冊|公司應收/.test(String(item?.label||'')))) return 'company-accounting';
   if(scope==='company' && String(item?.action||'')==='equip-apply') return null;
@@ -2770,6 +2771,7 @@ const punchFixApi=require('./punch-fix-routes')(app,{db,getUser,tenantId,now,req
 // ===== 交接清冊（經理版／秘書版）設定與智慧帶入 =====
 handover.register(app,{db,getUser,tenantId,requireStaffFiller,requireSuperAdmin,getAccessibleCommunity,staffCommunityRows});
 require('./journal-routes')(app,{db,getUser,tenantId,getSiteAssignments,isSiteManager,effectivePermissions,now,requireStaff,requireCompanyAdmin,requireSuperAdmin,fs,path,DATA_DIR});
+require('./duty-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,isSiteManager,effectivePermissions,staffCommunityRows,org:orgApi});
 
 // ===== 代班／調假／加班（依組織架構調度，連動班表與薪資）=====
 coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,leave:leaveApi,sched:{redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));return c||scheduleFallbackRedDates(y);},platformRules:schedulePlatformRules,effectiveRule:scheduleEffectiveRule,getProfile:scheduleGetProfile,defaultRole:scheduleDefaultRole}});

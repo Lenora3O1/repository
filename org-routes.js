@@ -295,5 +295,5 @@ module.exports = function registerOrgRoutes(app, d) {
     }));
   }
 
-  return { configFor, prefsFor, memberInfo, relations, resolveLeaveStep, syncRegionAccess };
+  return { configFor, prefsFor, memberInfo, people, relations, resolveLeaveStep, syncRegionAccess };
 };
