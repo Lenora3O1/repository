@@ -375,10 +375,10 @@ const PLATFORM_COMPANY_SCHEDULE_MENU = [
   {id:'company-schedule',parentId:null,icon:'📅',label:'班表',action:'schedule',enabled:true},
   {id:'company-schedule-month',parentId:'company-schedule',icon:'↳',label:'月班表',action:'schedule-month',enabled:true},
   {id:'company-schedule-staff',parentId:'company-schedule',icon:'↳',label:'人員班表',action:'schedule-staff',enabled:true},
-  {id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'社區班表',action:'schedule-community',enabled:true},
   {id:'company-schedule-swap',parentId:'company-schedule',icon:'↳',label:'換班紀錄',action:'schedule-swap',enabled:true},
   {id:'company-schedule-leave',parentId:'company-schedule',icon:'↳',label:'請假／代班',action:'schedule-leave',enabled:true},
-  {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true}
+  {id:'company-schedule-overtime',parentId:'company-schedule',icon:'↳',label:'加班',action:'schedule-overtime',enabled:true},
+  {id:'company-schedule-community',parentId:'company-schedule',icon:'↳',label:'班表規則',action:'schedule-community',enabled:true}
 ];
 const PLATFORM_STAFF_ATTENDANCE_MENU = [
   {id:'staff-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'staff-attendance',enabled:true},
@@ -412,7 +412,7 @@ function isScheduleMenuItem(item, scope){
   const id=String(item?.id||'').trim();
   const action=String(item?.action||'').trim();
   const label=String(item?.label||'').trim();
-  if(scope==='company') return id==='shift'||action==='shift'||action==='schedule'||/^company-schedule(?:-|$)/.test(id)||['班表','月班表','人員班表','社區班表','換班紀錄','請假／代班','加班'].includes(label);
+  if(scope==='company') return id==='shift'||action==='shift'||action==='schedule'||/^company-schedule(?:-|$)/.test(id)||['班表','月班表','人員班表','社區班表','班表規則','換班紀錄','請假／代班','加班'].includes(label);
   return id==='shift'||action==='shift'||action==='staff-schedule'||/^staff-schedule(?:-|$)/.test(id)||['班表','排班表','請假／代班','加班'].includes(label);
 }
 function normalizeScheduleMenu(items, scope){

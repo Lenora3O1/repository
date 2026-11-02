@@ -57,7 +57,9 @@ module.exports = function registerSmartSchedule(app, d) {
       const mobileKind = role === 'mobile' ? ((m?.dept === 'secretary') ? 'secretary' : 'guard') : '';
       // 機動保全也分日班／夜班：夜班機動只補夜班缺口、日班機動只補日班缺口（沒有設定班別的兩邊都可以）
       const shift = role === 'mobile' ? String(m?.shift || p.default_shift || '') : '';
-      out.push({ id: u.id, name: u.name, employee_id: u.employee_id, position: m?.position?.name || u.position || '', role, group, sites, home: sites[0], mobileKind, shift, profile: p });
+      // 部門：物業（經理）／秘書／勤務（保全）；給月班表、人員班表篩選用
+      const dept = ['property', 'secretary', 'duty'].includes(m?.dept) ? m.dept : (group === 'manager' ? 'property' : group === 'secretary' ? 'secretary' : role === 'mobile' ? (mobileKind === 'secretary' ? 'secretary' : 'duty') : 'duty');
+      out.push({ id: u.id, name: u.name, employee_id: u.employee_id, position: m?.position?.name || u.position || '', role, group, sites, home: sites[0], mobileKind, shift, dept, profile: p });
     }
     return out;
   }
@@ -200,7 +202,7 @@ module.exports = function registerSmartSchedule(app, d) {
         if (WORK(e.shift_code) && inC && cover[g]) cover[g][days.indexOf(dt)].have++;
         return { date: dt, code: e.shift_code, here: inC, community: inC ? '' : (comms.find(x => x.id === e.community_id)?.name || ''), source: e.source, locked: LOCKED.has(e.source), note: e.note || '', streak_warn: WORK(e.shift_code) && streakAt(m, dt) > max }; });
       const rp = restPlan(tid, p, month, [...reds]);
-      rows.push({ staff_id: p.id, name: p.name, employee_id: p.employee_id, position: p.position, group: p.group, rest_mode: rp.mode, rest_target: rp.target, work: cells.filter(x => WORK(x.code)).length, off: cells.filter(x => x.code === 'off').length, leave: cells.filter(x => x.code === 'leave').length, cells });
+      rows.push({ staff_id: p.id, name: p.name, employee_id: p.employee_id, position: p.position, group: p.group, dept: p.dept, mobile_kind: p.mobileKind, rest_mode: rp.mode, rest_target: rp.target, work: cells.filter(x => WORK(x.code)).length, off: cells.filter(x => x.code === 'off').length, leave: cells.filter(x => x.code === 'leave').length, cells });
     }
     // 缺人與補位建議
     const shortages = [];
@@ -231,6 +233,28 @@ module.exports = function registerSmartSchedule(app, d) {
   // ---------- 路由 ----------
   const P = requireCompanyPermission('schedule');
   const notify = (tid, from, toIds, subject, body) => { for (const toId of [...new Set(toIds)]) { try { const to = db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(toId, tid); if (!to || to.id === from.id) continue; db.prepare('INSERT INTO messages (tenant_id,sender_id,recipient_id,sender_employee_id,sender_name,recipient_employee_id,recipient_name,subject,body,message_type,attachment_json,created_at,read_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)').run(tid, from.id, to.id, from.employee_id, from.name, to.employee_id, to.name, subject, body, 'text', '', now()); } catch {} } };
+  // 人員班表：每個人這個月每天在哪個社區上班、哪幾天休假（掌握機動人員、秘書支援狀況）
+  app.get('/api/company/schedule/people', requireCompanyAdmin, P, wrap(async (req, res) => {
+    const tid = tenantId(req); const month = isMonth(req.query.month) ? req.query.month : new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    await S.holidays(Number(month.slice(0, 4))).catch(() => {});
+    const [y, mo] = month.split('-').map(Number); const n = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const days = Array.from({ length: n }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+    const reds = new Set(S.redDatesSync(Number(month.slice(0, 4))).filter(x => x.startsWith(month)));
+    const comms = db.prepare("SELECT id,name FROM communities WHERE tenant_id=? ORDER BY name").all(tid); const cname = id => comms.find(c => c.id === Number(id))?.name || '';
+    const entries = db.prepare('SELECT * FROM schedule_entries WHERE tenant_id=? AND month=?').all(tid, month);
+    const by = new Map(); for (const e of entries) { if (!by.has(e.staff_id)) by.set(e.staff_id, new Map()); const m = by.get(e.staff_id); const cur = m.get(e.work_date); if (!cur || WORK(e.shift_code)) m.set(e.work_date, e); }
+    const dept = ['property', 'secretary', 'duty'].includes(req.query.dept) ? req.query.dept : ''; const mobileOnly = req.query.mobile === '1'; const cid = Number(req.query.community_id) || 0;
+    const all = people(tid);
+    const rows = all.filter(p => (!dept || p.dept === dept) && (!mobileOnly || p.role === 'mobile') && (!cid || p.sites.includes(cid))).map(p => {
+      const m = by.get(p.id) || new Map();
+      const cells = days.map(dt => { const e = m.get(dt); if (!e) return { date: dt, code: '' }; return { date: dt, code: e.shift_code, community: WORK(e.shift_code) ? cname(e.community_id) : '', community_id: e.community_id, note: e.note || '' }; });
+      const sitesWorked = {}; for (const c of cells) if (WORK(c.code) && c.community) sitesWorked[c.community] = (sitesWorked[c.community] || 0) + 1;
+      return { staff_id: p.id, name: p.name, employee_id: p.employee_id, position: p.position, dept: p.dept, mobile: p.role === 'mobile', home: cname(p.home), sites: p.sites.map(cname), work: cells.filter(c => WORK(c.code)).length, off: cells.filter(c => c.code === 'off').length, leave: cells.filter(c => c.code === 'leave').length, off_dates: cells.filter(c => c.code === 'off' || c.code === 'leave').map(c => ({ date: c.date, code: c.code })), sites_worked: sitesWorked, cells };
+    });
+    const pub = db.prepare('SELECT status FROM schedule_publish WHERE tenant_id=? AND month=?').get(tid, month);
+    res.set('Cache-Control', 'no-store');
+    res.json({ month, days: days.map(dt => ({ date: dt, red: reds.has(dt), wd: '日一二三四五六'[new Date(`${dt}T12:00:00Z`).getUTCDay()] })), communities: comms.filter(c => all.some(p => p.sites.includes(c.id))), rows, published: pub?.status === 'published' });
+  }));
   app.get('/api/company/schedule/smart', requireCompanyAdmin, P, wrap(async (req, res) => {
     const tid = tenantId(req); const month = isMonth(req.query.month) ? req.query.month : new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
     await S.holidays(Number(month.slice(0, 4))).catch(() => {});

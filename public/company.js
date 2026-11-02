@@ -329,7 +329,7 @@ let scheduleCache={staff:[],communities:[]};
 function scheduleMonthNow(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}
 function scheduleCategoryName(x){return SCHEDULE_CATEGORIES.find(a=>a[0]===x)?.[1]||x||'班表';}
 async function openScheduleModule(action,label){
-  const titleMap={'schedule-month':'📅 月班表','schedule-staff':'📋 人員班表','schedule-community':'🏢 社區班表','schedule-swap':'🔄 換班紀錄','schedule-leave':'📝 請假／代班','schedule-overtime':'➕ 加班'};
+  const titleMap={'schedule-month':'📅 月班表','schedule-staff':'📋 人員班表','schedule-swap':'🔄 換班紀錄','schedule-leave':'📝 請假／代班','schedule-overtime':'➕ 加班','schedule-community':'⚙️ 班表規則'};
   try{
     scheduleCache=await api('/api/company/schedule/staff');
     const box=document.getElementById('companyWorkspace');
@@ -339,8 +339,8 @@ async function openScheduleModule(action,label){
     box.classList.add('schedule-workpage');
     box.innerHTML=`<div class="schedule-page-heading"><div><h2>${titleMap[action]||'📅 班表'}</h2><p>班表設定與紀錄都在此工作頁操作，不會跳出卡片視窗。</p></div><div class="schedule-page-nav">${Object.entries(titleMap).map(([key,name])=>`<button type="button" class="secondary" data-schedule-nav="${key}" ${key===action?'disabled':''}>${name}</button>`).join('')}</div></div><div id="scheduleModuleBody"><div class="profile-loading">班表資料載入中…</div></div>`;
     box.querySelectorAll('[data-schedule-nav]').forEach(b=>b.addEventListener('click',()=>openScheduleModule(b.dataset.scheduleNav,titleMap[b.dataset.scheduleNav])));
-    if(action==='schedule-staff') renderScheduleStaff(box);
-    else if(action==='schedule-community') renderScheduleCommunity(box);
+    if(action==='schedule-staff'){const body=box.querySelector('#scheduleModuleBody');if(window.SmartSchedule?.renderPeople)await window.SmartSchedule.renderPeople(body);else renderScheduleStaff(box);}
+    else if(action==='schedule-community') renderScheduleRules(box);
     else if(action==='schedule-swap') await renderScheduleSwaps(box);
     else if(action==='schedule-leave'){const body=box.querySelector('#scheduleModuleBody');if(window.LeaveModule&&window.CoverModule)await window.LeaveModule.render(body,{base:'/api/company/my',side:'company',label:'請假／代班',tab:'cover',withCover:true,embedded:true});else await renderScheduleRequests(box);}
     else if(action==='schedule-overtime'){const body=box.querySelector('#scheduleModuleBody');if(window.CoverModule)await window.CoverModule.renderOvertime(body,{base:'/api/company/my',side:'company',label:'加班',tab:'all'});else await renderScheduleOvertime(box);}
@@ -349,7 +349,7 @@ async function openScheduleModule(action,label){
   }catch(e){const box=document.getElementById('companyWorkspace');if(box){box.style.display='block';box.innerHTML=`<div class="msg error">${escapeHtml(e.message||'班表模組載入失敗')}</div>`;}else alert(e.message||'班表模組載入失敗');}
 }
 function scheduleWorkRoot(){return document.getElementById('companyWorkspace');}
-function renderScheduleSubpage(title,content){const box=scheduleWorkRoot();if(!box)return null;box.innerHTML=`<div class="schedule-page-heading"><div><h2>${title}</h2><p>班表設定工作頁</p></div><button type="button" class="secondary" id="scheduleBackBtn">← 返回班表列表</button></div><div id="scheduleModuleBody">${content}</div>`;box.querySelector('#scheduleBackBtn')?.addEventListener('click',()=>openScheduleModule('schedule-staff','人員班表'));return box;}
+function renderScheduleSubpage(title,content){const box=scheduleWorkRoot();if(!box)return null;box.innerHTML=`<div class="schedule-page-heading"><div><h2>${title}</h2><p>班表設定工作頁</p></div><button type="button" class="secondary" id="scheduleBackBtn">← 返回班表規則</button></div><div id="scheduleModuleBody">${content}</div>`;box.querySelector('#scheduleBackBtn')?.addEventListener('click',()=>(scheduleRulesSub='staff',openScheduleModule('schedule-community','班表規則')));return box;}
 function scheduleToolbar(selected='security',month=scheduleMonthNow(),communityId=''){
   return `<div class="schedule-toolbar">
     <div><label>排班類型</label><select id="scheduleCategory">${SCHEDULE_CATEGORIES.map(([v,n])=>`<option value="${v}" ${v===selected?'selected':''}>${n}</option>`).join('')}</select></div>
@@ -388,16 +388,25 @@ function renderScheduleStaff(box,state0){
 function openScheduleStaffEditor(id){
   const u=scheduleCache.staff.find(x=>Number(x.id)===Number(id));if(!u)return;const p=u.schedule_profile||{};const cats=SCHEDULE_CATEGORIES.map(([v,n])=>`<option value="${v}" ${p.schedule_role===v?'selected':''}>${n}</option>`).join('');const communityHtml=scheduleCache.communities.map(c=>`<label class="check-row"><input type="checkbox" data-schedule-cid="${c.id}" ${(p.community_ids||[]).map(Number).includes(Number(c.id))?'checked':''}> ${escapeHtml(c.name)}</label>`).join('');
   const box=renderScheduleSubpage(`📅 ${escapeHtml(u.name)}｜班表設定`,`<div class="editor-grid"><div><label>班表身分</label><select id="scheduleRole">${cats}</select></div><div><label>固定班別</label><select id="scheduleShift"><option value="" ${!p.default_shift?'selected':''}>不指定</option><option value="day" ${p.default_shift==='day'?'selected':''}>日班</option><option value="night" ${p.default_shift==='night'?'selected':''}>夜班</option></select></div><div><label>每月休假天數</label><input id="scheduleRestDays" type="number" min="0" max="31" value="${Number(p.rest_days??6)}"></div><div><label>人員自選休假天數</label><input id="scheduleSelfDays" type="number" min="0" max="31" value="${Number(p.self_select_days??2)}"></div></div><div class="panel-lite"><strong>🏠 支援／服務社區</strong><p class="hint">機動可複選多個社區；系統會用這些社區計算支援路線與休假衝突。</p><div class="check-list">${communityHtml||'<div class="empty">尚未建立社區。</div>'}</div></div><div><label>備註</label><textarea id="scheduleProfileNotes">${escapeHtml(p.notes||'')}</textarea></div><div class="modal-actions"><button class="secondary" type="button" id="scheduleCancelEdit">取消</button><button type="button" onclick="saveScheduleStaff(${id},this)">儲存</button></div>`);
-  box?.querySelector('#scheduleCancelEdit')?.addEventListener('click',()=>openScheduleModule('schedule-staff','人員班表'));
+  box?.querySelector('#scheduleCancelEdit')?.addEventListener('click',()=>(scheduleRulesSub='staff',openScheduleModule('schedule-community','班表規則')));
 }
-async function saveScheduleStaff(id,btn){const box=btn.closest('.modal')||scheduleWorkRoot();try{await api(`/api/company/schedule/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule_role:box.querySelector('#scheduleRole').value,default_shift:box.querySelector('#scheduleShift').value,rest_days:Number(box.querySelector('#scheduleRestDays').value),self_select_days:Number(box.querySelector('#scheduleSelfDays').value),community_ids:[...box.querySelectorAll('input[data-schedule-cid]:checked')].map(x=>Number(x.dataset.scheduleCid)),notes:box.querySelector('#scheduleProfileNotes').value})});scheduleCache=await api('/api/company/schedule/staff');alert('班表人員設定已儲存。');openScheduleModule('schedule-staff','人員班表')}catch(e){alert(e.message)}}
+async function saveScheduleStaff(id,btn){const box=btn.closest('.modal')||scheduleWorkRoot();try{await api(`/api/company/schedule/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule_role:box.querySelector('#scheduleRole').value,default_shift:box.querySelector('#scheduleShift').value,rest_days:Number(box.querySelector('#scheduleRestDays').value),self_select_days:Number(box.querySelector('#scheduleSelfDays').value),community_ids:[...box.querySelectorAll('input[data-schedule-cid]:checked')].map(x=>Number(x.dataset.scheduleCid)),notes:box.querySelector('#scheduleProfileNotes').value})});scheduleCache=await api('/api/company/schedule/staff');alert('班表人員設定已儲存。');(scheduleRulesSub='staff',openScheduleModule('schedule-community','班表規則'))}catch(e){alert(e.message)}}
+// 班表規則：分「社區規則」（行政／保全／機動）與「人員規則」（每個人的休假制度、班表身分、支援社區）
+let scheduleRulesSub='community';
+function renderScheduleRules(box){
+  const body=box.querySelector('#scheduleModuleBody');
+  body.innerHTML=`<div style="display:flex;gap:8px;margin-bottom:12px">${[['community','🏢 社區規則（行政／保全／機動）'],['staff','👤 人員規則（休假制度、支援社區）']].map(([k,l])=>`<button type="button" data-rsub="${k}" class="secondary" style="margin:0;border-radius:999px;${scheduleRulesSub===k?'background:#5F403B;color:#fff;border-color:#5F403B':''}">${l}</button>`).join('')}</div><div id="scheduleRulesBody"></div>`;
+  body.querySelectorAll('[data-rsub]').forEach(b=>b.addEventListener('click',()=>{scheduleRulesSub=b.dataset.rsub;renderScheduleRules(box);}));
+  const inner=body.querySelector('#scheduleRulesBody');const proxy={querySelector:sel=>sel==='#scheduleModuleBody'?inner:box.querySelector(sel)};
+  if(scheduleRulesSub==='staff')renderScheduleStaff(proxy);else renderScheduleCommunity(proxy);
+}
 function renderScheduleCommunity(box){
   const body=box.querySelector('#scheduleModuleBody');body.innerHTML=`<div class="schedule-rule-note">行政、保全、機動是三套獨立規則。每個社區可以有自己的合約／勤務規則，不會把行政規則套到保全或機動。</div><div class="table-wrap"><table><thead><tr><th>社區</th><th>行政規則</th><th>保全規則</th><th>機動規則</th><th>操作</th></tr></thead><tbody>${scheduleCache.communities.map(c=>`<tr><td><strong>${escapeHtml(c.name)}</strong></td><td>依合約</td><td>日／夜班、月休</td><td>支援／休假</td><td><button class="secondary" onclick="openScheduleRuleEditor(${c.id})">設定規則</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">目前沒有啟用社區。</td></tr>'}</tbody></table></div>`;
 }
 async function openScheduleRuleEditor(cid){
   const community=scheduleCache.communities.find(c=>Number(c.id)===Number(cid));const configs={};for(const cat of ['admin','security','mobile'])configs[cat]=(await api(`/api/company/schedule/rules?community_id=${cid}&category=${cat}`)).config||{};
   const box=renderScheduleSubpage(`🏢 ${escapeHtml(community?.name||'社區')}｜班表規則`,`<div class="schedule-rule-tabs"><button type="button" class="schedule-tab-admin" data-rule-tab="admin">🏢 行政</button><button type="button" class="schedule-tab-security" data-rule-tab="security">🛡️ 保全</button><button type="button" class="schedule-tab-mobile" data-rule-tab="mobile">🚗 機動</button></div><div id="scheduleRuleFields"></div><div class="modal-actions"><button class="secondary" type="button" id="scheduleRuleCancel">← 返回社區班表</button><button type="button" onclick="saveScheduleRules(${cid},this)">儲存目前規則</button></div>`);
-  box._scheduleRuleConfigs=configs;box._scheduleRuleCategory='admin';box.querySelector('#scheduleRuleCancel')?.addEventListener('click',()=>openScheduleModule('schedule-community','社區班表'));renderScheduleRuleFields(box);box.querySelectorAll('[data-rule-tab]').forEach(b=>b.addEventListener('click',()=>{box._scheduleRuleCategory=b.dataset.ruleTab;renderScheduleRuleFields(box)}));
+  box._scheduleRuleConfigs=configs;box._scheduleRuleCategory='admin';box.querySelector('#scheduleRuleCancel')?.addEventListener('click',()=>(scheduleRulesSub='community',openScheduleModule('schedule-community','班表規則')));renderScheduleRuleFields(box);box.querySelectorAll('[data-rule-tab]').forEach(b=>b.addEventListener('click',()=>{box._scheduleRuleCategory=b.dataset.ruleTab;renderScheduleRuleFields(box)}));
 }
 function renderScheduleRuleFields(box){
   const cat=box._scheduleRuleCategory,c=box._scheduleRuleConfigs[cat]||{},el=box.querySelector('#scheduleRuleFields');

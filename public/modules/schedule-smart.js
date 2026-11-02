@@ -3,7 +3,10 @@
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   async function api(url,options={}){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',...options});let d={};try{d=await r.json()}catch{}if(!r.ok){if(d.must_change_password)window.PasswordModule?.force('/api/company/my');throw new Error(d.error||'操作失敗');}return d;}
   const J=(method,body)=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const S={month:null,cid:0};
+  const S={month:null,cid:0,dept:''};
+  // 班別所屬部門：物業（社區主管）、秘書、勤務（保全）
+  const GDEPT={manager:'property',secretary:'secretary',guard_day:'duty',guard_night:'duty'};
+  const DEPTS=[['','全部'],['property','物業部'],['secretary','秘書部'],['duty','勤務部']];
   const CODE={work:'班',day:'日',night:'夜',off:'休',leave:'假','':'—'};
   function injectStyle(){
     if(document.getElementById('smartSchedStyle'))return;
@@ -32,6 +35,8 @@
 .ss-short{display:grid;gap:8px;margin-top:14px}
 .ss-sh{border:1px solid #E2D3CC;border-left:4px solid #A44528;border-radius:10px;padding:9px 12px;background:#fff}
 .ss-sh b{color:#7A2E1A}.ss-sh .sg{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.ss-sh .sg button{padding:4px 10px;min-height:0;margin:0;font-size:.8rem}
+.ss-seg{display:inline-flex;gap:4px;flex-wrap:wrap}.ss-seg button{border-radius:999px}
+.ss-p-cell{font-size:.7rem;font-weight:700;min-width:44px!important;max-width:64px;overflow:hidden;text-overflow:ellipsis;padding:0 2px!important}
 .ss-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:.78rem;color:#5F403B;margin-top:10px}.ss-legend span i{display:inline-block;width:16px;height:16px;border-radius:4px;vertical-align:-3px;margin-right:4px;border:1px solid #E2D3CC}
 `;
     document.head.appendChild(s);
@@ -40,26 +45,28 @@
     injectStyle();
     S.month=S.month||new Date(Date.now()+8*3600e3).toISOString().slice(0,7);
     el.innerHTML='<div class="profile-loading">讀取班表中…</div>';
-    const d=await api(`/api/company/schedule/smart?month=${S.month}${S.cid?`&community_id=${S.cid}`:''}`);
+    let d=await api(`/api/company/schedule/smart?month=${S.month}${S.cid?`&community_id=${S.cid}`:''}`);
     if(!d.community){el.innerHTML='<div class="empty">還沒有服務中的社區。</div>';return;}
     S.cid=d.community.id;
     const short=d.shortages.reduce((a,x)=>a+x.short,0);const pub=d.publish?.status==='published';
-    const groupsUsed=d.groups.filter(g=>d.rows.some(r=>r.group===g.key)||d.cover[g.key].some(c=>c.need>0));
+    const okD=g=>!S.dept||GDEPT[g]===S.dept;const rowsAll=d.rows;d={...d,rows:d.rows.filter(r=>r.group==='mobile'?(!S.dept||r.dept===S.dept):okD(r.group)),shortages:d.shortages.filter(x=>okD(x.group))};
+    const groupsUsed=d.groups.filter(g=>okD(g.key)&&(d.rows.some(r=>r.group===g.key)||d.cover[g.key].some(c=>c.need>0)));
     const head=`<tr><th class="nm">人員</th>${d.days.map(x=>`<th class="${x.red?'red':''}">${Number(x.date.slice(8))}<br>${x.wd}</th>`).join('')}<th>上班</th><th>休</th></tr>`;
     const personRow=r=>`<tr><td class="nm"><b>${esc(r.name)}</b><small>${esc(r.position||'')}・${esc({red_holiday:'見紅休',rotation:'輪排休',fixed_monthly:'月休'}[r.rest_mode]||'')} ${r.rest_target} 天</small></td>${r.cells.map((c,i)=>{const other=c.code&&!c.here&&!['off','leave'].includes(c.code);return `<td class="ss-c ${other?'other':c.code}${d.days[i].red?' red':''}${c.locked?' lock':''}${c.streak_warn?' warn':''}" data-sid="${r.staff_id}" data-date="${c.date}" title="${esc([other?`支援 ${c.community}`:'',c.note,c.locked?'已手動調整（重新排班不會覆蓋）':'',c.streak_warn?`連續上班超過 ${d.max_consecutive} 天`:''].filter(Boolean).join('｜'))}">${other?'支':CODE[c.code]??c.code}</td>`;}).join('')}<td>${r.work}</td><td>${r.off}</td></tr>`;
     const groupRow=g=>`<tr class="grp"><td class="nm">${esc(g.label)}（需要／排定）</td>${d.cover[g.key].map(c=>`<td class="${c.have<c.need?'short':c.need?'okc':''}">${c.need?`${c.have}/${c.need}`:''}</td>`).join('')}<td></td><td></td></tr>`;
     const body=groupsUsed.map(g=>groupRow(g)+d.rows.filter(r=>r.group===g.key).map(personRow).join('')).join('')+(d.rows.some(r=>r.group==='mobile')?`<tr class="grp"><td class="nm">機動支援</td>${d.days.map(()=>'<td></td>').join('')}<td></td><td></td></tr>${d.rows.filter(r=>r.group==='mobile').map(personRow).join('')}`:'');
-    el.innerHTML=`<div class="ss-bar"><input type="month" id="ssMonth" value="${esc(S.month)}"><select id="ssComm">${d.communities.map(c=>`<option value="${c.id}" ${c.id===S.cid?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+    el.innerHTML=`<div class="ss-bar"><input type="month" id="ssMonth" value="${esc(S.month)}"><select id="ssComm">${d.communities.map(c=>`<option value="${c.id}" ${c.id===S.cid?'selected':''}>${esc(c.name)}</option>`).join('')}</select><span class="ss-seg">${DEPTS.map(([v,l])=>`<button type="button" data-dept="${v}" class="${S.dept===v?'':'secondary'}">${l}</button>`).join('')}</span>
       ${d.publish?`<span class="ss-pill ${pub?'pub':'draft'}">${pub?`已發布（${esc(d.publish.published_by||'')}）`:'草稿：現場人員還看不到'}</span>`:'<span class="ss-pill none">尚未排班</span>'}
       ${pub?'':'<button type="button" id="ssGen">🤖 智慧排班（全公司）</button>'}${d.can_staffing?'<button type="button" class="secondary" id="ssNeed">👥 人力需求</button>':''}${d.publish&&!pub?'<button type="button" class="secondary" id="ssPub">📣 發布班表</button>':''}${pub?'<button type="button" class="secondary" id="ssUnpub">↩ 撤回發布</button>':''}</div>
       <div class="ss-sum">${short?`<div class="bad">⚠ 本月 ${d.community.name} 缺 ${short} 個班次</div>`:d.rows.length?'<div class="ok">✓ 每天每班人力足額</div>':''}<div class="info">人力需求：${groupsUsed.map(g=>`${g.label} 平日 ${d.staffing.need[g.key].weekday}／假日 ${d.staffing.need[g.key].holiday}`).join('、')}${d.staffing.custom?'':'（預設值）'}</div></div>
-      ${d.rows.length?`<div class="ss-wrap"><table class="ss-grid"><thead>${head}</thead><tbody>${body}</tbody></table></div>`:'<div class="empty">這個社區還沒有排班人員。請先在「公司人員管理」設定人員的職位與所屬社區。</div>'}
+      ${!d.rows.length&&rowsAll.length?`<div class="empty">這個社區沒有${DEPTS.find(x=>x[0]===S.dept)?.[1]||''}的排班人員。</div>`:''}${d.rows.length?`<div class="ss-wrap"><table class="ss-grid"><thead>${head}</thead><tbody>${body}</tbody></table></div>`:(rowsAll.length?'':'<div class="empty">這個社區還沒有排班人員。請先在「公司人員管理」設定人員的職位與所屬社區。</div>')}
       <div class="ss-legend"><span><i style="background:#fff"></i>班／日班</span><span><i style="background:#3B2A27"></i>夜班</span><span><i style="background:#EFE6DF"></i>休</span><span><i style="background:#F6E3DC"></i>請假</span><span><i style="background:#FFF6E6"></i>支援其他社區</span><span><i style="background:#fff;box-shadow:inset 0 0 0 2px #C0392B"></i>連續上班超過 ${d.max_consecutive} 天</span><span>● 手動調整（重新排班不會覆蓋）</span><span>點格子可以調整</span></div>
       ${d.shortages.length?`<h3 style="margin:18px 0 6px">缺人與補位建議</h3><div class="ss-short">${d.shortages.map((x,i)=>`<div class="ss-sh"><b>${Number(x.date.slice(5,7))}/${Number(x.date.slice(8))}　${esc(x.group_label)} 缺 ${x.short} 人</b>（需要 ${x.need}、排定 ${x.have}）<div class="sg">${x.suggestions.length?x.suggestions.map(s=>`<button type="button" class="secondary" data-fill="${i}" data-sid="${s.staff_id}" title="${esc(s.label)}">指派 ${esc(s.name)}<small style="display:block;font-weight:400">${esc(s.label)}</small></button>`).join(''):'<span class="muted">找不到符合條件的人（同班別休假中、機動人員或同區域其他社區），可以考慮請人加班或調整其他人的休假。</span>'}</div></div>`).join('')}</div>`:''}
       <p class="hint" style="margin-top:12px">智慧排班會依每個人的休假制度（見紅休、輪排休、月休）、自選休假、已核准的假單與連續上班上限，優先把休假排在人力有餘裕的日子；保留手動調整、代班、調假的格子；機動人員自動補到缺人的社區。發布前現場人員看不到這個月的班表。</p>`;
     const again=()=>{const w=el.querySelector('.ss-wrap');const pos=w?[w.scrollLeft,w.scrollTop]:null;return render(el).then(()=>{const n=el.querySelector('.ss-wrap');if(n&&pos){n.scrollLeft=pos[0];n.scrollTop=pos[1];}});};
     el.querySelector('#ssMonth').addEventListener('change',e=>{S.month=e.target.value;render(el).catch(x=>alert(x.message));});
     el.querySelector('#ssComm').addEventListener('change',e=>{S.cid=Number(e.target.value);render(el).catch(x=>alert(x.message));});
+    el.querySelectorAll('[data-dept]').forEach(b=>b.addEventListener('click',()=>{S.dept=b.dataset.dept;render(el).catch(x=>alert(x.message));}));
     el.querySelector('#ssGen')?.addEventListener('click',async e=>{if(d.publish&&!confirm('重新排班會重排所有自動排的格子（手動調整、代班、調假、自選休假、請假會保留）。確定嗎？'))return;e.target.disabled=true;e.target.textContent='排班中…';try{const r=await api('/api/company/schedule/smart/generate',J('POST',{month:S.month}));await render(el);if(r.extra_off)alert(`已排好 ${r.people} 位人員的班表。\n有 ${r.extra_off} 天為了不超過連續上班上限而多排休。`);}catch(err){alert(err.message);e.target.disabled=false;}});
     el.querySelector('#ssPub')?.addEventListener('click',async()=>{if(short&&!confirm(`還有 ${short} 個班次缺人，確定要發布嗎？`))return;if(!confirm(`發布 ${S.month} 班表？所有人會收到通知，現場人員可以開始查看。`))return;try{await api('/api/company/schedule/smart/publish',J('POST',{month:S.month}));render(el);}catch(err){alert(err.message);}});
     el.querySelector('#ssUnpub')?.addEventListener('click',async()=>{if(!confirm('撤回後現場人員暫時看不到這個月的班表，確定嗎？'))return;try{await api('/api/company/schedule/smart/publish',J('POST',{month:S.month,unpublish:true}));render(el);}catch(err){alert(err.message);}});
@@ -84,5 +91,32 @@
     document.body.appendChild(box);const close=()=>box.remove();box.querySelector('.modal-close').onclick=close;
     box.querySelector('#needSave').onclick=async()=>{const need={};box.querySelectorAll('[data-g]').forEach(i=>{need[i.dataset.g]=need[i.dataset.g]||{};need[i.dataset.g][i.dataset.k]=Number(i.value)||0;});try{await api(`/api/company/schedule/smart/staffing/${d.community.id}`,J('PUT',{need}));close();done();}catch(e){alert(e.message);}};
   }
-  window.SmartSchedule={render};
+  // ---------- 人員班表：每個人這個月在哪些社區上班、哪幾天休假（重點看機動人員、秘書） ----------
+  const P={month:null,dept:'',mobile:false,cid:0,q:''};
+  const short=n=>{const x=String(n||'').replace(/社區|大樓|管理委員會/g,'');return x.length>3?x.slice(0,3):x;};
+  async function renderPeople(el){
+    injectStyle();P.month=P.month||S.month||new Date(Date.now()+8*3600e3).toISOString().slice(0,7);
+    el.innerHTML='<div class="profile-loading">讀取人員班表中…</div>';
+    const qs=new URLSearchParams({month:P.month,dept:P.dept,mobile:P.mobile?'1':'',community_id:P.cid||''});
+    const d=await api(`/api/company/schedule/people?${qs}`);
+    const q=P.q.trim();const rows=d.rows.filter(r=>!q||`${r.name}${r.employee_id}${r.sites.join('')}`.includes(q));
+    const md=x=>Number(x.slice(8));
+    const cell=(c,i)=>{const red=d.days[i].red?' red':'';if(!c.code)return `<td class="${red}"></td>`;if(c.code==='off')return `<td class="ss-c off${red}" title="休假">休</td>`;if(c.code==='leave')return `<td class="ss-c leave${red}" title="請假${c.note?`：${esc(c.note)}`:''}">假</td>`;return `<td class="ss-c ss-p-cell ${c.code==='night'?'night':'work'}${red}" title="${esc(c.community)}${c.code==='night'?'（夜班）':''}${c.note?`｜${esc(c.note)}`:''}">${esc(short(c.community))}</td>`;};
+    el.innerHTML=`<div class="schedule-rule-note">看每個人這個月<b>在哪些社區上班、哪幾天休假</b>。適合掌握機動保全、機動秘書的支援狀況，或查某位秘書這個月的休假。格子顯示社區名稱，滑過去可以看完整名稱；要調整班表請到「月班表」。${d.published?'':'<br>⚠ 這個月的班表還沒發布，現場人員還看不到。'}</div>
+      <div class="ss-bar"><input type="month" id="ppM" value="${esc(P.month)}"><span class="ss-seg">${DEPTS.map(([v,l])=>`<button type="button" data-pd="${v}" class="${P.dept===v?'':'secondary'}">${l}</button>`).join('')}</span>
+        <label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:700"><input type="checkbox" id="ppMob" ${P.mobile?'checked':''} style="width:auto;margin:0"> 只看機動人員</label>
+        <select id="ppC"><option value="">全部社區</option>${d.communities.map(c=>`<option value="${c.id}" ${c.id===P.cid?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        <input id="ppQ" placeholder="搜尋姓名、員編" value="${esc(P.q)}" style="max-width:200px"></div>
+      ${rows.length?`<div class="ss-wrap"><table class="ss-grid"><thead><tr><th class="nm">人員</th>${d.days.map(x=>`<th class="${x.red?'red':''}">${md(x.date)}<br>${x.wd}</th>`).join('')}<th>上班</th><th>休</th><th style="min-width:200px;text-align:left;padding:4px 8px">休假日／支援社區</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr><td class="nm"><b>${esc(r.name)}</b>${r.mobile?' <span class="ss-pill draft" style="font-size:.66rem;padding:1px 6px">機動</span>':''}<small>${esc(r.position||'')}｜${esc(r.home||'')}</small></td>${r.cells.map(cell).join('')}<td>${r.work}</td><td>${r.off+r.leave}</td>
+          <td style="text-align:left;padding:4px 8px;white-space:normal;font-size:.76rem;min-width:200px">${r.off_dates.length?`休：${r.off_dates.map(x=>`${md(x.date)}${x.code==='leave'?'(假)':''}`).join('、')}`:'—'}${Object.keys(r.sites_worked).length>1||r.mobile?`<br>${Object.entries(r.sites_worked).map(([n,c])=>`${esc(n)} ${c} 天`).join('、')}`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">沒有符合條件的人員，或這個月還沒有排班。</div>'}
+      <div class="ss-legend"><span><i style="background:#fff"></i>上班（顯示社區）</span><span><i style="background:#3B2A27"></i>夜班</span><span><i style="background:#EFE6DF"></i>休</span><span><i style="background:#F6E3DC"></i>請假</span></div>`;
+    const re=()=>renderPeople(el).catch(x=>alert(x.message));
+    el.querySelector('#ppM').onchange=e=>{P.month=e.target.value;re();};
+    el.querySelectorAll('[data-pd]').forEach(b=>b.onclick=()=>{P.dept=b.dataset.pd;re();});
+    el.querySelector('#ppMob').onchange=e=>{P.mobile=e.target.checked;re();};
+    el.querySelector('#ppC').onchange=e=>{P.cid=Number(e.target.value)||0;re();};
+    let t;el.querySelector('#ppQ').oninput=e=>{P.q=e.target.value;clearTimeout(t);t=setTimeout(()=>{re().then(()=>{const n=el.querySelector('#ppQ');n.focus();n.setSelectionRange(n.value.length,n.value.length);});},300);};
+  }
+  window.SmartSchedule={render,renderPeople};
 })();
