@@ -130,7 +130,7 @@ module.exports = function registerContractRoutes(app, d) {
     let positions = []; try { positions = org.configFor(tid).positions.filter(p => !['owner', 'gm', 'dept_head', 'office'].includes(p.kind)).map(p => ({ id: p.id, name: p.name, kind: p.kind, shift: p.shift, dept: p.dept || '' })); } catch {}
     const s = scopeCommunities(u);
     res.set('Cache-Control', 'no-store');
-    res.json({ communities: db.prepare("SELECT id,name FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tid).filter(c => !s || s.has(c.id)), entities: acct.entities(tid), positions, kinds: KINDS, freq: FREQ, shifts: SHIFT, status: STATUS, can_edit: canEdit(u), today: todayTW() });
+    res.json({ communities: db.prepare("SELECT id,name FROM communities WHERE tenant_id=? AND status='active' ORDER BY name").all(tid).filter(c => !s || s.has(c.id)), entities: acct.entities(tid), positions, kinds: KINDS, freq: FREQ, shifts: SHIFT, status: STATUS, can_edit: canEdit(u), can_manage_entities: canManageEntities(u), today: todayTW() });
   }));
   app.get(B, requireCompanyAdmin, needView, wrap((req, res) => {
     const tid = tenantId(req); sweep(tid); const q = req.query || {}; const s = scopeCommunities(getUser(req));
@@ -194,6 +194,8 @@ module.exports = function registerContractRoutes(app, d) {
     if (!o) return null; const e = entName(tid, x.entity_id);
     return { id: o.id, msg: `${commName(x.community_id)} 與「${e}」在 ${o.start_date}～${o.end_date} 已經有合約，期間重疊。若是續約請把新合約的開始日設在舊合約到期之後。` };
   }
+  // 「管理簽約公司」在會計 → 傳票與帳冊 → 簽約公司：需要會計權限，且公司有開通會計模組
+  const canManageEntities = u => { try { if (!acct.canAcct(u)) return false; const p = typeof d.addons === 'function' ? d.addons() : d.addons; return !p?.isOn || p.isOn(u.tenant_id, 'accounting'); } catch { return false; } };
   const entName = (tid, eid) => { try { const e = acct.entities(tid, { all: true }).find(x => x.id === Number(eid)); return e?.short_name || e?.name || ''; } catch { return ''; } };
   const members = (tid, gid) => db.prepare('SELECT * FROM community_contracts WHERE tenant_id=? AND (group_id=? OR (group_id IS NULL AND id=?)) ORDER BY id').all(tid, gid, gid);
   // 把一次填寫的內容依簽約公司拆開；每一列都帶 entity_id

@@ -118,7 +118,7 @@
     const staffing=withE([],'staffing'),feedback=withE([],'feedback');
     const nos=Object.fromEntries(ms.map(m=>[m.entity_id,m.contract_no||'']));
     const firstNo=ms[0]?.contract_no||'';
-    const ENTS=one?M.entities.filter(x=>x.id===c.entity_id):M.entities;
+    let ENTS=one?M.entities.filter(x=>x.id===c.entity_id):M.entities;
     const K=Object.entries(M.kinds),F=Object.entries(M.freq),SH=Object.entries(M.shifts).filter(([k])=>k);
     const entSel=(v,auto)=>`<select data-f="entity_id"${auto?' data-auto="1"':''}${one?' disabled':''}>${ENTS.map(x=>`<option value="${x.id}" ${Number(v)===x.id?'selected':''}>${esc(x.short_name||x.name)}</option>`).join('')}</select>`;
     const itemRow=(i={})=>`<tr><td>${entSel(i.entity_id??lastEnt())}</td><td><div style="display:flex;gap:6px"><select data-f="kind" style="width:140px;flex:0 0 140px">${K.map(([k,l])=>`<option value="${k}" ${i.kind===k?'selected':''}>${l}</option>`).join('')}</select><input data-f="name" value="${esc(i.name||'')}" placeholder="項目名稱"></div></td><td><input data-f="amount" type="number" min="0" value="${i.amount??''}" placeholder="每月金額"></td><td><input data-f="note" value="${esc(i.note||'')}"></td><td><button type="button" class="secondary" data-rm>✕</button></td></tr>`;
@@ -133,7 +133,7 @@
         <label class="half">合約編號${one?'':' <small class="ct-muted" style="font-weight:400">（第一家簽約公司）</small>'}<input id="fNo" value="${esc(one?c.contract_no||'':firstNo)}"></label>
         <div class="wide" id="noBox" style="display:none"></div>
         <label>開始日<input type="date" id="fS" value="${esc(c.start_date||'')}"></label><label>結束日<input type="date" id="fEnd" value="${esc(c.end_date||'')}"></label><label>到期通知（到期前幾天）<input type="number" id="fR" min="0" max="365" value="${c.remind_days??60}"></label><label>備註<input id="fNote" value="${esc(c.note||'')}"></label></div></div>
-      <div class="ct-sec"><h3>合約資訊（每月）<label style="display:flex;gap:14px;font-size:.86rem;font-weight:600"><label style="display:flex;gap:5px;align-items:center"><input type="radio" name="tax" value="exclusive" ${c.tax_type!=='inclusive'?'checked':''} style="width:auto;margin:0"> 未稅（另加 5%）</label><label style="display:flex;gap:5px;align-items:center"><input type="radio" name="tax" value="inclusive" ${c.tax_type==='inclusive'?'checked':''} style="width:auto;margin:0"> 含稅</label></label></h3>
+      <div class="ct-sec"><h3>合約資訊（每月）<label style="display:flex;gap:14px;font-size:.86rem;font-weight:600"><label style="display:flex;gap:5px;align-items:center"><input type="radio" name="tax" value="exclusive" ${c.tax_type!=='inclusive'?'checked':''} style="width:auto;margin:0"> 未稅（另加 5%）</label><label style="display:flex;gap:5px;align-items:center"><input type="radio" name="tax" value="inclusive" ${c.tax_type==='inclusive'?'checked':''} style="width:auto;margin:0"> 含稅</label>${M.can_manage_entities&&!one?'<a href="#" id="ctEntMgr" title="在新分頁開啟：會計 → 傳票與帳冊 → 簽約公司" style="margin-left:6px;font-weight:600;white-space:nowrap">🏢 管理簽約公司 ↗</a>':''}</label></h3>
         <table class="ct-table"><thead><tr><th style="width:190px">簽約公司</th><th>項目</th><th style="width:140px">每月金額</th><th>說明</th><th></th></tr></thead><tbody id="tItems">${items.map(itemRow).join('')}</tbody></table><div class="ct-bar"><button type="button" class="secondary" data-add="tItems">＋ 新增項目</button><span id="fTotal" class="ct-muted"></span></div>
         <small class="ct-muted">簽約公司在「會計 → 傳票與帳冊 → 簽約公司」維護。同一社區跟不同公司簽約時，每一列選各自的簽約公司，儲存後會依公司分開請款、開發票。</small></div>
       <div class="ct-sec"><h3>派駐配置</h3><table class="ct-table"><thead><tr><th style="width:190px">簽約公司</th><th>職位</th><th style="width:110px">班別</th><th style="width:80px">人數</th><th>說明</th><th></th></tr></thead><tbody id="tStaff">${staffing.map(staffRow).join('')}</tbody></table><div class="ct-bar"><button type="button" class="secondary" data-add="tStaff">＋ 新增職位</button><span class="ct-muted">選職位後會自動帶入對應的簽約公司（保全→保全費那家、物業／秘書→物業費那家），可以再改。</span></div></div>
@@ -169,6 +169,17 @@
     const rows={tItems:itemRow,tStaff:staffRow,tFb:fbRow};
     el.querySelector('#tItems').addEventListener('input',total);el.querySelector('#tItems').addEventListener('change',total);el.querySelectorAll('[name=tax]').forEach(r=>r.addEventListener('change',total));bind();total();
     el.querySelector('#ctCancel').addEventListener('click',()=>opt.gid?detail(el,opt.gid):list(el));
+    // 管理簽約公司：新分頁打開「會計 → 傳票與帳冊 → 簽約公司」，這邊填到一半的合約不會不見；切回來時自動更新下拉選單
+    const mgr=el.querySelector('#ctEntMgr');
+    if(mgr){
+      mgr.addEventListener('click',ev=>{ev.preventDefault();try{localStorage.setItem('acct.openTab',JSON.stringify({tab:'entities',at:Date.now()}));}catch{}window.open(`${location.pathname}#m=company-ledger`,'_blank');});
+      const refresh=async()=>{
+        if(!mgr.isConnected){window.removeEventListener('focus',refresh);return;}
+        try{const m2=await api('/api/company/contracts/meta');M.entities=m2.entities;ENTS=M.entities;}catch{return;}
+        el.querySelectorAll('select[data-f="entity_id"]').forEach(s=>{const v=s.value;s.innerHTML=ENTS.map(x=>`<option value="${x.id}" ${String(x.id)===v?'selected':''}>${esc(x.short_name||x.name)}</option>`).join('');if(!ENTS.some(x=>String(x.id)===v)&&ENTS[0])s.value=String(ENTS[0].id);});
+      };
+      window.addEventListener('focus',refresh);
+    }
     const read=sel=>[...el.querySelectorAll(`${sel} tr`)].map(tr=>Object.fromEntries([...tr.querySelectorAll('[data-f]')].map(i=>[i.dataset.f,i.dataset.f==='entity_id'?Number(i.value):i.value])));
     const save=async draft=>{const v=s=>el.querySelector(s).value;
       const body={community_id:Number(v('#fC')),contract_no:v('#fNo'),contract_nos:Object.fromEntries([...el.querySelectorAll('[data-no]')].map(i=>[i.dataset.no,i.value])),start_date:v('#fS'),end_date:v('#fEnd'),remind_days:Number(v('#fR')),note:v('#fNote'),tax_type:el.querySelector('[name=tax]:checked').value,

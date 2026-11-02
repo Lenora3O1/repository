@@ -2832,7 +2832,7 @@ smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompany
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
 plansApi=require('./plans')(app,{db,now,requireSuperAdmin,requireCompanyAdmin,getUser,tenantId,getAcct:()=>acctApi});
 acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,effectivePermissions,org:orgApi,XLSX});
-contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi});
+contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,addons:()=>plansApi});
 arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});
 apApi=require('./ap-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,contracts:contractApi,plans:plansApi});
 const advanceReqApi=require('./advance-request-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,effectivePermissions,payroll,ap:apApi});
