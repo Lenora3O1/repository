@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 11;
+const VERSION = 12;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -28,6 +28,14 @@ COMPANY.unshift({ parent: null, children: [{ id: 'company-expense', label: '公�
 // 方案與費用：只給公司高層（老闆、總經理、公司管理員），開通會計模組時會計也看得到
 COMPANY.push({ parent: null, children: [{ id: 'company-plan', label: '方案與費用', action: 'plan-billing', exact: ['方案與費用', '方案與計費', '使用方案'], after: 'company-schedule', icon: '💳' }] });
 COMPANY.push({ parent: null, children: [{ id: 'company-interviews', label: '面試管理', action: 'interviews', exact: ['面試管理', '面試人員', '招募管理'], after: 'company-hr', icon: '📝' }] });
+// 出勤與巡邏：出勤（打卡點設定、紀錄、補打卡）與巡邏（巡邏點設定、紀錄）分開排列，名稱直接說明用途
+COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', labels: ['出勤與巡邏'], icon: '📍', action: 'attendance' }, children: [
+  { id: 'company-attendance-locations', label: '出勤打卡點設定', action: 'attendance-locations', exact: ['出勤打卡'], rename: ['出勤打卡'] },
+  { id: 'company-attendance-records', label: '出勤紀錄', action: 'attendance-records', exact: ['出勤紀錄'] },
+  { id: 'company-punch-fix', label: '補打卡審核', action: 'punch-fix', exact: ['補打卡審核'] },
+  { id: 'company-patrol-management', label: '巡邏點設定', action: 'patrol-management', exact: ['巡邏管理'], rename: ['巡邏管理'] },
+  { id: 'company-patrol-records', label: '巡邏紀錄', action: 'patrol-records', exact: ['巡邏紀錄'] },
+] });
 const STAFF = [
   // 社區資訊：社區名稱、代表地址、棟別門牌（同時服務多個社區的人，看的是目前選擇的社區）
   { parent: null, children: [{ id: 'staff-community-info', label: '社區資訊', action: 'community-info', exact: ['社區資訊', '社區基本資料'], after: 'residents', icon: '🏢' }] },
