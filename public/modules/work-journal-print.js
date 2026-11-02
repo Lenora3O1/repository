@@ -95,7 +95,7 @@ td.c{text-align:center}td.n{text-align:right;font-variant-numeric:tabular-nums}
     return `<h1>${esc(community?.name||'')} 工作日誌</h1><p class="doc-sub">${rocDate(p.date||p.journal?.period_date)}</p>
       <div class="doc-meta"><span>${p.journal?.status==='submitted'?`已送出：${esc(p.journal.submitted_by||'')}`:'草稿（尚未送出）'}</span><span>最後編輯：${esc(p.journal?.updated_by||'—')}</span></div>
       ${dailyBody(p,data,st)}
-      <div class="sign"><span>記錄人員</span><span>社區經理</span><span>主任委員</span></div>`;
+`;
   }
   function weeklyBody(p,data,s,t,r,cons,manualCons){
     const secs=(p.settings?.weekly_sections||[{key:'summary'},{key:'construction'},{key:'meters'},{key:'tracking'},{key:'staffing'},{key:'custom'},{key:'committee'},{key:'next_week'},{key:'extra'}]).filter(x=>x.on!==false);
@@ -124,7 +124,7 @@ td.c{text-align:center}td.n{text-align:right;font-variant-numeric:tabular-nums}
     return `<h1>${esc(community?.name||'')} 每週工作日誌</h1><p class="doc-sub">${range}</p>
       <div class="doc-meta"><span>${p.journal?.status==='submitted'?`已送出：${esc(p.journal.submitted_by||'')}`:'草稿（尚未送出）'}</span><span>本週每日日誌：${s.daily_count||0} 份（已送出 ${s.daily_submitted||0}）</span></div>
       ${weeklyBody(p,data,s,t,r,cons,manualCons)}
-      <div class="sign"><span>記錄人員</span><span>社區經理</span><span>主任委員</span></div>`;
+`;
   }
   function html(payload,community){
     const weekly=!!(payload.summary||payload.week_start);
