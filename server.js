@@ -34,6 +34,7 @@ try{db.prepare('ALTER TABLE tenants ADD COLUMN self_select_deadline INTEGER DEFA
 const { generateDocx } = require('./generate');
 const { analyzeTemplate } = require('./template-analyzer');
 
+const security = require('./security');
 const app = express();
 
 // SOP 模組資料欄位升級：保留『來源負責人』與『實際上傳者』兩個概念。
@@ -220,8 +221,12 @@ const sopUpload=multer({
 
 
 const perf=require('./perf');
+app.disable('x-powered-by');
+app.set('trust proxy', 1); // Render／Zeabur 前面有一層代理：取得真正的使用者 IP、判斷是否為 HTTPS
 app.use(perf.timing);
+app.use(security.headers);
 app.use(express.json({ limit: '2mb' }));
+app.use(security.loginGuard);
 // HTML 一律重新驗證；帶 ?v= 版本號的 JS/CSS 長期快取（改版時版本號會變）；文字檔以 gzip 傳送
 const staticGz=perf.staticGzip(path.join(__dirname, 'public'));
 app.use(staticGz);
@@ -230,9 +235,10 @@ app.use(express.static(path.join(__dirname, 'public'),{setHeaders:perf.staticHea
 app.use('/api',perf.jsonGzip);
 app.use('/api',perf.versionHeader(path.join(__dirname,'public')));
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
-  resave: false, saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 12, sameSite: 'lax', httpOnly: true }
+  secret: security.sessionSecret(DATA_DIR),
+  resave: false, saveUninitialized: false, proxy: true,
+  // secure:'auto'：HTTPS 連線時 Cookie 只走加密連線；httpOnly：網頁程式讀不到登入憑證
+  cookie: { maxAge: 1000 * 60 * 60 * 12, sameSite: 'lax', httpOnly: true, secure: 'auto' }
 }));
 // 方案與計費：唯讀（到期）、加值模組、方案上限（模組在後面註冊，這裡延後取用）
 app.use((req,res,next)=>plansApi?plansApi.guard(req,res,next):next());
@@ -1355,7 +1361,7 @@ app.post('/api/submissions',requireStaffFiller,(req,res)=>{
 // ===== 總後臺 =====
 // 效能監看（總後台）：各 API 的次數、平均、P95、最大耗時與記憶體
 app.get('/api/admin/perf',requireSuperAdmin,(req,res)=>res.json(perf.report()));
-app.post('/api/admin/login',(req,res)=>{const {username,password}=req.body||{};if(username===ADMIN_USER&&password===ADMIN_PASS){req.session.isAdmin=true;req.session.employeeId=null;req.session.tenantId=null;req.session.role='super_admin';return res.json({success:true});}res.status(401).json({error:'帳號或密碼錯誤'});});
+app.post('/api/admin/login',(req,res)=>{const {username,password}=req.body||{};if(security.safeEqual(username,ADMIN_USER)&&security.safeEqual(password,ADMIN_PASS)){const weak=security.adminPasswordProblem(ADMIN_PASS);if(weak)return res.status(403).json({error:weak});req.session.isAdmin=true;req.session.employeeId=null;req.session.tenantId=null;req.session.role='super_admin';return res.json({success:true});}res.status(401).json({error:'帳號或密碼錯誤'});});
 app.post('/api/admin/logout',(req,res)=>{req.session.destroy(()=>res.json({success:true}));});
 app.get('/api/admin/session',(req,res)=>res.json({isAdmin:!!req.session?.isAdmin}));
 
