@@ -2440,3 +2440,6 @@ body.is-authenticated .app-sidebar .sidebar-caption{color:#555!important}
 .perm-node .perm-parent{font-weight:700}
 .perm-subs{margin:2px 0 0 22px;padding-left:8px;border-left:2px solid #EFE6E2;display:flex;flex-direction:column}
 .perm-node .perm-sub{font-weight:500;font-size:.92em;color:#4E322D}
+
+/* 巡邏點：簡化表單 */
+.patrol-simple-form{max-width:760px}.patrol-simple-form .field-stack input,.patrol-simple-form .field-stack select{font-size:16px;min-height:46px}.patrol-simple-form .info-box{margin-top:6px}

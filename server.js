@@ -388,15 +388,15 @@ const PLATFORM_STAFF_ATTENDANCE_MENU = [
 ];
 const PLATFORM_COMPANY_ATTENDANCE_MENU = [
   {id:'company-attendance',parentId:null,icon:'📍',label:'出勤與巡邏',action:'attendance',enabled:true},
-  {id:'company-attendance-locations',parentId:'company-attendance',icon:'↳',label:'出勤打卡',action:'attendance-locations',enabled:true},
+  {id:'company-attendance-locations',parentId:'company-attendance',icon:'↳',label:'出勤打卡點設定',action:'attendance-locations',enabled:true},
   {id:'company-attendance-records',parentId:'company-attendance',icon:'↳',label:'出勤紀錄',action:'attendance-records',enabled:true},
-  {id:'company-patrol-management',parentId:'company-attendance',icon:'↳',label:'巡邏管理',action:'patrol-management',enabled:true},
-  {id:'company-patrol-records',parentId:'company-attendance',icon:'↳',label:'巡邏紀錄',action:'patrol-records',enabled:true},
-  {id:'company-punch-fix',parentId:'company-attendance',icon:'↳',label:'補打卡審核',action:'punch-fix',enabled:true}
+  {id:'company-punch-fix',parentId:'company-attendance',icon:'↳',label:'補打卡審核',action:'punch-fix',enabled:true},
+  {id:'company-patrol-management',parentId:'company-attendance',icon:'↳',label:'巡邏點設定',action:'patrol-management',enabled:true},
+  {id:'company-patrol-records',parentId:'company-attendance',icon:'↳',label:'巡邏紀錄',action:'patrol-records',enabled:true}
 ];
 function isAttendanceMenuItem(item, scope){
   const id=String(item?.id||'').trim(), action=String(item?.action||'').trim(), label=String(item?.label||'').trim();
-  if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||action==='punch-fix'||['出勤與巡邏','出勤打卡','出勤紀錄','巡邏管理','巡邏紀錄','補打卡審核'].includes(label);
+  if(scope==='company') return id==='company-attendance'||/^company-attendance(?:-|$)/.test(id)||action==='attendance'||action==='punch-fix'||['出勤與巡邏','出勤打卡','出勤打卡點設定','出勤紀錄','巡邏管理','巡邏點設定','巡邏紀錄','補打卡審核'].includes(label);
   return id==='staff-attendance'||/^staff-(?:attendance|patrol)(?:-|$)/.test(id)||['staff-attendance','staff-attendance-checkin','staff-patrol','staff-patrol-records','staff-punch-fix'].includes(action)||id==='staff-punch-fix'||['出勤與巡邏','出勤打卡','巡邏巡檢','巡邏紀錄','補打卡'].includes(label);
 }
 function normalizeAttendanceMenu(items, scope){
