@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 14;
+const VERSION = 15;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -30,6 +30,8 @@ COMPANY.push({ parent: null, children: [{ id: 'company-plan', label: '方案與�
 COMPANY.push({ parent: null, children: [{ id: 'company-interviews', label: '面試管理', action: 'interviews', exact: ['面試管理', '面試人員', '招募管理'], after: 'company-hr', icon: '📝' }] });
 // 工作日誌管理：舊版或各公司自訂的目錄可能沒有正確的功能代碼，點了只會看到「建置中」；依名稱補回 work-journal
 COMPANY.push({ parent: null, children: [{ id: 'company-work-journal', label: '工作日誌管理', action: 'work-journal', exact: ['工作日誌管理', '工作日誌', '日誌管理'], after: 'company-templates', icon: '📝' }] });
+// 保全勤務日誌：現場「勤務日誌」（每一班交接點收、紀錄、交班送出），公司「勤務日誌管理」（唯讀副本）
+COMPANY.push({ parent: null, children: [{ id: 'company-duty-logs', label: '勤務日誌管理', action: 'duty-logs', exact: ['勤務日誌管理'], after: 'company-work-journal', icon: '🛡️' }] });
 // 出勤與巡邏：出勤（打卡點設定、紀錄、補打卡）與巡邏（巡邏點設定、紀錄）分開排列，名稱直接說明用途
 COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', labels: ['出勤與巡邏'], icon: '📍', action: 'attendance' }, children: [
   { id: 'company-attendance-locations', label: '出勤打卡點設定', action: 'attendance-locations', exact: ['出勤打卡'], rename: ['出勤打卡'] },
@@ -39,6 +41,7 @@ COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', lab
   { id: 'company-patrol-records', label: '巡邏紀錄', action: 'patrol-records', exact: ['巡邏紀錄'] },
 ] });
 const STAFF = [
+  { parent: null, children: [{ id: 'staff-duty-log', label: '勤務日誌', action: 'duty-log', exact: ['勤務日誌'], after: 'work-journal', icon: '🛡️' }] },
   // 社區資訊：社區名稱、代表地址、棟別門牌（同時服務多個社區的人，看的是目前選擇的社區）
   { parent: null, children: [{ id: 'staff-community-info', label: '社區資訊', action: 'community-info', exact: ['社區資訊', '社區基本資料'], after: 'residents', icon: '🏢' }] },
   // 現場「設備借用申請」放在公司資源底下；舊版放在最上層的「設備申請」會合併過來
