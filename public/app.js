@@ -381,6 +381,18 @@ async function loadHandoverHome(type='manager',label=''){
 async function openManagerChecklist(label='經理交接清冊'){return loadHandoverHome('manager',label);}
 async function openSecretaryChecklist(label='秘書交接清冊'){return loadHandoverHome('secretary',label);}
 async function loadChecklistModule(label='交接清冊'){return loadHandoverHub(label);}
+// 現場「公司資源」：公司開放給現場的文件＋平台公版
+async function loadCompanyResourcesPage(label){
+  const el=$('staffHome');if(!el)return;
+  const [c,p]=await Promise.all([api('/api/staff/company-resources').catch(()=>({resources:[]})),api('/api/staff/platform-resources').catch(()=>({platformResources:[]}))]);
+  const ext=r=>String(r.extension||'').replace('.','').toUpperCase();
+  const groups={};for(const r of c.resources||[])(groups[r.category||'其他']||=[]).push(r);
+  const item=(r,url)=>`<a class="cr-item" href="${url}" target="_blank" rel="noopener"><span class="cr-ext">${escapeHtml(ext(r)||'檔案')}</span><span><b>${escapeHtml(r.name)}</b>${r.description?`<small>${escapeHtml(r.description)}</small>`:''}</span><span class="cr-dl">下載</span></a>`;
+  el.innerHTML=`<style>.cr-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #E7DAD4;border-radius:12px;background:#fff;margin-bottom:8px;text-decoration:none;color:inherit}.cr-item b{display:block;font-size:16px}.cr-item small{display:block;color:#8A6B62;margin-top:2px}.cr-ext{flex:0 0 52px;text-align:center;font-weight:800;font-size:12px;color:#A44528;background:#F8ECE6;border-radius:8px;padding:8px 0}.cr-dl{margin-left:auto;color:#A44528;font-weight:700;white-space:nowrap}.cr-h{margin:16px 0 8px;font-weight:800;color:#5F403B}</style>
+    <div class="panel"><div class="eyebrow">📦 公司資源</div><h1>${escapeHtml(label)}</h1><p class="hint">公司提供的表單、公告與規定，點一下就能下載。</p>
+    ${Object.keys(groups).length?Object.entries(groups).map(([g,rows])=>`<div class="cr-h">${escapeHtml(g)}</div>${rows.map(r=>item(r,`/api/staff/company-resources/${r.id}/download`)).join('')}`).join(''):'<div class="empty">公司目前還沒有開放文件。</div>'}
+    ${(p.platformResources||[]).length?`<details style="margin-top:16px"><summary class="cr-h" style="cursor:pointer">平台公版文件（${p.platformResources.length}）</summary>${p.platformResources.map(r=>item(r,`/api/staff/platform-resources/${r.id}/download`)).join('')}</details>`:''}</div>`;
+}
 function showWorkspacePlaceholder(label){
   $('loginView').style.display='none';$('editorView').style.display='none';$('homeView').style.display='block';$('staffTop').style.display='flex';
   const el=$('staffHome');el.innerHTML=`<div class="panel workspace-placeholder"><div class="eyebrow">工作項目</div><h1>🚧 ${escapeHtml(label||'工作功能')}</h1><p>這個工作內容已經可以放進工作目錄與個人釘選區，實際資料功能會依平台建置進度陸續加入。</p><div class="placeholder-note">您可以先把常用的其他工作項目釘選到首頁；未來功能完成後，不需要重新設定釘選。</div></div>`;
@@ -531,6 +543,11 @@ async function handleWorkspaceMenu(e){
   if(['sop','sop-admin','sop-duty','sop-company','sop-community'].includes(action)){
     showWorkspaceLoading(label||'案場 SOP');
     try{if(!window.SOPStaffModule)throw new Error('案場 SOP 模組尚未載入，請重新整理頁面');await window.SOPStaffModule.render(action,label,$('staffHome'));}catch(err){showWorkspaceError(label||'案場 SOP',err);}
+    return;
+  }
+  if(action==='company-resources'){
+    showWorkspaceLoading(label||'公司資源');
+    try{await loadCompanyResourcesPage(label||'公司資源');}catch(err){showWorkspaceError(label||'公司資源',err);}
     return;
   }
   if(action==='duty-log'){

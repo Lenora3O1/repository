@@ -1798,7 +1798,7 @@ app.get('/api/staff/platform-resources/:id/download', requireStaffFiller, (req,r
   res.download(p,r.original_name);
 });
 
-app.get('/api/company/platform-resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({platformResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM platform_resources WHERE is_active=1 ORDER BY category,name,id DESC').all(),companyResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM company_resources WHERE tenant_id=? AND is_active=1 ORDER BY category,name,id DESC').all(tenantId(req))}));
+app.get('/api/company/platform-resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>res.json({platformResources:db.prepare('SELECT id,name,original_name,extension,category,description,created_at FROM platform_resources WHERE is_active=1 ORDER BY category,name,id DESC').all(),companyResources:db.prepare('SELECT id,platform_resource_id,name,original_name,extension,category,description,COALESCE(share_staff,0) share_staff,uploaded_by,created_at,updated_at FROM company_resources WHERE tenant_id=? AND is_active=1 ORDER BY category,name,id DESC').all(tenantId(req))}));
 app.get('/api/company/platform-resources/:id/download',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
   const r=db.prepare('SELECT * FROM platform_resources WHERE id=? AND is_active=1').get(Number(req.params.id));
   if(!r)return res.status(404).json({error:'找不到平台公版文件'});
@@ -1824,6 +1824,49 @@ app.delete('/api/company/resources/:id',requireCompanyAdmin,requireCompanyPermis
   const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=?').get(Number(req.params.id),tenantId(req));
   if(r){const p=path.join(PLATFORM_RESOURCES_DIR,r.filename);if(fs.existsSync(p))fs.unlinkSync(p);db.prepare('DELETE FROM company_resources WHERE id=? AND tenant_id=?').run(r.id,tenantId(req));}
   res.json({success:true});
+});
+// ===== 本公司文件：公司自己上傳的各種文件（PDF、Word、Excel、PowerPoint、圖片…），可選擇開放給現場人員下載 =====
+try{db.exec('ALTER TABLE company_resources ADD COLUMN share_staff INTEGER DEFAULT 0');}catch{}
+try{db.exec("ALTER TABLE company_resources ADD COLUMN uploaded_by TEXT DEFAULT ''");}catch{}
+try{db.exec('ALTER TABLE company_resources ADD COLUMN updated_at TEXT');}catch{}
+const COMPANY_DOC_EXTS=new Set([...PLATFORM_RESOURCE_EXTS,'.jpg','.jpeg','.png','.odt','.ods','.rtf']);
+const companyDocUpload=multer({
+  storage:multer.diskStorage({destination:(req,file,cb)=>cb(null,PLATFORM_RESOURCES_DIR),filename:(req,file,cb)=>cb(null,`${Date.now()}-${crypto.randomBytes(5).toString('hex')}${path.extname(file.originalname).toLowerCase()}`)}),
+  limits:{fileSize:20*1024*1024},
+  fileFilter:(req,file,cb)=>COMPANY_DOC_EXTS.has(path.extname(file.originalname).toLowerCase())?cb(null,true):cb(new Error('可以上傳 PDF、Word、Excel、PowerPoint、TXT、CSV 或 JPG／PNG 圖片'))
+});
+const docUploadMw=field=>(req,res,next)=>companyDocUpload.single(field)(req,res,e=>{if(e)return res.status(400).json({error:e.code==='LIMIT_FILE_SIZE'?'檔案太大了（最多 20MB）':(e.message||'上傳失敗')});next();});
+const docCategory=v=>String(v||'').trim().slice(0,20)||'其他';
+app.post('/api/company/resources',requireCompanyAdmin,requireCompanyPermission('manage-templates'),docUploadMw('file'),(req,res)=>{
+  if(!req.file)return res.status(400).json({error:'請選擇要上傳的檔案'});
+  const name=String(req.body?.name||'').trim().slice(0,80)||path.basename(req.file.originalname,path.extname(req.file.originalname));
+  const u=getUser(req);
+  const info=db.prepare('INSERT INTO company_resources (tenant_id,platform_resource_id,name,original_name,filename,mime_type,extension,category,description,is_active,created_at,share_staff,uploaded_by,updated_at) VALUES (?,NULL,?,?,?,?,?,?,?,1,?,?,?,?)')
+    .run(tenantId(req),name,req.file.originalname,req.file.filename,req.file.mimetype||'',path.extname(req.file.originalname).toLowerCase(),docCategory(req.body?.category),String(req.body?.description||'').trim().slice(0,300),now(),req.body?.share_staff==='1'||req.body?.share_staff==='true'?1:0,u?.name||'',now());
+  res.json({success:true,id:Number(info.lastInsertRowid)});
+});
+app.put('/api/company/resources/:id',requireCompanyAdmin,requireCompanyPermission('manage-templates'),(req,res)=>{
+  const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));if(!r)return res.status(404).json({error:'找不到這份文件'});
+  const b=req.body||{};const name=b.name!==undefined?String(b.name).trim().slice(0,80):r.name;if(!name)return res.status(400).json({error:'名稱不可空白'});
+  db.prepare('UPDATE company_resources SET name=?,category=?,description=?,share_staff=?,updated_at=? WHERE id=?').run(name,b.category!==undefined?docCategory(b.category):r.category,b.description!==undefined?String(b.description).trim().slice(0,300):r.description,b.share_staff!==undefined?(b.share_staff?1:0):(r.share_staff||0),now(),r.id);
+  res.json({success:true});
+});
+app.post('/api/company/resources/:id/file',requireCompanyAdmin,requireCompanyPermission('manage-templates'),docUploadMw('file'),(req,res)=>{
+  const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=? AND is_active=1').get(Number(req.params.id),tenantId(req));if(!r)return res.status(404).json({error:'找不到這份文件'});
+  if(!req.file)return res.status(400).json({error:'請選擇新的檔案'});
+  try{fs.unlinkSync(path.join(PLATFORM_RESOURCES_DIR,path.basename(r.filename)));}catch{}
+  db.prepare('UPDATE company_resources SET original_name=?,filename=?,mime_type=?,extension=?,uploaded_by=?,updated_at=? WHERE id=?').run(req.file.originalname,req.file.filename,req.file.mimetype||'',path.extname(req.file.originalname).toLowerCase(),getUser(req)?.name||'',now(),r.id);
+  res.json({success:true});
+});
+// 現場「公司資源」：公司開放給現場的文件
+app.get('/api/staff/company-resources',requireStaffFiller,(req,res)=>{
+  const u=getUser(req);res.set('Cache-Control','no-store');
+  res.json({resources:db.prepare('SELECT id,name,original_name,extension,category,description,COALESCE(updated_at,created_at) updated_at FROM company_resources WHERE tenant_id=? AND is_active=1 AND share_staff=1 ORDER BY category,name').all(u.tenant_id)});
+});
+app.get('/api/staff/company-resources/:id/download',requireStaffFiller,(req,res)=>{
+  const u=getUser(req);const r=db.prepare('SELECT * FROM company_resources WHERE id=? AND tenant_id=? AND is_active=1 AND share_staff=1').get(Number(req.params.id),u.tenant_id);
+  if(!r)return res.status(404).json({error:'找不到這份文件'});const p=path.join(PLATFORM_RESOURCES_DIR,path.basename(r.filename));if(!fs.existsSync(p))return res.status(404).json({error:'檔案不存在'});
+  res.download(p,r.original_name);
 });
 // ===== 智慧住戶名冊 =====
 const RESIDENT_CATEGORIES=new Set(['residents-contact','residents-owners','residents-tenants']);
