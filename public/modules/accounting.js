@@ -34,6 +34,8 @@
   let M=null;
   const TP={receipt:'r',payment:'p',transfer:''};
   async function render(el,label){
+    // 從其他功能（例如社區合約的「管理簽約公司」）直接帶到指定分頁
+    try{const o=JSON.parse(localStorage.getItem('acct.openTab')||'null');if(o&&Date.now()-o.at<60000){S.tab=o.tab;}localStorage.removeItem('acct.openTab');}catch{}
     injectStyle();M=await api('/api/company/acct/meta');
     if(!S.eid||!M.entities.some(e=>e.id===S.eid))S.eid=M.entities[0]?.id;
     if(!S.from){S.from=`${M.today.slice(0,7)}-01`;S.to=M.today;S.year=M.today.slice(0,4);}
