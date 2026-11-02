@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 12;
+const VERSION = 13;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -84,9 +84,26 @@ function apply(list, spec) {
   }
   return list;
 }
+// 舊版留下、已經沒有用的公司目錄：「新日錄」（錯字、建置中）、「公司財務」（＝會計）、「人員」（＝公司人員管理）
+const COMPANY_REMOVE = [
+  { id: 'company-new-record', label: '新日錄', action: 'new-record' },
+  { id: 'company-finance', label: '公司財務', action: 'finance' },
+  { id: 'company-personnel', label: '人員', action: 'manage-staff', onlyIfOther: true },
+];
+function prune(list) {
+  if (!Array.isArray(list)) return list;
+  for (const r of COMPANY_REMOVE) {
+    for (const x of list.filter(x => !x.parentId && (String(x.id) === r.id || (String(x.label || '').trim() === r.label && String(x.action || '') === r.action)))) {
+      if (list.some(y => String(y.parentId || '') === String(x.id))) continue; // 底下還有子目錄就不動
+      if (r.onlyIfOther && !list.some(y => y !== x && String(y.action || '') === r.action)) continue;
+      list.splice(list.indexOf(x), 1);
+    }
+  }
+  return list;
+}
 function sync(c) {
-  apply(c.company, COMPANY); apply(c.staff, STAFF);
-  for (const k of Object.keys(c.tenants || {})) { const t = c.tenants[k]; if (!t || typeof t !== 'object') continue; if (Array.isArray(t.company)) apply(t.company, COMPANY); if (Array.isArray(t.staff)) apply(t.staff, STAFF); }
+  apply(c.company, COMPANY); apply(c.staff, STAFF); prune(c.company);
+  for (const k of Object.keys(c.tenants || {})) { const t = c.tenants[k]; if (!t || typeof t !== 'object') continue; if (Array.isArray(t.company)) { apply(t.company, COMPANY); prune(t.company); } if (Array.isArray(t.staff)) apply(t.staff, STAFF); }
   return c;
 }
-module.exports = { VERSION, sync, apply, COMPANY, STAFF };
+module.exports = { VERSION, sync, apply, prune, COMPANY, STAFF };

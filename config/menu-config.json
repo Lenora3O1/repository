@@ -484,22 +484,6 @@
       "enabled": true
     },
     {
-      "id": "company-personnel",
-      "parentId": null,
-      "icon": "👤",
-      "label": "人員",
-      "action": "manage-staff",
-      "enabled": true
-    },
-    {
-      "id": "company-finance",
-      "parentId": null,
-      "icon": "💵",
-      "label": "公司財務",
-      "action": "finance",
-      "enabled": true
-    },
-    {
       "id": "company-hr",
       "parentId": null,
       "icon": "🧑‍💼",
@@ -513,14 +497,6 @@
       "icon": "📝",
       "label": "面試管理",
       "action": "interviews",
-      "enabled": true
-    },
-    {
-      "id": "company-new-record",
-      "parentId": null,
-      "icon": "🗒️",
-      "label": "新日錄",
-      "action": "new-record",
       "enabled": true
     },
     {
