@@ -70,7 +70,9 @@
   // ---------- 系統更新偵測：部署新版後，還開著的舊頁面在點下一個功能時自動重新整理成新版 ----------
   // 伺服器每個 API 回應都帶 X-App-Version；和頁面載入時的版本不同，就代表程式已經更新。
   let appVer=null,appStale=false;
-  try{const of=window.fetch.bind(window);window.fetch=async(...args)=>{const r=await of(...args);try{const v=r.headers.get('x-app-version');if(v){if(appVer===null)appVer=v;else if(v!==appVer&&!appStale){appStale=true;showUpdateBar();}}}catch(e){}return r;};}catch(e){}
+  try{const of=window.fetch.bind(window);window.fetch=async(...args)=>{const r=await of(...args);try{if(r.status===401&&r.headers.get('x-relogin')==='1')showRelogin();}catch(e){}try{const v=r.headers.get('x-app-version');if(v){if(appVer===null)appVer=v;else if(v!==appVer&&!appStale){appStale=true;showUpdateBar();}}}catch(e){}return r;};}catch(e){}
+  // 登入已逾時（閒置太久或登入狀態失效）：用清楚的提示請使用者重新登入，取代「沒有權限」的錯誤訊息
+  function showRelogin(){if(!document.body.classList.contains('is-authenticated')||document.getElementById('reloginBox'))return;const b=document.createElement('div');b.id='reloginBox';b.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(29,13,12,.5);display:flex;align-items:center;justify-content:center;padding:16px';b.innerHTML='<div role="alertdialog" aria-modal="true" style="background:#FCFAF1;color:#1D0D0C;border-radius:16px;max-width:400px;width:100%;padding:22px 20px;box-shadow:0 18px 50px rgba(0,0,0,.25)"><h3 style="margin:0 0 8px">🔒 登入已逾時</h3><p style="margin:0 0 16px;color:#5F403B;line-height:1.6">為了資料安全，系統已將您登出。請重新登入後繼續作業。</p><div style="text-align:right"><button type="button" id="reloginGo">重新登入</button></div></div>';document.body.appendChild(b);b.querySelector('#reloginGo').onclick=()=>location.replace(location.pathname);}
   function showUpdateBar(){if(document.getElementById('appUpdateBar'))return;const b=document.createElement('div');b.id='appUpdateBar';b.setAttribute('role','status');b.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9999;background:#5F403B;color:#fff;padding:10px 18px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-size:15px;cursor:pointer;max-width:92vw;text-align:center';b.textContent='🔄 系統已更新，點這裡重新整理（下一次點選功能也會自動更新）';b.onclick=()=>location.reload();document.body.appendChild(b);}
   document.addEventListener('workspace-menu',e=>{
     const d=e.detail||{};if(d.fromHistory)return;
@@ -212,15 +214,24 @@
   let last=Date.now(),wrote=0;
   const save=t=>{try{localStorage.setItem(KEY,String(t));}catch(e){}};
   const act=()=>{const t=Date.now();last=t;if(t-wrote>15000){wrote=t;save(t);}};
+  // 在輸入框打字（含手機輸入法）也算有在作業
+  document.addEventListener('input',()=>act(),true);
   ['mousedown','keydown','touchstart','wheel','mousemove','scroll'].forEach(e=>window.addEventListener(e,act,{passive:true,capture:true}));
   save(last);
   try{if(sessionStorage.getItem(MSG)){sessionStorage.removeItem(MSG);const d=document.createElement('div');d.setAttribute('role','status');d.style.cssText='position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:10000;background:#5F403B;color:#fff;padding:12px 18px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-weight:600;max-width:92vw';d.textContent='為了資料安全，閒置超過 30 分鐘已自動登出，請重新登入。';document.addEventListener('DOMContentLoaded',()=>document.body.appendChild(d));if(document.body)document.body.appendChild(d);setTimeout(()=>d.remove(),10000);}}catch(e){}
+  // 快到時間前 2 分鐘先提醒；只要動一下滑鼠、按鍵或捲動就會繼續保持登入
+  const WARN=2*60*1000;let bar=null;
+  const hideBar=()=>{if(bar){bar.remove();bar=null;}};
+  ['mousedown','keydown','touchstart','wheel','mousemove','scroll'].forEach(e=>window.addEventListener(e,hideBar,{passive:true,capture:true}));
   setInterval(async()=>{
     if(!document.body.classList.contains('is-authenticated'))return;
     let t=last;try{t=Math.max(last,Number(localStorage.getItem(KEY))||0);}catch(e){}
-    if(Date.now()-t<LIMIT)return;
+    const idle=Date.now()-t;
+    if(idle<LIMIT-WARN){hideBar();return;}
+    if(idle<LIMIT){if(!bar){bar=document.createElement('div');bar.setAttribute('role','alert');bar.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10000;background:#5F403B;color:#fff;padding:12px 16px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-weight:600;display:flex;gap:12px;align-items:center;max-width:94vw;flex-wrap:wrap';bar.innerHTML='<span>您已經一段時間沒有操作，約 2 分鐘後會自動登出。</span><button type="button" style="background:#fff;color:#5F403B;border:0;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer">繼續使用</button>';bar.querySelector('button').onclick=()=>{act();hideBar();};document.body.appendChild(bar);}return;}
+    hideBar();
     try{await fetch(scope==='admin'?'/api/admin/logout':'/api/company/logout',{method:'POST',credentials:'same-origin'});}catch(e){}
     try{sessionStorage.setItem(MSG,'1');}catch(e){}
     location.replace(location.pathname);
-  },20000);
+  },10000);
 })();
