@@ -300,7 +300,7 @@ module.exports = function registerPayrollRoutes(app, d) {
       const type = ['national', 'arc', 'passport'].includes(b.id_type) ? b.id_type : 'national'; const no = str(b.id_no, 20).toUpperCase().replace(/\s/g, '');
       if (no && type !== 'passport' && !idCheck(no)) return bad(res, type === 'arc' ? '居留證號碼格式或檢查碼不正確（新式：1 個英文＋8 或 9 開頭的 9 碼數字；舊式：2 個英文＋8 碼數字）' : '身分證字號格式或檢查碼不正確');
       if (no && type === 'national' && !/^[A-Z][12]/.test(no)) return bad(res, '這是居留證號碼，請把證件類別改成「居留證」');
-      if (no && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND id_no=? AND staff_id<>?').get(tid, no, sid)) return bad(res, '這個證號已經登記在其他人員的資料上');
+      if (no && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND (id_no=? OR id_no=enc_eq(?)) AND staff_id<>?').get(tid, no, no, sid)) return bad(res, '這個證號已經登記在其他人員的資料上');
       // 身分證第 2 碼 1＝男、2＝女，性別未登記時自動帶入
       const g = type === 'national' && no ? (no[1] === '1' ? 'M' : 'F') : '';
       db.prepare('UPDATE hr_profiles SET id_type=?,id_no=?,nationality=?,gender=CASE WHEN COALESCE(gender,\'\')=\'\' AND ?<>\'\' THEN ? ELSE gender END WHERE tenant_id=? AND staff_id=?').run(type, no, type === 'national' ? '' : str(b.nationality, 30), g, g, tid, sid);

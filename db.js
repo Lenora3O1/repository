@@ -5,6 +5,9 @@ const crypto = require('crypto');
 
 const { DATA_DIR } = require('./data-dir');
 const db = new Database(path.join(DATA_DIR, 'data.sqlite'));
+// 個資欄位加密（金鑰：環境變數 DATA_ENCRYPTION_KEY）。金鑰不對時停止啟動，避免把資料寫壞。
+db.fieldCrypto = require('./field-crypto')(db);
+if (!db.fieldCrypto.keyState.ok) { console.error('==================================================================\n[資安] ' + db.fieldCrypto.keyState.error + '\n=================================================================='); process.exit(1); }
 db.pragma('foreign_keys = ON');
 // WAL：讀寫可同時進行，多人操作時讀取不必等寫入完成；NORMAL 在 WAL 下仍可保證資料一致
 try { db.pragma('journal_mode = WAL'); db.pragma('synchronous = NORMAL'); db.pragma('busy_timeout = 5000'); db.pragma('cache_size = -32000'); } catch (e) { console.warn('[db] WAL 設定失敗：', e.message); }

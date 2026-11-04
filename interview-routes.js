@@ -361,7 +361,7 @@ module.exports = function registerInterviewRoutes(app, d) {
     const cols = db.prepare('PRAGMA table_info(hr_profiles)').all().map(c => c.name);
     const set = { gender: r.gender, birthday: r.birthday, mobile: r.phone, address: r.address, emergency_name: r.emergency_name, emergency_relation: r.emergency_relation, emergency_phone: r.emergency_phone, id_type: r.id_type, id_no: r.id_no, nationality: r.nationality };
     const keys = Object.keys(set).filter(k => cols.includes(k) && set[k]);
-    if (keys.includes('id_no') && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND id_no=? AND staff_id<>?').get(tid, set.id_no, sid)) throw err('這個證號已經登記在其他人員的資料上');
+    if (keys.includes('id_no') && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND (id_no=? OR id_no=enc_eq(?)) AND staff_id<>?').get(tid, set.id_no, set.id_no, sid)) throw err('這個證號已經登記在其他人員的資料上');
     if (keys.length) db.prepare(`UPDATE hr_profiles SET ${keys.map(k => `${k}=?`).join(',')},hr_updated_at=?,hr_updated_by=? WHERE tenant_id=? AND staff_id=?`).run(...keys.map(k => set[k]), now(), by(u), tid, sid);
     db.prepare("UPDATE interview_applicants SET staff_id=?,status='hired',decision='hired',decided_at=COALESCE(decided_at,?),updated_at=? WHERE id=?").run(sid, now(), now(), a.id);
     ilog(a, u, 'linked', `員編 ${s0.employee_id}`);
