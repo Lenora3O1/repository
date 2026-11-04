@@ -10,10 +10,37 @@ module.exports = function registerSecurityRoutes(app, d) {
   const isBoss = u => !!u && (u.role === 'company_admin' || ['owner', 'gm'].includes(orgKind(u)));
   const log = (u, action, detail) => { try { db.prepare('INSERT INTO audit_logs (tenant_id,employee_id,employee_name,action,module,record_type,record_id,detail,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(u.tenant_id, u.employee_id, u.name, action, 'security', 'staff_user', String(u.id), detail, now()); } catch {} };
 
+  // ================= 信任的裝置：勾選後 30 天內這台電腦／手機不用再輸入驗證碼 =================
+  // 瀏覽器只存一組隨機代碼（Cookie，網頁程式讀不到）；伺服器只存代碼的雜湊。重設兩步驟驗證或密碼時一併取消。
+  const crypto = require('crypto');
+  const TRUST_DAYS = 30;
+  db.exec(`CREATE TABLE IF NOT EXISTS trusted_devices (id INTEGER PRIMARY KEY AUTOINCREMENT, user_key TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, device TEXT DEFAULT '', ip TEXT DEFAULT '', created_at TEXT NOT NULL, last_used_at TEXT, expires_at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_trusted_user ON trusted_devices(user_key);`);
+  const hashTok = t => crypto.createHash('sha256').update(String(t)).digest('hex');
+  const cookieName = key => 'hs_td_' + key.replace(/[^a-z0-9]/gi, '');
+  const readCookie = (req, name) => { const m = new RegExp('(?:^|;\\s*)' + name + '=([A-Za-z0-9_-]{20,})').exec(req.headers.cookie || ''); return m ? m[1] : ''; };
+  const addCookie = (res, v) => { const prev = res.getHeader('Set-Cookie'); res.setHeader('Set-Cookie', [].concat(prev || [], v)); };
+  const deviceName = ua => { ua = String(ua || ''); const os = /iPhone|iPad/.test(ua) ? 'iPhone／iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : '其他'; const br = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /Firefox\//.test(ua) ? 'Firefox' : '瀏覽器'; return `${os}｜${br}`; };
+  function isTrusted(req, key) {
+    const t = readCookie(req, cookieName(key)); if (!t) return false;
+    const r = db.prepare('SELECT id,expires_at FROM trusted_devices WHERE user_key=? AND token_hash=?').get(key, hashTok(t));
+    if (!r || r.expires_at < Date.now()) return false;
+    db.prepare('UPDATE trusted_devices SET last_used_at=?,ip=? WHERE id=?').run(now(), String(req.ip || ''), r.id); return true;
+  }
+  function trustDevice(req, res, key) {
+    const t = crypto.randomBytes(32).toString('base64url'); const exp = Date.now() + TRUST_DAYS * 864e5;
+    db.prepare('INSERT INTO trusted_devices (user_key,token_hash,device,ip,created_at,expires_at) VALUES (?,?,?,?,?,?)').run(key, hashTok(t), deviceName(req.headers['user-agent']), String(req.ip || ''), now(), exp);
+    addCookie(res, `${cookieName(key)}=${t}; Path=/; Max-Age=${TRUST_DAYS * 86400}; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`);
+  }
+  const untrustAll = key => db.prepare('DELETE FROM trusted_devices WHERE user_key=?').run(key).changes;
+  const trustedCount = key => db.prepare('SELECT COUNT(*) n FROM trusted_devices WHERE user_key=? AND expires_at>?').get(key, Date.now()).n;
+  try { db.prepare('DELETE FROM trusted_devices WHERE expires_at<?').run(Date.now()); } catch {}
+
   // ================= 兩步驟驗證：內勤入口 =================
   // 由 server.js 的登入流程呼叫：密碼正確後，需要兩步驟的人先不登入，改回傳 need_2fa／setup_2fa
   function startIfNeeded(req, res, user, entry) {
     if (entry !== 'company' || !needs2fa(user)) return false;
+    if (twofa.state(user).enabled && isTrusted(req, `s${user.id}`)) return false; // 信任的裝置：直接登入
     req.session.pending2fa = { uid: user.id, entry, at: Date.now(), tries: 0 };
     const s = twofa.state(user);
     if (s.enabled) { res.json({ need_2fa: true, name: user.name }); return true; }
@@ -31,6 +58,7 @@ module.exports = function registerSecurityRoutes(app, d) {
     if (!s.enabled) { codes = twofa.finishSetup(user, code); if (!codes) return fail(); log(user, '2fa_enabled', '完成兩步驟驗證設定'); }
     else { const how = twofa.check(user, code); if (!how) return fail(); if (how === 'recovery') log(user, '2fa_recovery_used', '使用備用碼登入'); }
     delete req.session.pending2fa;
+    if (req.body?.trust) { trustDevice(req, res, `s${user.id}`); log(user, '2fa_trust_device', `信任裝置 ${TRUST_DAYS} 天：${deviceName(req.headers['user-agent'])}`); }
     return finishStaffLogin(req, res, user, p.entry, codes ? { recovery_codes: codes } : {});
     function fail() {
       p.tries++;
@@ -42,6 +70,7 @@ module.exports = function registerSecurityRoutes(app, d) {
   // ================= 兩步驟驗證：系統總後台 =================
   function adminStart(req, res) {
     if (!twofa.required()) return false;
+    if (twofa.admin.state().enabled && isTrusted(req, 'admin')) return false;
     req.session.adminPending = { at: Date.now(), tries: 0 };
     if (twofa.admin.state().enabled) { res.json({ need_2fa: true }); return true; }
     const s = twofa.admin.beginSetup(); res.json({ setup_2fa: true, secret: s.secret, otpauth: s.otpauth }); return true;
@@ -53,6 +82,7 @@ module.exports = function registerSecurityRoutes(app, d) {
     else if (!twofa.admin.check(code)) return fail();
     delete req.session.adminPending;
     req.session.isAdmin = true; req.session.employeeId = null; req.session.tenantId = null; req.session.role = 'super_admin'; req.session.adminAt = Date.now();
+    if (req.body?.trust) trustDevice(req, res, 'admin');
     return res.json({ success: true, ...(codes ? { recovery_codes: codes } : {}) });
     function fail() { p.tries++; if (p.tries >= MAX_TRIES) { delete req.session.adminPending; return bad(res, '驗證碼錯誤次數過多，請重新登入', 401); } return bad(res, `驗證碼不正確（還可以再試 ${MAX_TRIES - p.tries} 次）`, 401); }
   });
@@ -90,7 +120,7 @@ module.exports = function registerSecurityRoutes(app, d) {
     const tid = tenantId(req);
     const users = db.prepare("SELECT * FROM staff_users WHERE tenant_id=? AND is_active=1 ORDER BY role DESC, employee_id").all(tid);
     const locked = users.filter(u => u.locked_at).map(u => ({ id: u.id, employee_id: u.employee_id, name: u.name, locked_at: u.locked_at, owner: isOwnerAccount(u) }));
-    const twofaRows = users.filter(u => twofa.needsFor(u, { orgKind: orgKind(u), perms: effectivePermissions(u) || [] })).map(u => { const s = twofa.state(u); return { id: u.id, employee_id: u.employee_id, name: u.name, enabled: s.enabled, recovery_left: s.recovery.length, owner: isOwnerAccount(u) }; });
+    const twofaRows = users.filter(u => twofa.needsFor(u, { orgKind: orgKind(u), perms: effectivePermissions(u) || [] })).map(u => { const s = twofa.state(u); return { id: u.id, employee_id: u.employee_id, name: u.name, enabled: s.enabled, recovery_left: s.recovery.length, owner: isOwnerAccount(u), trusted: trustedCount(`s${u.id}`) }; });
     const q = req.query || {}; const days = Math.min(Math.max(Number(q.days) || 30, 1), 365);
     const since = new Date(Date.now() - days * 864e5).toISOString();
     const args = [tid, since]; let where = 'tenant_id=? AND at>=?';
@@ -107,8 +137,16 @@ module.exports = function registerSecurityRoutes(app, d) {
     if (!u) return bad(res, '找不到人員', 404);
     if (u.id === me.id) return bad(res, '不能重設自己的兩步驟驗證，請由公司負責人或系統服務商處理');
     if (isOwnerAccount(u)) return bad(res, '公司負責人的兩步驟驗證請聯絡系統服務商（總後台）重設', 403);
-    twofa.reset(u.id); log(me, '2fa_reset', `重設 ${u.name}（${u.employee_id}）的兩步驟驗證`);
+    twofa.reset(u.id); untrustAll(`s${u.id}`); log(me, '2fa_reset', `重設 ${u.name}（${u.employee_id}）的兩步驟驗證`);
     res.json({ success: true });
+  });
+
+  // 取消某人所有「信任的裝置」（電腦遺失、離職交接、懷疑被別人使用時）
+  app.post(`${C}/untrust/:id`, requireCompanyAdmin, needBoss, (req, res) => {
+    const me = getUser(req); const u = db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(Number(req.params.id), tenantId(req));
+    if (!u) return bad(res, '找不到人員', 404);
+    const n = untrustAll(`s${u.id}`); log(me, '2fa_untrust', `取消 ${u.name}（${u.employee_id}）的 ${n} 台信任裝置`);
+    res.json({ success: true, removed: n });
   });
 
   // ================= 總後台：資安狀態 =================
@@ -130,9 +168,9 @@ module.exports = function registerSecurityRoutes(app, d) {
   app.post('/api/admin/tenants/:id/admin/reset-2fa', requireSuperAdmin, (req, res) => {
     const u = db.prepare("SELECT * FROM staff_users WHERE tenant_id=? AND role='company_admin' AND admin_level='owner' ORDER BY id LIMIT 1").get(Number(req.params.id));
     if (!u) return bad(res, '找不到公司負責人', 404);
-    twofa.reset(u.id); log({ tenant_id: u.tenant_id, employee_id: 'super_admin', name: '系統總後台' }, '2fa_reset', `總後台重設公司負責人 ${u.name}（${u.employee_id}）的兩步驟驗證`);
+    twofa.reset(u.id); untrustAll(`s${u.id}`); log({ tenant_id: u.tenant_id, employee_id: 'super_admin', name: '系統總後台' }, '2fa_reset', `總後台重設公司負責人 ${u.name}（${u.employee_id}）的兩步驟驗證`);
     res.json({ success: true });
   });
 
-  return { startIfNeeded, adminStart, needs2fa, accessLog };
+  return { startIfNeeded, adminStart, needs2fa, accessLog, untrustAll, trustedCount };
 };

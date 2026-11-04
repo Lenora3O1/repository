@@ -193,16 +193,16 @@ module.exports = function registerOrgRoutes(app, d) {
     return dg;
   };
   const saveMobile = (tid, sid, mobile) => { try { db.prepare('INSERT OR IGNORE INTO hr_profiles (tenant_id,staff_id,updated_at) VALUES (?,?,?)').run(tid, sid, now()); db.prepare('UPDATE hr_profiles SET mobile=? WHERE tenant_id=? AND staff_id=?').run(mobile, tid, sid); } catch (e) { console.warn('mobile save failed', e.message); } };
-  app.post(`${C}/staff`, requireCompanyAdmin, requireCompanyPermission('manage-staff'), wrap((req, res) => {
-    const tid = tenantId(req); const b = req.body || {}; const actor = getUser(req);
+  // 開通人員（開通表單、Excel 匯入共用）：成功回傳 { id, employee_id }，資料不正確時丟出錯誤
+  function createStaff(tid, b, actor) {
     const mobileMode = LI.loginMode(tid) === 'mobile';
     let employeeId = str(b.employee_id, 30); const name = str(b.name, 60), password = String(b.password || '');
     if (!employeeId && mobileMode) employeeId = LI.autoEmployeeId(tid);
-    if (!employeeId) return bad(res, '請填寫員編'); if (!name) return bad(res, '請填寫姓名'); if (password.length < 4) return bad(res, '初始密碼至少 4 碼');
-    if (db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tid, employeeId)) return bad(res, '這家公司已有相同員編的帳號');
+    if (!employeeId) throw err('請填寫員編'); if (!name) throw err('請填寫姓名'); if (password.length < 4) throw err('初始密碼至少 4 碼');
+    if (db.prepare('SELECT id FROM staff_users WHERE tenant_id=? AND employee_id=?').get(tid, employeeId)) throw err('這家公司已有相同員編的帳號');
     const mobile = checkMobile(tid, b.mobile, 0);
-    const chk = LI.checkForAccount(tid, mobile, b, { requireForMode: true }); if (chk) return res.status(chk.status).json(chk.body);
-    if (!posOf(configFor(tid), b.position_id)) return bad(res, '請選擇職位');
+    const chk = LI.checkForAccount(tid, mobile, b, { requireForMode: true }); if (chk) throw Object.assign(err(chk.body?.error || '手機號碼無法使用'), { status: chk.status, body: chk.body });
+    if (!posOf(configFor(tid), b.position_id)) throw err('請選擇職位');
     let id;
     tx(() => {
       const p = db.makePassword(password);
@@ -212,20 +212,27 @@ module.exports = function registerOrgRoutes(app, d) {
       applyMember(tid, id, b, actor);
       if (mobile) saveMobile(tid, id, mobile);
     })();
-    res.json({ success: true, id, employee_id: employeeId });
+    return { id, employee_id: employeeId };
+  }
+  app.post(`${C}/staff`, requireCompanyAdmin, requireCompanyPermission('manage-staff'), wrap((req, res) => {
+    try { const r = createStaff(tenantId(req), req.body || {}, getUser(req)); res.json({ success: true, ...r }); }
+    catch (e) { if (e.body) return res.status(e.status || 400).json(e.body); throw e; }
   }));
-  app.put(`${C}/staff/:id`, requireCompanyAdmin, requireCompanyPermission('manage-staff'), wrap((req, res) => {
-    const tid = tenantId(req); const sid = Number(req.params.id); const b = req.body || {}; const actor = getUser(req);
-    const u = db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(sid, tid); if (!u) return bad(res, '找不到人員', 404);
-    if (u.role === 'company_admin' && actor.role !== 'company_admin') return bad(res, '公司管理員的職位只能由公司管理員設定', 403);
+  // 修改人員職位／社區／手機（設定表單、Excel 匯入共用）
+  function updateStaff(tid, sid, b, actor) {
+    const u = db.prepare('SELECT * FROM staff_users WHERE id=? AND tenant_id=?').get(sid, tid); if (!u) throw Object.assign(err('找不到人員'), { status: 404 });
+    if (u.role === 'company_admin' && actor.role !== 'company_admin') throw Object.assign(err('公司管理員的職位只能由公司管理員設定'), { status: 403 });
     const mobile = b.mobile !== undefined ? checkMobile(tid, b.mobile, sid) : null;
-    if (mobile !== null) { const chk = LI.checkForAccount(tid, mobile, b, { requireForMode: true, previous: LI.mobileOf(sid) }); if (chk) return res.status(chk.status).json(chk.body); }
+    if (mobile !== null) { const chk = LI.checkForAccount(tid, mobile, b, { requireForMode: true, previous: LI.mobileOf(sid) }); if (chk) throw Object.assign(err(chk.body?.error || '手機號碼無法使用'), { status: chk.status, body: chk.body }); }
     tx(() => {
       if (b.name && u.role !== 'company_admin') db.prepare('UPDATE staff_users SET name=? WHERE id=?').run(str(b.name, 60), sid);
       applyMember(tid, sid, b, actor);
       if (mobile !== null) saveMobile(tid, sid, mobile);
     })();
-    res.json({ success: true });
+  }
+  app.put(`${C}/staff/:id`, requireCompanyAdmin, requireCompanyPermission('manage-staff'), wrap((req, res) => {
+    try { updateStaff(tenantId(req), Number(req.params.id), req.body || {}, getUser(req)); res.json({ success: true }); }
+    catch (e) { if (e.body) return res.status(e.status || 400).json(e.body); throw e; }
   }));
   app.post(`${C}/apply-suggestions`, requireCompanyAdmin, requireCompanyPermission('manage-staff'), wrap((req, res) => {
     const tid = tenantId(req); const actor = getUser(req); const done = [], failed = [];
@@ -295,5 +302,5 @@ module.exports = function registerOrgRoutes(app, d) {
     }));
   }
 
-  return { configFor, prefsFor, memberInfo, people, relations, resolveLeaveStep, syncRegionAccess };
+  return { configFor, prefsFor, memberInfo, people, relations, resolveLeaveStep, syncRegionAccess, createStaff, updateStaff, memberRow, posOf };
 };

@@ -38,6 +38,7 @@ module.exports = function registerAccountRoutes(app, d) {
     const temp = Array.from(crypto.randomBytes(8), b => alphabet[b % alphabet.length]).join('');
     const p = db.makePassword(temp);
     db.prepare("UPDATE staff_users SET password_hash=?,password_salt=?,must_change_password=1,failed_logins=0,locked_at='',updated_at=? WHERE id=?").run(p.hash, p.salt, now(), u.id);
+    try { db.prepare('DELETE FROM trusted_devices WHERE user_key=?').run(`s${u.id}`); } catch {} // 重設密碼：已信任的裝置也要重新驗證
     res.json({ success: true, temp_password: temp, employee_id: u.employee_id, name: u.name });
   });
   // 解鎖：密碼連續錯 5 次被鎖的帳號，由有「人員管理」權限的主管解鎖（公司負責人只能由總後台重發密碼）
