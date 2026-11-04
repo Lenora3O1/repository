@@ -2874,6 +2874,8 @@ coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,req
 smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,getSiteAssignments,org:orgApi,S:{getProfile:scheduleGetProfile,effectiveRule:scheduleEffectiveRule,platformRules:schedulePlatformRules,holidays:y=>scheduleTaiwanHolidayDates(y),redDatesSync:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),leavePolicy:tid=>leaveApi.policyFor(tid)}});
 // ===== 公司內勤首頁儀表板（依職位與權限組合卡片）=====
 plansApi=require('./plans')(app,{db,now,requireSuperAdmin,requireCompanyAdmin,getUser,tenantId,getAcct:()=>acctApi});
+// Excel 批次匯入：人事（開通帳號＋人事資料）、薪資
+require('./staff-import')(app,{db,XLSX,multer,LI,getUser,tenantId,now,requireCompanyAdmin,getOrg:()=>orgApi,getPayroll:()=>payroll,getPlans:()=>plansApi,hasPermission:(u,k)=>effectivePermissions(u).includes(k),getSiteAssignments});
 acctApi=require('./accounting-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireSuperAdmin,effectivePermissions,org:orgApi,XLSX});
 contractApi=require('./contract-routes')(app,{db,fs,path,crypto,multer,DATA_DIR,getUser,tenantId,now,requireCompanyAdmin,getSiteAssignments,org:orgApi,acct:acctApi,addons:()=>plansApi});
 arApi=require('./ar-routes')(app,{db,getUser,tenantId,now,requireCompanyAdmin,acct:acctApi,contracts:contractApi});

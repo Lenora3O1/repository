@@ -281,11 +281,10 @@ module.exports = function registerPayrollRoutes(app, d) {
     res.set('Cache-Control', 'no-store');
     res.json({ profiles: staffList(tid).map(u => hrView(profileOut(u, profileRow(tid, u.id), t), t)), table: tableOut(tid, t), can_payroll: canPayroll(getUser(req)) });
   }));
-  app.put(`${C}/hr/profiles/:staffId`, requireCompanyAdmin, guard(canHR), wrap((req, res) => {
-    const tid = tenantId(req); const sid = Number(req.params.staffId); const u = findStaff(tid, sid); if (!u) return bad(res, '找不到人員', 404);
-    const b = req.body || {};
-    for (const k of ['hire_date', 'trial_end_date', 'birthday', 'insured_date']) if (b[k] && !isDate(b[k])) return bad(res, '日期格式不正確');
-    if (b.hire_date && b.trial_end_date && b.trial_end_date < b.hire_date) return bad(res, '試用期到期日不能早於到職日');
+  // 儲存人事資料（人事管理頁、Excel 匯入共用）：b 為完整資料（沒帶的欄位會被清空，匯入時先合併原本的資料）
+  function saveHr(tid, sid, b, actor) {
+    for (const k of ['hire_date', 'trial_end_date', 'birthday', 'insured_date']) if (b[k] && !isDate(b[k])) throw Object.assign(new Error('日期格式不正確'), { status: 400 });
+    if (b.hire_date && b.trial_end_date && b.trial_end_date < b.hire_date) throw Object.assign(new Error('試用期到期日不能早於到職日'), { status: 400 });
     const t = tables.forMonth(monthTW()); const auto = b.auto_grade !== false;
     const g = (k, list) => { const v = int(b[k]); if (auto || !v) return 0; if (!list.includes(v)) throw Object.assign(new Error('投保級距必須是級距表中的金額'), { status: 400 }); return v; };
     const lg = g('labor_grade', t.labor);
@@ -294,18 +293,25 @@ module.exports = function registerPayrollRoutes(app, d) {
     db.prepare('UPDATE hr_profiles SET auto_grade=?,labor_grade=?,occupational_grade=?,health_grade=?,pension_grade=?,pay_method=?,bank_name=?,bank_account=?,annual_used=? WHERE tenant_id=? AND staff_id=?')
       .run(auto ? 1 : 0, ...grades, b.pay_method === 'cash' ? 'cash' : 'transfer', str(b.bank_name, 40), b.pay_method === 'cash' ? '' : str(b.bank_account, 60), Math.max(0, Math.min(Number(b.annual_used) || 0, 60)), tid, sid);
     db.prepare('UPDATE hr_profiles SET hire_date=?,trial_end_date=?,birthday=?,mobile=?,address=?,emergency_name=?,emergency_relation=?,emergency_phone=?,insured_date=?,labor_insured=?,employment_insured=?,occupational_insured=?,health_insured=?,pension_enabled=?,health_dependents=?,note=?,hr_updated_at=?,hr_updated_by=?,updated_at=? WHERE tenant_id=? AND staff_id=?')
-      .run(b.hire_date || '', b.trial_end_date || '', b.birthday || '', str(b.mobile, 30), str(b.address, 200), str(b.emergency_name, 30), str(b.emergency_relation, 20), str(b.emergency_phone, 30), b.insured_date || '', b.labor_insured === false ? 0 : 1, b.employment_insured === false ? 0 : 1, b.labor_insured === false ? 0 : 1, b.health_insured === false ? 0 : 1, b.pension_enabled === false ? 0 : 1, Math.max(0, Math.min(int(b.health_dependents), 20)), str(b.note, 500), now(), by(getUser(req)), now(), tid, sid);
+      .run(b.hire_date || '', b.trial_end_date || '', b.birthday || '', str(b.mobile, 30), str(b.address, 200), str(b.emergency_name, 30), str(b.emergency_relation, 20), str(b.emergency_phone, 30), b.insured_date || '', b.labor_insured === false ? 0 : 1, b.employment_insured === false ? 0 : 1, b.labor_insured === false ? 0 : 1, b.health_insured === false ? 0 : 1, b.pension_enabled === false ? 0 : 1, Math.max(0, Math.min(int(b.health_dependents), 20)), str(b.note, 500), now(), by(actor), now(), tid, sid);
     db.prepare('UPDATE hr_profiles SET gender=? WHERE tenant_id=? AND staff_id=?').run(['F', 'M'].includes(b.gender) ? b.gender : '', tid, sid);
     if (b.id_no !== undefined) {
       const type = ['national', 'arc', 'passport'].includes(b.id_type) ? b.id_type : 'national'; const no = str(b.id_no, 20).toUpperCase().replace(/\s/g, '');
-      if (no && type !== 'passport' && !idCheck(no)) return bad(res, type === 'arc' ? '居留證號碼格式或檢查碼不正確（新式：1 個英文＋8 或 9 開頭的 9 碼數字；舊式：2 個英文＋8 碼數字）' : '身分證字號格式或檢查碼不正確');
-      if (no && type === 'national' && !/^[A-Z][12]/.test(no)) return bad(res, '這是居留證號碼，請把證件類別改成「居留證」');
-      if (no && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND (id_no=? OR id_no=enc_eq(?)) AND staff_id<>?').get(tid, no, no, sid)) return bad(res, '這個證號已經登記在其他人員的資料上');
+      if (no && type !== 'passport' && !idCheck(no)) throw Object.assign(new Error(type === 'arc' ? '居留證號碼格式或檢查碼不正確（新式：1 個英文＋8 或 9 開頭的 9 碼數字；舊式：2 個英文＋8 碼數字）' : '身分證字號格式或檢查碼不正確'), { status: 400 });
+      if (no && type === 'national' && !/^[A-Z][12]/.test(no)) throw Object.assign(new Error('這是居留證號碼，請把證件類別改成「居留證」'), { status: 400 });
+      if (no && db.prepare('SELECT 1 FROM hr_profiles WHERE tenant_id=? AND (id_no=? OR id_no=enc_eq(?)) AND staff_id<>?').get(tid, no, no, sid)) throw Object.assign(new Error('這個證號已經登記在其他人員的資料上'), { status: 400 });
       // 身分證第 2 碼 1＝男、2＝女，性別未登記時自動帶入
       const g = type === 'national' && no ? (no[1] === '1' ? 'M' : 'F') : '';
       db.prepare('UPDATE hr_profiles SET id_type=?,id_no=?,nationality=?,gender=CASE WHEN COALESCE(gender,\'\')=\'\' AND ?<>\'\' THEN ? ELSE gender END WHERE tenant_id=? AND staff_id=?').run(type, no, type === 'national' ? '' : str(b.nationality, 30), g, g, tid, sid);
     }
     try { db.prepare('UPDATE staff_users SET trial_end_date=?,health_dependents=? WHERE id=?').run(b.trial_end_date || '', Math.max(0, int(b.health_dependents)), sid); } catch {}
+  }
+  // 目前的人事資料（給匯入合併用）
+  function hrBody(tid, sid) { const u = findStaff(tid, sid); if (!u) return null; const t = tables.forMonth(monthTW()); return hrView(profileOut(u, profileRow(tid, sid), t), t); }
+  app.put(`${C}/hr/profiles/:staffId`, requireCompanyAdmin, guard(canHR), wrap((req, res) => {
+    const tid = tenantId(req); const sid = Number(req.params.staffId); const u = findStaff(tid, sid); if (!u) return bad(res, '找不到人員', 404);
+    const t = tables.forMonth(monthTW());
+    saveHr(tid, sid, req.body || {}, getUser(req));
     res.json({ success: true, profile: hrView(profileOut(u, profileRow(tid, sid), t), t) });
   }));
 
@@ -327,16 +333,21 @@ module.exports = function registerPayrollRoutes(app, d) {
     res.set('Cache-Control', 'no-store');
     res.json({ salaries: staffList(tid).map(u => salaryView(profileOut(u, profileRow(tid, u.id), t), t, tid)), table: tableOut(tid, t), month: monthTW(), company_ins: companyIns(tid) });
   }));
-  app.put(`${C}/payroll/salaries/:staffId`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
-    const tid = tenantId(req); const sid = Number(req.params.staffId); const u = findStaff(tid, sid); if (!u) return bad(res, '找不到人員', 404);
-    const b = req.body || {}; const t = tables.forMonth(monthTW());
+  // 儲存薪資設定（薪資設定頁、Excel 匯入共用）
+  function saveSalary(tid, sid, b, actor) {
     const allowances = (Array.isArray(b.allowances) ? b.allowances : []).map(x => ({ name: str(x?.name, 20), amount: int(x?.amount) })).filter(x => x.name && x.amount).slice(0, 10);
     ensureRow(tid, sid);
     // 投保級距、薪轉帳號屬於人事資料，這裡不修改
     db.prepare('UPDATE hr_profiles SET payroll_enabled=?,base_salary=?,trial_salary=?,allowances_json=?,deductions_json=?,pension_self_rate=?,salary_note=?,salary_updated_at=?,salary_updated_by=?,updated_at=? WHERE tenant_id=? AND staff_id=?')
-      .run(b.payroll_enabled === false ? 0 : 1, Math.max(0, int(b.base_salary)), Math.max(0, int(b.trial_salary)), JSON.stringify(allowances), JSON.stringify(cleanDeductions(b.deductions)), Math.max(0, Math.min(Number(b.pension_self_rate) || 0, 6)), str(b.salary_note, 500), now(), by(getUser(req)), now(), tid, sid);
+      .run(b.payroll_enabled === false ? 0 : 1, Math.max(0, int(b.base_salary)), Math.max(0, int(b.trial_salary)), JSON.stringify(allowances), JSON.stringify(cleanDeductions(b.deductions)), Math.max(0, Math.min(Number(b.pension_self_rate) || 0, 6)), str(b.salary_note, 500), now(), by(actor), now(), tid, sid);
     if (Array.isArray(b.ins_exclude)) { const ids = new Set(companyIns(tid).map(x => x.id)); db.prepare('UPDATE hr_profiles SET ins_exclude_json=? WHERE tenant_id=? AND staff_id=?').run(JSON.stringify(b.ins_exclude.map(String).filter(x => ids.has(x))), tid, sid); }
     try { db.prepare('UPDATE staff_users SET formal_salary=? WHERE id=?').run(String(int(b.base_salary) || ''), sid); } catch {}
+  }
+  function salaryBody(tid, sid) { const u = findStaff(tid, sid); if (!u) return null; const t = tables.forMonth(monthTW()); return salaryView(profileOut(u, profileRow(tid, sid), t), t, tid); }
+  app.put(`${C}/payroll/salaries/:staffId`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
+    const tid = tenantId(req); const sid = Number(req.params.staffId); const u = findStaff(tid, sid); if (!u) return bad(res, '找不到人員', 404);
+    const t = tables.forMonth(monthTW());
+    saveSalary(tid, sid, req.body || {}, getUser(req));
     res.json({ success: true, salary: salaryView(profileOut(u, profileRow(tid, sid), t), t, tid) });
   }));
   // 只改定期代扣款（借資頁的「代扣款項」使用）
@@ -567,5 +578,5 @@ module.exports = function registerPayrollRoutes(app, d) {
     return Number(info.lastInsertRowid);
   }
   tables.startScheduler();
-  return { advanceBasis, createAdvance, profileExtras, canPayroll, canHR, annualLeave, setLeaveHooks: h => { leaveHooks = h; } };
+  return { saveHr, hrBody, saveSalary, salaryBody, idCheck, advanceBasis, createAdvance, profileExtras, canPayroll, canHR, annualLeave, setLeaveHooks: h => { leaveHooks = h; } };
 };
