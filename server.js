@@ -239,6 +239,8 @@ app.use('/api',perf.jsonGzip);
 app.use('/api',perf.versionHeader(path.join(__dirname,'public')));
 app.use(session({
   secret: security.sessionSecret(DATA_DIR),
+  // 登入狀態存在資料庫：系統更新或主機重開時不會把大家登出；rolling：有在使用就自動延長
+  store: require('./session-store')(session, db) || undefined, rolling: true,
   resave: false, saveUninitialized: false, proxy: true,
   // secure:'auto'：HTTPS 連線時 Cookie 只走加密連線；httpOnly：網頁程式讀不到登入憑證
   cookie: { maxAge: 1000 * 60 * 60 * 12, sameSite: 'lax', httpOnly: true, secure: 'auto' }
@@ -248,16 +250,16 @@ app.use((req,res,next)=>plansApi?plansApi.guard(req,res,next):next());
 // 敏感資料查看紀錄（住戶名冊、薪資、人事、面試者）
 app.use((req,res,next)=>securityApi?securityApi.accessLog(req,res,next):next());
 
-function requireSuperAdmin(req,res,next){ if(req.session?.isAdmin) return next(); return res.status(401).json({error:'尚未登入總後臺或登入已過期'}); }
+function requireSuperAdmin(req,res,next){ if(req.session?.isAdmin) return next(); res.set('X-Relogin','1'); return res.status(401).json({error:'尚未登入總後臺或登入已過期'}); }
 // 第一次登入（或管理員重設密碼後）必須先修改密碼，其他功能暫停使用
 const PASSWORD_FREE_PATH=/\/(session|password|logout|login|branding|ui-text|menu-config)$/;
 function mustChangePassword(req,res,u){ if(u && u.must_change_password && !PASSWORD_FREE_PATH.test(String(req.path||''))){ res.status(403).json({error:'請先修改密碼後再使用系統',must_change_password:true}); return true; } return false; }
-function requireStaff(req,res,next){ const u=getUser(req); if(mustChangePassword(req,res,u)) return; const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active') return next(); return res.status(401).json({error:'帳號已停用、公司已停用或尚未登入'}); }
+function requireStaff(req,res,next){ const u=getUser(req); if(mustChangePassword(req,res,u)) return; const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active') return next(); if(!u)res.set('X-Relogin','1'); return res.status(401).json({error:u?'帳號已停用、公司已停用或尚未登入':'登入已逾時，請重新登入',relogin:!u}); }
 function requireStaffFiller(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='company_admin' && hasSiteAccess(u)) return next(); return res.status(403).json({error:'此帳號沒有啟用中的駐點案場，請使用公司內部後台或先設定駐點案場'}); }
 function requireStaffSopUser(req,res,next){ const u=getUser(req); const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && u.role!=='company_admin' && (hasSiteAccess(u)||isSiteManager(u))) return next(); return res.status(403).json({error:'只有有效的公司人員或駐點人員可以使用案場 SOP'}); }
 function hasSiteAccess(u){ if(!u||!u.tenant_id||u.role==='company_admin') return false; return db.prepare("SELECT 1 FROM staff_communities sc JOIN communities c ON c.id=sc.community_id WHERE sc.staff_id=? AND c.tenant_id=? AND c.status='active' LIMIT 1").get(u.id,u.tenant_id) || db.prepare("SELECT 1 FROM staff_work_assignments a JOIN communities c ON c.id=a.community_id WHERE a.staff_id=? AND a.tenant_id=? AND a.scope_type='site' AND c.status='active' LIMIT 1").get(u.id,u.tenant_id); }
 function hasCompanyAccess(u){ return !!u && (u.role==='company_admin' || ['internal','hybrid'].includes(u.work_type||'')); }
-function requireCompanyAdmin(req,res,next){ const u=getUser(req); if(mustChangePassword(req,res,u)) return; const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && hasCompanyAccess(u)) return next(); return res.status(403).json({error:'這個帳號沒有公司內部後台權限'}); }
+function requireCompanyAdmin(req,res,next){ const u=getUser(req); if(mustChangePassword(req,res,u)) return; const t=u?.tenant_id?db.prepare('SELECT status FROM tenants WHERE id=?').get(u.tenant_id):null; if(u && u.is_active && u.tenant_id && t?.status==='active' && hasCompanyAccess(u)) return next(); if(!u){res.set('X-Relogin','1');return res.status(401).json({error:'登入已逾時，請重新登入',relogin:true});} return res.status(403).json({error:'這個帳號沒有公司內部後台權限'}); }
 function requireCompanyPermission(key){ return (req,res,next)=>{ const u=getUser(req); if(u?.role==='company_admin') return next(); const a=getCompanyAssignment(u); if(effectivePermissions(u).includes(key)) return next(); return res.status(403).json({error:'您目前沒有這項公司內部功能的權限'}); }; }
 function isCompanyRequest(req){ return String(req.path||'').startsWith('/api/company/'); }
 function isStaffRequest(req){ return String(req.path||'').startsWith('/api/staff/'); }
