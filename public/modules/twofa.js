@@ -35,13 +35,14 @@
       +`<input class="tfa-code" inputmode="numeric" autocomplete="one-time-code" maxlength="${setup?6:12}" placeholder="000000" data-code>
       <div class="tfa-err" data-err></div>
       ${setup?'':'<button type="button" class="tfa-link" data-rec>手機不在身邊？改用備用碼</button>'}
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:12px 0 0;font-size:.92rem;font-weight:600;cursor:pointer;background:#F6EFEA;border-radius:10px;padding:10px 12px"><input type="checkbox" data-trust style="width:auto;margin:3px 0 0;flex:none"><span>信任這台裝置，30 天內不用再輸入驗證碼<br><small style="font-weight:400;color:#7A5F58">只在自己的電腦或手機勾選；公用電腦、別人的手機請不要勾</small></span></label>
       <div class="tfa-row"><button type="button" class="secondary" data-cancel>取消</button><button type="button" data-go>${setup?'完成設定並登入':'驗證並登入'}</button></div>`);
     const inp=b.querySelector('[data-code]'),err=b.querySelector('[data-err]');setTimeout(()=>inp.focus(),50);
     b.querySelector('[data-rec]')?.addEventListener('click',()=>{inp.placeholder='xxxxx-xxxxx';inp.style.letterSpacing='.1em';inp.removeAttribute('inputmode');inp.focus();});
     b.querySelector('[data-cancel]').onclick=()=>{b.remove();reject(new Error('已取消登入'));};
     const go=async()=>{const code=inp.value.trim();if(!code){err.textContent='請輸入驗證碼';return;}
       const btn=b.querySelector('[data-go]');btn.disabled=true;
-      try{const {r,d:res}=await post(url,{code});if(!r.ok){err.textContent=res.error||'驗證失敗';btn.disabled=false;inp.select();if(/重新|逾時|上鎖|過多/.test(res.error||'')){setTimeout(()=>{b.remove();reject(new Error(res.error));},1600);}return;}
+      try{const {r,d:res}=await post(url,{code,trust:!!b.querySelector('[data-trust]')?.checked});if(!r.ok){err.textContent=res.error||'驗證失敗';btn.disabled=false;inp.select();if(/重新|逾時|上鎖|過多/.test(res.error||'')){setTimeout(()=>{b.remove();reject(new Error(res.error));},1600);}return;}
         b.remove();if(Array.isArray(res.recovery_codes)&&res.recovery_codes.length)await showRecovery(res.recovery_codes);resolve(res);}
       catch(e){err.textContent='連線失敗，請再試一次';btn.disabled=false;}};
     b.querySelector('[data-go]').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go();});

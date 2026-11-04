@@ -279,10 +279,17 @@ module.exports = function registerPayrollRoutes(app, d) {
   app.get(`${C}/hr/profiles`, requireCompanyAdmin, guard(canHR), wrap((req, res) => {
     const tid = tenantId(req); const t = tables.forMonth(monthTW());
     res.set('Cache-Control', 'no-store');
-    res.json({ profiles: staffList(tid).map(u => hrView(profileOut(u, profileRow(tid, u.id), t), t)), table: tableOut(tid, t), can_payroll: canPayroll(getUser(req)) });
+    res.json({ profiles: staffList(tid).map(u => hrView(profileOut(u, profileRow(tid, u.id), t), t)), table: tableOut(tid, t), can_payroll: canPayroll(getUser(req)), mobile_required: d.LI ? d.LI.loginMode(tid) === 'mobile' : false });
   }));
   // 儲存人事資料（人事管理頁、Excel 匯入共用）：b 為完整資料（沒帶的欄位會被清空，匯入時先合併原本的資料）
   function saveHr(tid, sid, b, actor) {
+    // 手機＝登入帳號：公司設定「手機登入」時必填；格式與是否和本公司其他人重複都要檢查
+    { const LI = d.LI; if (LI) {
+      const m = LI.normMobile(b.mobile);
+      if (!m && LI.loginMode(tid) === 'mobile') throw Object.assign(new Error('本公司以手機號碼登入，手機為必填'), { status: 400 });
+      if (m) { if (!LI.isMobile(m)) throw Object.assign(new Error('手機號碼格式不正確（例如 0912345678）'), { status: 400 });
+        const chk = LI.checkForAccount(tid, m, { confirm_shared_mobile: true }, { previous: LI.mobileOf(sid), exceptId: sid }); if (chk) throw Object.assign(new Error(chk.body?.error || '手機號碼無法使用'), { status: 400 });
+        b = { ...b, mobile: m }; } } }
     for (const k of ['hire_date', 'trial_end_date', 'birthday', 'insured_date']) if (b[k] && !isDate(b[k])) throw Object.assign(new Error('日期格式不正確'), { status: 400 });
     if (b.hire_date && b.trial_end_date && b.trial_end_date < b.hire_date) throw Object.assign(new Error('試用期到期日不能早於到職日'), { status: 400 });
     const t = tables.forMonth(monthTW()); const auto = b.auto_grade !== false;

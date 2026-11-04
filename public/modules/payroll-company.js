@@ -84,13 +84,15 @@ button.lnk{border:0!important;background:transparent!important;color:#4E312D!imp
   // ================= 人事管理（人事／總務）：基本資料 =================
   const leaveText=p=>{const a=p.annual_leave;if(!a)return '—';if(!a.days)return `<small class="muted">${esc(a.next_date)} 起 ${a.next_days} 天</small>`;return `<b>${a.days}</b> 天<small class="muted">（剩 ${p.annual_left}）</small><br><small class="muted">至 ${esc(a.end)}</small>`;};
   async function renderHR(el,label){
-    const d=await api('/api/company/hr/profiles');S.hrTable=d.table;
+    const d=await api('/api/company/hr/profiles');S.hrTable=d.table;S.mobileReq=!!d.mobile_required;
     const today=new Date().toISOString().slice(0,10);const soon=new Date(Date.now()+14*864e5).toISOString().slice(0,10);
     const trial=d.profiles.filter(p=>p.trial_end_date&&p.trial_end_date>=today&&p.trial_end_date<=soon);
     const missing=d.profiles.filter(p=>p.role!=='company_admin'&&!p.hire_date);
+    const noMob=S.mobileReq?d.profiles.filter(p=>!p.mobile):[];
     const grant=d.profiles.filter(p=>p.annual_leave?.next_date&&p.annual_leave.next_date>=today&&p.annual_leave.next_date<=soon);
     el.innerHTML=`<div class="eyebrow">👥 人事管理</div><h1>${esc(label||'人事管理')}</h1><p class="hint">人員的基本資料、到職與試用期、特休、勞健保加保與級距、眷屬、薪資發放方式，由人事或總務登記。薪資金額由會計在「人員薪資單 → 薪資設定」處理，這裡看不到薪資。</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px"><button type="button" id="hrImport">📥 Excel 批次匯入／開通人員</button><span class="hint" style="align-self:center;margin:0">已有人事 Excel？下載範本、複製貼上，一次開通全部人員並補齊人事資料。</span></div>
+      ${noMob.length?`<div class="pr-warn">📱 ${noMob.length} 位人員還沒有登記手機（手機是登入帳號，沒有手機無法登入）：${esc(noMob.map(p=>p.name).join('、'))}</div>`:''}
       ${missing.length?`<div class="pr-warn">⚠ ${missing.length} 位人員尚未登記到職日（無法計算特休）：${esc(missing.map(p=>p.name).join('、'))}</div>`:''}
       ${trial.length?`<div class="pr-warn">⏰ 試用期 14 天內到期：${esc(trial.map(p=>`${p.name}（${p.trial_end_date}）`).join('、'))}</div>`:''}
       ${grant.length?`<div class="pr-ok">🌴 14 天內將取得新年度特休：${esc(grant.map(p=>`${p.name} ${p.annual_leave.next_date} 起 ${p.annual_leave.next_days} 天`).join('、'))}</div>`:''}
@@ -115,7 +117,7 @@ button.lnk{border:0!important;background:transparent!important;color:#4E312D!imp
       <label>身分證字號／居留證號碼<input name="id_no" maxlength="20" autocomplete="off" value="${esc(p.id_no||'')}" placeholder="例如 A123456789"><small class="muted" style="font-weight:400">勞健保加保必填；系統會檢查格式與檢查碼，人員列表只顯示部分號碼</small></label>
       <label class="hr-nat">國籍<input name="nationality" value="${esc(p.nationality||'')}" placeholder="例如：越南"></label>
       <label>生日<input type="date" name="birthday" value="${esc(p.birthday)}"></label>
-      <label>手機<input name="mobile" inputmode="tel" value="${esc(p.mobile)}"></label>
+      <label>手機${S.mobileReq?'<span style="color:#A52828">＊</span>':''}<input name="mobile" inputmode="tel" value="${esc(p.mobile)}" ${S.mobileReq?'required placeholder="0912345678"':''}>${S.mobileReq?'<small class="muted" style="font-weight:400">登入帳號就是手機號碼，必填</small>':''}</label>
       <label class="wide">通訊地址<input name="address" value="${esc(p.address)}"></label>
       <label>緊急聯絡人<input name="emergency_name" value="${esc(p.emergency_name)}"></label>
       <label>關係<input name="emergency_relation" value="${esc(p.emergency_relation)}" placeholder="例如：配偶"></label>
