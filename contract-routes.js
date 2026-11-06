@@ -64,13 +64,33 @@ module.exports = function registerContractRoutes(app, d) {
   const KINDS = { property: '物業管理服務費', security: '保全服務費', cleaning: '清潔服務費', maintenance: '機電／工程維護費', other: '其他' };
   const FREQ = { monthly: '每月', quarterly: '每季', half: '每半年', yearly: '每年', once: '一次' };
   const SHIFT = { day: '日班', night: '夜班', h24: '24 小時', office: '行政班', '': '' };
+  // 派駐職位的上下班時段（含異動紀錄）：times＝[{ from 生效日, start, end, break_min }]，依生效日排序
+  // 這次填的時段和目前不同時，從「生效日」（預設今天）起套用新時段；之前的日子維持原本時段，已算過的出勤與薪資不受影響
+  const hm = v => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || '')); return m && +m[1] < 24 && +m[2] < 60 ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };
+  function shiftTimes(x, eff) {
+    let hist = Array.isArray(x?.times) ? x.times : parse(typeof x?.times === 'string' ? x.times : '', []);
+    hist = (Array.isArray(hist) ? hist : []).map(t => ({ from: isDate(t?.from) ? t.from : '2000-01-01', start: hm(t?.start), end: hm(t?.end), break_min: int(t?.break_min, 0, 240, 0) })).filter(t => t.start && t.end).sort((a, b) => a.from.localeCompare(b.from));
+    const start = hm(x?.start), end = hm(x?.end);
+    if (x?.start !== undefined || x?.end !== undefined) {
+      if ((x.start || x.end) && (!start || !end)) throw err('上下班時間格式不正確（例如 09:00）');
+      if (start && end) {
+        if (start === end) throw err('上下班時間不能相同');
+        const br = int(x?.break_min, 0, 240, 0); const span = ((+end.slice(0, 2) * 60 + +end.slice(3)) - (+start.slice(0, 2) * 60 + +start.slice(3)) + 1440) % 1440; if (br >= span) throw err('休息時間比上班時間還長');
+        // 比對「今天適用」的時段：沒變就保留原本紀錄（含已排定的未來異動）；有變才從生效日起套用
+        const t0 = todayTW(); const cur = hist.filter(t => t.from <= t0).pop() || hist[0];
+        const same = cur && cur.start === start && cur.end === end && cur.break_min === br;
+        if (isDate(x?.effective_from) || !same) { const from = isDate(x?.effective_from) ? x.effective_from : isDate(eff) ? eff : (hist.length ? t0 : '2000-01-01'); if (!(same && from <= t0)) { hist = hist.filter(t => t.from < from); hist.push({ from, start, end, break_min: br }); } }
+      } else hist = [];
+    }
+    return hist.slice(-20);
+  }
   function readContract(tid, b, cur = {}) {
     const cid = Number(b.community_id ?? cur.community_id); if (!db.prepare('SELECT 1 FROM communities WHERE id=? AND tenant_id=?').get(cid, tid)) throw err('請選擇社區');
     const entity = acct.entityOf(tid, b.entity_id ?? cur.entity_id);
     const start = b.start_date ?? cur.start_date, end = b.end_date ?? cur.end_date; if (!isDate(start) || !isDate(end) || end < start) throw err('請填寫正確的合約期間');
     const items = (Array.isArray(b.items) ? b.items : parse(cur.items_json, [])).map(x => ({ kind: KINDS[x?.kind] ? x.kind : 'other', name: str(x?.name, 40) || KINDS[x?.kind] || '其他', amount: Math.max(0, Math.round(Number(x?.amount) || 0)), note: str(x?.note, 100) })).filter(x => x.amount > 0 || x.name).slice(0, 20);
     if (!items.some(x => x.amount > 0)) throw err('請至少填一項合約金額');
-    const staffing = (Array.isArray(b.staffing) ? b.staffing : parse(cur.staffing_json, [])).map(x => ({ position_id: str(x?.position_id, 30), position_name: str(x?.position_name, 30), count: int(x?.count, 0, 99, 1), shift: SHIFT[x?.shift] !== undefined ? x.shift : '', note: str(x?.note, 100) })).filter(x => x.position_id || x.position_name).slice(0, 30);
+    const staffing = (Array.isArray(b.staffing) ? b.staffing : parse(cur.staffing_json, [])).map(x => ({ position_id: str(x?.position_id, 30), position_name: str(x?.position_name, 30), count: int(x?.count, 0, 99, 1), shift: SHIFT[x?.shift] !== undefined ? x.shift : '', note: str(x?.note, 100), times: shiftTimes(x, b.time_effective) })).filter(x => x.position_id || x.position_name).slice(0, 30);
     const feedback = (Array.isArray(b.feedback) ? b.feedback : parse(cur.feedback_json, [])).map(x => ({ type: x?.type === 'service' ? 'service' : 'cash', name: str(x?.name, 40), amount: x?.type === 'service' ? 0 : Math.max(0, Math.round(Number(x?.amount) || 0)), frequency: FREQ[x?.frequency] ? x.frequency : 'monthly', times: int(x?.times, 0, 99, 0), note: str(x?.note, 120) })).filter(x => x.name).slice(0, 20);
     const c0 = b.client && typeof b.client === 'object' ? b.client : parse(cur.client_json, {});
     const client = { name: str(c0.name, 60), tax_id: str(c0.tax_id, 8), contact: str(c0.contact, 30), phone: str(c0.phone, 30), email: str(c0.email, 80), address: str(c0.address, 120) };
@@ -325,5 +345,15 @@ module.exports = function registerContractRoutes(app, d) {
     return rows[0] || null;
   }
   function dashboard(tid) { sweep(tid); const t = todayTW(); const rows = db.prepare("SELECT * FROM community_contracts WHERE tenant_id=? AND status='active' AND end_date>=?").all(tid, t); return { current: rows.filter(c => c.start_date <= t).length, expiring: rows.filter(c => statusOf(c) === 'expiring').map(c => ({ community: commName(c.community_id), end_date: c.end_date, days: diffDays(t, c.end_date) })) }; }
-  return { activeFor, amounts, out, dashboard, canView, canEdit, KINDS };
+  // 給出勤工時用：某社區某職位某天的上下班時段
+  function shiftTimeFor(tid, cid, positionId, code, date) {
+    const rows = db.prepare("SELECT staffing_json,start_date,end_date FROM community_contracts WHERE tenant_id=? AND community_id=? AND status NOT IN ('terminated','draft')").all(tid, cid).filter(c => (!c.start_date || c.start_date <= date) && (!c.end_date || c.end_date >= date)).flatMap(c => parse(c.staffing_json, [])).filter(r => Array.isArray(r.times) && r.times.length);
+    let hit = rows.filter(r => r.position_id && r.position_id === positionId);
+    if (hit.length > 1 && (code === 'day' || code === 'night')) { const by = hit.filter(r => r.shift === code); if (by.length) hit = by; }
+    if (!hit.length && (code === 'day' || code === 'night')) hit = rows.filter(r => r.shift === code);
+    const r = hit[0]; if (!r) return null;
+    const t = r.times.filter(x => x.from <= date).pop(); if (!t) return null;
+    return { ...t, position_id: r.position_id, position_name: r.position_name, shift: r.shift };
+  }
+  return { activeFor, amounts, out, dashboard, canView, canEdit, KINDS, shiftTimeFor, shiftTimes, SHIFT };
 };
