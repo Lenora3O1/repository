@@ -2869,6 +2869,10 @@ require('./journal-routes')(app,{companyCommunityScope:u=>companyCommunityScope(
 require('./duty-routes')(app,{companyCommunityScope:u=>companyCommunityScope(u),db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,isSiteManager,effectivePermissions,staffCommunityRows,org:orgApi});
 
 // ===== 代班／調假／加班（依組織架構調度，連動班表與薪資）=====
+// 出勤工時：每日工時計算、出勤工時報表、核定加班、補休期限
+const workHoursApi=require('./work-hours')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,requireStaff,getOrg:()=>orgApi,getLeave:()=>leaveApi,redDates:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),scopeOf:companyCommunityScope,hasPermission:(u,k)=>effectivePermissions(u).includes(k)});
+leaveApi.setHooks({compAvailableOn:workHoursApi.compAvailableOn});
+{const y=new Date().getFullYear();for(const yy of [y-1,y,y+1])scheduleTaiwanHolidayDates(yy).catch(()=>{});}
 coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,leave:leaveApi,sched:{redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));return c||scheduleFallbackRedDates(y);},platformRules:schedulePlatformRules,effectiveRule:scheduleEffectiveRule,getProfile:scheduleGetProfile,defaultRole:scheduleDefaultRole}});
 // ===== 智慧月班表 =====
 smartApi=require('./smart-schedule')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,getSiteAssignments,org:orgApi,S:{getProfile:scheduleGetProfile,effectiveRule:scheduleEffectiveRule,platformRules:schedulePlatformRules,holidays:y=>scheduleTaiwanHolidayDates(y),redDatesSync:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),leavePolicy:tid=>leaveApi.policyFor(tid)}});
