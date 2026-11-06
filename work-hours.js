@@ -79,7 +79,7 @@ module.exports = function registerWorkHours(app, d) {
     if (!shifts.length) throw err('至少要有一個班別');
     const has = id => shifts.some(s => s.id === id);
     const pick = (k) => { const v = str(b[k] ?? cur[k], 20); if (!has(v)) throw err('預設班別不存在，請重新選擇'); return v; };
-    const ps = {}; for (const [k, v] of Object.entries(b.person_shift || cur.person_shift || {})) if (Number(k) && has(String(v))) ps[Number(k)] = String(v);
+    const ps = {}; // 個人時段改在「人員開通管理」設定（個人例外）
     return {
       shifts, admin_shift: pick('admin_shift'), guard_day_shift: pick('guard_day_shift'), guard_night_shift: pick('guard_night_shift'), person_shift: ps,
       normal_hours: Math.max(4, Math.min(12, Number(b.normal_hours ?? cur.normal_hours) || 8)),
@@ -127,15 +127,40 @@ module.exports = function registerWorkHours(app, d) {
     return 'admin';
   }
   const shiftById = (cfg, id) => cfg.shifts.find(s => s.id === id) || null;
-  function shiftFor(cfg, sid, m, code) {
-    const own = cfg.person_shift[sid] && shiftById(cfg, cfg.person_shift[sid]);
+  // ---------- 某人某天的上下班時段 ----------
+  // 順序：① 個人例外（公司內勤、督導、主管或特殊情況）② 當天所在社區的合約「派駐配置」時段（依職位）③ 公司預設班別
+  db.exec(`CREATE TABLE IF NOT EXISTS staff_shift_exceptions (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, staff_id INTEGER NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, break_min INTEGER NOT NULL DEFAULT 0,
+    from_date TEXT NOT NULL, to_date TEXT DEFAULT '', reason TEXT NOT NULL DEFAULT '', created_by TEXT DEFAULT '', created_at TEXT NOT NULL, removed_at TEXT DEFAULT '', removed_by TEXT DEFAULT '');
+    CREATE INDEX IF NOT EXISTS idx_shift_exc ON staff_shift_exceptions(tenant_id,staff_id);`);
+  // 舊版「工時設定 → 個人固定班別」轉成個人例外（只做一次）
+  try { for (const r of db.prepare('SELECT tenant_id,config_json FROM work_time_settings').all()) { const c = parse(r.config_json, {}); const ps = c.person_shift || {}; if (!Object.keys(ps).length) continue; const shifts = Array.isArray(c.shifts) && c.shifts.length ? c.shifts : DEFAULTS.shifts;
+    for (const [sid, id] of Object.entries(ps)) { const sh = shifts.find(x => x.id === id); if (sh) db.prepare('INSERT INTO staff_shift_exceptions (tenant_id,staff_id,start,end,break_min,from_date,reason,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(r.tenant_id, Number(sid), sh.start, sh.end, sh.break_min || 0, '2000-01-01', '由「工時設定 → 個人固定班別」轉入', '系統', now()); }
+    c.person_shift = {}; db.prepare('UPDATE work_time_settings SET config_json=? WHERE tenant_id=?').run(JSON.stringify(c), r.tenant_id); } } catch (e) { console.error('[個人班別轉換]', e.message); }
+  function shiftContext(tid) {
+    const exc = new Map(); for (const x of db.prepare("SELECT * FROM staff_shift_exceptions WHERE tenant_id=? AND COALESCE(removed_at,'')='' ORDER BY from_date").all(tid)) { if (!exc.has(x.staff_id)) exc.set(x.staff_id, []); exc.get(x.staff_id).push(x); }
+    const con = new Map(); try { for (const c of db.prepare("SELECT community_id,staffing_json,start_date,end_date FROM community_contracts WHERE tenant_id=? AND status NOT IN ('terminated','draft')").all(tid)) for (const r of parse(c.staffing_json, [])) if (Array.isArray(r.times) && r.times.length) { if (!con.has(c.community_id)) con.set(c.community_id, []); con.get(c.community_id).push({ ...r, c_start: c.start_date, c_end: c.end_date }); } } catch {}
+    return { exc, con };
+  }
+  const asShift = (t, name, source, group) => ({ id: `${source}:${t.start}-${t.end}`, name, start: t.start, end: t.end, break_min: Number(t.break_min) || 0, group, source });
+  function shiftFor(cfg, sid, m, code, date = todayTW(), cid = 0, ctx = null) {
     const g = groupOf(m);
-    if (code === 'night') return (own && own.group === 'guard' && hm(own.start) >= 12 * 60 ? own : null) || shiftById(cfg, cfg.guard_night_shift);
-    if (code === 'day') return (own && own.group === 'guard' && hm(own.start) < 12 * 60 ? own : null) || shiftById(cfg, cfg.guard_day_shift);
-    if (own) return own;
+    const ex = ctx?.exc.get(sid)?.filter(x => x.from_date <= date && (!x.to_date || x.to_date >= date)).pop();
+    if (ex) return asShift(ex, `個人時段 ${ex.start}–${ex.end}`, 'person', g);
+    const site = cid || Number((m?.sites || [])[0]) || 0;
+    if (site && ctx) {
+      const rows = (ctx.con.get(site) || []).filter(r => (!r.c_start || r.c_start <= date) && (!r.c_end || r.c_end >= date));
+      let hit = rows.filter(r => r.position_id && r.position_id === m?.position?.id);
+      if (hit.length > 1 && (code === 'day' || code === 'night')) { const by = hit.filter(r => r.shift === code); if (by.length) hit = by; }
+      if (!hit.length && (code === 'day' || code === 'night')) hit = rows.filter(r => r.shift === code);
+      const t = hit[0]?.times.filter(x => x.from <= date).pop();
+      if (t) return asShift(t, `${hit[0].position_name || '合約'} ${t.start}–${t.end}`, 'contract', g);
+    }
+    if (code === 'night') return shiftById(cfg, cfg.guard_night_shift);
+    if (code === 'day') return shiftById(cfg, cfg.guard_day_shift);
     if (g === 'guard') return shiftById(cfg, m?.shift === 'night' ? cfg.guard_night_shift : cfg.guard_day_shift);
     return shiftById(cfg, cfg.admin_shift);
   }
+
 
   // ---------- 每日計算 ----------
   function compute(tid, month, { communityId = 0, group = '', staffId = 0, scope = null } = {}) {
@@ -157,6 +182,7 @@ module.exports = function registerWorkHours(app, d) {
     const reviews = new Map(db.prepare('SELECT * FROM attendance_ot_reviews WHERE tenant_id=? AND work_date BETWEEN ? AND ?').all(tid, days[0], days[days.length - 1]).map(r => [`${r.staff_id}|${r.work_date}|${r.kind}`, r]));
     const unit = cfg.unit_min, remind = cfg.remind_min, NORMAL = cfg.normal_hours * 60;
     const hires = new Map(db.prepare('SELECT staff_id,hire_date FROM hr_profiles WHERE tenant_id=?').all(tid).map(r => [r.staff_id, r.hire_date || '']));
+    const sctx = shiftContext(tid);
     // 只有「有在用打卡」的人才會產生出勤異常：近 3 個月打過卡，或駐點社區有設定出勤打卡點（沒在用打卡的公司不會被擋住發薪）
     const recentPunch = new Set(db.prepare("SELECT DISTINCT staff_id FROM attendance_records WHERE tenant_id=? AND record_type IN ('checkin','checkout') AND recorded_at>=?").all(tid, new Date(twMs(days[0], 0) - 62 * 864e5).toISOString()).map(r => r.staff_id));
     const punchSites = new Set(db.prepare("SELECT DISTINCT community_id FROM attendance_locations WHERE tenant_id=? AND location_type='attendance' AND is_active=1").all(tid).map(r => r.community_id));
@@ -184,7 +210,7 @@ module.exports = function registerWorkHours(app, d) {
         if (startDay && date < startDay) plan = 'before';
         const isRed = red.has(date);
 
-        const sh = plan === 'work' || plan === 'none' ? shiftFor(cfg, u.id, m, e?.shift_code) : null;
+        const sh = plan === 'work' || plan === 'none' ? shiftFor(cfg, u.id, m, e?.shift_code, date, Number(e?.community_id) || 0, sctx) : null;
         let S = null, E = null, spanMin = 0;
         if (sh) { const st = hm(sh.start), en = hm(sh.end); spanMin = (en - st + 1440) % 1440; S = twMs(date, st); E = S + spanMin * 60e3; }
         // 找這一天的上下班卡
@@ -243,7 +269,7 @@ module.exports = function registerWorkHours(app, d) {
       // 沒有被配對到的打卡（例如重複打卡）也列出，避免遺漏
       const extra = mine.filter(r => !used.has(r.id) && twLocal(r._ms).date.startsWith(month)).map(r => ({ date: twLocal(r._ms).date, ...punchOut(r, locs) }));
       out.push({ staff_id: u.id, employee_id: u.employee_id, name: u.name, position: m?.position?.name || '', group: g, scheduled: hasSched.has(u.id), group_name: g === 'guard' ? '保全' : '行政',
-        communities: [...new Set((m?.sites || []).map(c => comms.get(Number(c))).filter(Boolean))], default_shift: shiftFor(cfg, u.id, m, '')?.name || '',
+        communities: [...new Set((m?.sites || []).map(c => comms.get(Number(c))).filter(Boolean))], default_shift: shiftFor(cfg, u.id, m, '', todayTW() < days[days.length - 1] ? todayTW() : days[days.length - 1], 0, sctx)?.name || '',
         totals: { ...T, normal_h: r2(T.normal_min / 60), sched_ot_h: r2(T.sched_ot_min / 60), approved_ot_h: r2(T.approved_ot_h), pending_ot_h: r2(T.pending_ot_min / 60), leave_h: r2(T.leave_h) }, days: rows, extra_punches: extra });
     }
     return { cfg, people: out };
@@ -459,5 +485,108 @@ module.exports = function registerWorkHours(app, d) {
   // 給薪資發布前檢查：這個月還沒處理的出勤異常
   function pendingFor(tid, month) { const e = exceptions(tid, month); const items = e.items.filter(x => x.status === 'pending'); return { count: items.length, people: [...new Set(items.map(x => x.name))] }; }
 
-  return { compute, settings, compLedger, compAvailableOn, seal, verify, payrollIssues, pendingFor };
+  // ---------- 個人例外時段（人員開通管理） ----------
+  const canStaffEdit = u => !!u && (u.role === 'company_admin' || hasPermission(u, 'manage-staff') || canView(u));
+  const hmOk = v => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || ''));
+  const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  app.get(`${C}/person-shifts/:staffId`, requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canStaffEdit(u)) throw err('沒有權限', 403); const tid = tenantId(req); const sid = Number(req.params.staffId);
+    const p = db.prepare('SELECT id,name,employee_id FROM staff_users WHERE id=? AND tenant_id=?').get(sid, tid); if (!p) throw err('找不到人員', 404);
+    const rows = db.prepare('SELECT * FROM staff_shift_exceptions WHERE tenant_id=? AND staff_id=? ORDER BY from_date DESC,id DESC').all(tid, sid);
+    let m = null; try { m = getOrg().memberInfo(db.prepare('SELECT * FROM staff_users WHERE id=?').get(sid)); } catch {}
+    const cur = shiftFor(settings(tid), sid, m, '', todayTW(), 0, shiftContext(tid));
+    res.json({ person: p, current: cur ? { name: cur.name, start: cur.start, end: cur.end, break_min: cur.break_min, source: cur.source } : null, rows });
+  }));
+  app.post(`${C}/person-shifts/:staffId`, requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canStaffEdit(u)) throw err('沒有權限', 403); const tid = tenantId(req); const sid = Number(req.params.staffId); const b = req.body || {};
+    if (!db.prepare('SELECT 1 FROM staff_users WHERE id=? AND tenant_id=?').get(sid, tid)) throw err('找不到人員', 404);
+    if (!hmOk(b.start) || !hmOk(b.end) || b.start === b.end) throw err('請填寫正確的上下班時間');
+    const br = Math.max(0, Math.min(240, Math.round(Number(b.break_min) || 0)));
+    const from = isDate(b.from_date) ? b.from_date : todayTW(); const to = isDate(b.to_date) ? b.to_date : ''; if (to && to < from) throw err('結束日不能早於開始日');
+    const reason = str(b.reason, 200); if (!reason) throw err('請填寫原因（例如：公司內勤統一時段、督導巡區時段、經公司同意的個人時段）');
+    db.prepare('INSERT INTO staff_shift_exceptions (tenant_id,staff_id,start,end,break_min,from_date,to_date,reason,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(tid, sid, b.start, b.end, br, from, to, reason, by(u), now());
+    memo.clear(); res.json({ success: true });
+  }));
+  app.post(`${C}/person-shifts/:staffId/:id/remove`, requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canStaffEdit(u)) throw err('沒有權限', 403); const tid = tenantId(req);
+    const r = db.prepare('SELECT * FROM staff_shift_exceptions WHERE id=? AND tenant_id=? AND staff_id=?').get(Number(req.params.id), tid, Number(req.params.staffId)); if (!r) throw err('找不到紀錄', 404);
+    // 已經開始的例外不刪除，改成「到昨天為止」，過去的出勤仍依當時的時段計算
+    const y = addDays(todayTW(), -1);
+    if (r.from_date <= y) db.prepare("UPDATE staff_shift_exceptions SET to_date=? WHERE id=?").run(r.to_date && r.to_date < y ? r.to_date : y, r.id);
+    else db.prepare("UPDATE staff_shift_exceptions SET removed_at=?,removed_by=? WHERE id=?").run(now(), by(u), r.id);
+    memo.clear(); res.json({ success: true });
+  }));
+
+  // ---------- 上下班時段（現場）與社區經理申請變更 ----------
+  db.exec(`CREATE TABLE IF NOT EXISTS shift_change_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, community_id INTEGER NOT NULL, contract_id INTEGER NOT NULL, row_index INTEGER NOT NULL,
+    position_id TEXT DEFAULT '', position_name TEXT DEFAULT '', shift TEXT DEFAULT '', old_json TEXT DEFAULT '{}', start TEXT NOT NULL, end TEXT NOT NULL, break_min INTEGER NOT NULL DEFAULT 0, effective_from TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT '', reason TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', requested_by INTEGER, requester_name TEXT DEFAULT '', created_at TEXT NOT NULL,
+    decided_by TEXT DEFAULT '', decided_at TEXT, comment TEXT DEFAULT '');
+    CREATE INDEX IF NOT EXISTS idx_shift_req ON shift_change_requests(tenant_id,status);`);
+  const SHIFT_LABEL = { day: '日班', night: '夜班', h24: '24 小時', office: '行政班', '': '' };
+  function communityTimes(tid, cid, date = todayTW()) {
+    const out = [];
+    for (const c of db.prepare("SELECT id,entity_id,staffing_json,start_date,end_date,status FROM community_contracts WHERE tenant_id=? AND community_id=? AND status NOT IN ('terminated','draft')").all(tid, cid)) {
+      if (c.end_date && c.end_date < date) continue;
+      parse(c.staffing_json, []).forEach((r, i) => { const times = Array.isArray(r.times) ? r.times : []; const cur = times.filter(t => t.from <= date).pop() || null; const next = times.filter(t => t.from > date);
+        out.push({ contract_id: c.id, row_index: i, position_id: r.position_id || '', position_name: r.position_name || '', shift: r.shift || '', shift_label: SHIFT_LABEL[r.shift] || '', count: r.count, current: cur, upcoming: next }); });
+    }
+    return out;
+  }
+  const memberOf = u => { try { return getOrg().memberInfo(u); } catch { return null; } };
+  // 可以申請變更的人：該社區的社區主管／副主管、負責該區域的督導
+  function canRequest(u, cid) { const m = memberOf(u); if (!m) return false; if (['site_manager', 'site_deputy'].includes(m.kind)) return (m.sites || []).map(Number).includes(cid); if (m.kind === 'region') { const sc = scopeOf(u); return !sc || sc.has(cid); } return false; }
+  app.get('/api/staff/shift-times', requireStaff, wrap((req, res) => {
+    const u = getUser(req); const tid = u.tenant_id; const m = memberOf(u);
+    let cids = (m?.sites || []).map(Number); if (m?.kind === 'region') { const sc = scopeOf(u); if (sc) cids = [...sc]; }
+    const comms = cids.length ? db.prepare(`SELECT id,name FROM communities WHERE tenant_id=? AND id IN (${cids.map(() => '?').join(',')}) ORDER BY name`).all(tid, ...cids) : [];
+    const mine = shiftFor(settings(tid), u.id, m, '', todayTW(), 0, shiftContext(tid));
+    const reqs = db.prepare('SELECT * FROM shift_change_requests WHERE tenant_id=? AND requested_by=? ORDER BY id DESC LIMIT 50').all(tid, u.id);
+    res.set('Cache-Control', 'no-store');
+    res.json({ mine: mine ? { name: mine.name, start: mine.start, end: mine.end, break_min: mine.break_min, source: mine.source } : null,
+      communities: comms.map(c => ({ ...c, rows: communityTimes(tid, c.id), can_request: canRequest(u, c.id) })), requests: reqs.map(r => ({ ...r, community_name: comms.find(c => c.id === r.community_id)?.name || '', old: parse(r.old_json, {}) })) });
+  }));
+  app.post('/api/staff/shift-requests', requireStaff, wrap((req, res) => {
+    const u = getUser(req); const tid = u.tenant_id; const b = req.body || {}; const cid = Number(b.community_id);
+    if (!canRequest(u, cid)) throw err('只有這個社區的社區主管、副主管或區域督導可以申請變更上下班時段', 403);
+    const row = communityTimes(tid, cid).find(r => r.contract_id === Number(b.contract_id) && r.row_index === Number(b.row_index)); if (!row) throw err('找不到這個職位的合約時段，請重新整理');
+    if (!hmOk(b.start) || !hmOk(b.end) || b.start === b.end) throw err('請填寫正確的上下班時間');
+    const br = Math.max(0, Math.min(240, Math.round(Number(b.break_min) || 0)));
+    const from = str(b.effective_from, 10); if (!isDate(from) || from < todayTW()) throw err('生效日不能早於今天');
+    const basis = str(b.basis, 300); if (!basis) throw err('請填寫社區同意的依據（例如：11/3 管委會會議決議、主委書面同意）');
+    if (db.prepare("SELECT 1 FROM shift_change_requests WHERE tenant_id=? AND contract_id=? AND row_index=? AND status='pending'").get(tid, row.contract_id, row.row_index)) throw err('這個職位已經有一筆申請在審核中');
+    const info = db.prepare('INSERT INTO shift_change_requests (tenant_id,community_id,contract_id,row_index,position_id,position_name,shift,old_json,start,end,break_min,effective_from,basis,reason,requested_by,requester_name,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(tid, cid, row.contract_id, row.row_index, row.position_id, row.position_name, row.shift, JSON.stringify(row.current || {}), b.start, b.end, br, from, basis, str(b.reason, 300), u.id, u.name, now());
+    res.json({ success: true, id: Number(info.lastInsertRowid) });
+  }));
+  app.post('/api/staff/shift-requests/:id/cancel', requireStaff, wrap((req, res) => {
+    const u = getUser(req); const r = db.prepare('SELECT * FROM shift_change_requests WHERE id=? AND tenant_id=? AND requested_by=?').get(Number(req.params.id), u.tenant_id, u.id);
+    if (!r) throw err('找不到申請', 404); if (r.status !== 'pending') throw err('只能取消審核中的申請');
+    db.prepare("UPDATE shift_change_requests SET status='cancelled',decided_at=? WHERE id=?").run(now(), r.id); res.json({ success: true });
+  }));
+  // 公司內勤審核：核准後直接寫入社區合約的派駐配置（從生效日起套用），並留下合約異動紀錄
+  const canApprove = u => !!u && (u.role === 'company_admin' || hasPermission(u, 'company-general-affairs') || (() => { const m = memberOf(u); return ['owner', 'gm'].includes(m?.kind); })());
+  app.get('/api/company/shift-requests', requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canApprove(u) && !canView(u)) throw err('沒有權限', 403); const tid = tenantId(req);
+    const rows = db.prepare("SELECT r.*,c.name community_name FROM shift_change_requests r LEFT JOIN communities c ON c.id=r.community_id WHERE r.tenant_id=? AND (r.status='pending' OR r.created_at>=?) ORDER BY r.status='pending' DESC, r.id DESC LIMIT 100").all(tid, new Date(Date.now() - 90 * 864e5).toISOString());
+    res.set('Cache-Control', 'no-store'); res.json({ rows: rows.map(r => ({ ...r, old: parse(r.old_json, {}) })), pending: rows.filter(r => r.status === 'pending').length, can_approve: canApprove(u) });
+  }));
+  app.post('/api/company/shift-requests/:id/decide', requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canApprove(u)) throw err('只有總務、總經理或公司管理員可以審核', 403); const tid = tenantId(req);
+    const r = db.prepare('SELECT * FROM shift_change_requests WHERE id=? AND tenant_id=?').get(Number(req.params.id), tid); if (!r) throw err('找不到申請', 404); if (r.status !== 'pending') throw err('這筆申請已經處理過了');
+    const ok = req.body?.action === 'approve'; const comment = str(req.body?.comment, 300); if (!ok && !comment) throw err('退回請填寫原因');
+    db.transaction(() => {
+      if (ok) {
+        const c = db.prepare('SELECT * FROM community_contracts WHERE id=? AND tenant_id=?').get(r.contract_id, tid); if (!c) throw err('合約已不存在');
+        const st = parse(c.staffing_json, []); let i = r.row_index; if (!st[i] || (r.position_id && st[i].position_id !== r.position_id)) i = st.findIndex(x => x.position_id === r.position_id && (x.shift || '') === (r.shift || '')); if (i < 0) throw err('合約的派駐配置已經變更，找不到這個職位，請退回後重新申請');
+        const hist = (Array.isArray(st[i].times) ? st[i].times : []).filter(t => t.from < r.effective_from); hist.push({ from: r.effective_from, start: r.start, end: r.end, break_min: r.break_min }); st[i] = { ...st[i], times: hist };
+        db.prepare('UPDATE community_contracts SET staffing_json=?,updated_at=? WHERE id=?').run(JSON.stringify(st), now(), c.id);
+        try { db.prepare('INSERT INTO contract_logs (tenant_id,contract_id,action,note,actor,created_at) VALUES (?,?,?,?,?,?)').run(tid, c.id, 'update', `上下班時段：${r.position_name || ''} ${r.start}–${r.end}（${r.effective_from} 起生效，${r.requester_name} 申請，依據：${r.basis}）`, by(u), now()); } catch {}
+      }
+      db.prepare('UPDATE shift_change_requests SET status=?,decided_by=?,decided_at=?,comment=? WHERE id=?').run(ok ? 'approved' : 'rejected', by(u), now(), comment, r.id);
+    })();
+    memo.clear(); res.json({ success: true });
+  }));
+
+  return { compute, settings, compLedger, compAvailableOn, seal, verify, payrollIssues, pendingFor, shiftFor, shiftContext };
 };

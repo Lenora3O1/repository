@@ -497,6 +497,11 @@ async function handleWorkspaceMenu(e){
     try{if(!window.CoverModule)throw new Error('班表模組尚未載入，請重新整理頁面');if(action==='staff-schedule-rules')await window.CoverModule.renderMyRule($('staffHome'),{base:'/api/staff',label:L});else await window.CoverModule.renderOvertime($('staffHome'),{base:'/api/staff',side:'staff',label:L});}catch(err){showWorkspaceError(L,err);}
     return;
   }
+  if(action==='staff-shift-times'){
+    showWorkspaceLoading(label||'上下班時段');
+    try{if(!window.ShiftTimesStaff)throw new Error('上下班時段模組尚未載入，請重新整理頁面');await window.ShiftTimesStaff.render($('staffHome'),{label:label||'上下班時段'});}catch(err){showWorkspaceError(label||'上下班時段',err);}
+    return;
+  }
   if(action==='staff-comp-time'||(!action||action==='placeholder')&&String(label||'').trim()==='補休'){
     showWorkspaceLoading(label||'補休');
     try{if(!window.CompTimeStaff)throw new Error('補休模組尚未載入，請重新整理頁面');await window.CompTimeStaff.render($('staffHome'),{label:label||'補休'});}catch(err){showWorkspaceError(label||'補休',err);}
