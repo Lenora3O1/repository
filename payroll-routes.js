@@ -225,6 +225,7 @@ module.exports = function registerPayrollRoutes(app, d) {
     const rates = { ...t.rates, occupational: occupationalRate(tid, t) };
     if (!run) { const info = db.prepare('INSERT INTO payroll_runs (tenant_id,month,status,table_year,rates_json,created_at,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?)').run(tid, month, 'draft', t.year, JSON.stringify(rates), now(), by(user), now()); run = db.prepare('SELECT * FROM payroll_runs WHERE id=?').get(Number(info.lastInsertRowid)); }
     else db.prepare('UPDATE payroll_runs SET table_year=?,rates_json=?,updated_at=? WHERE id=?').run(t.year, JSON.stringify(rates), now(), run.id);
+    try { db.prepare('UPDATE payroll_runs SET calc_at=? WHERE id=?').run(now(), run.id); } catch {}
     const staff = staffList(tid);
     const existing = new Map(db.prepare('SELECT * FROM payroll_items WHERE run_id=?').all(run.id).map(x => [x.staff_id, x]));
     tx(() => {
@@ -431,10 +432,19 @@ module.exports = function registerPayrollRoutes(app, d) {
     const t = tables.forMonth(monthTW());
     res.json({ runs, today_month: monthTW(), table: { year: t.year, exact: t.exact }, occupational_rate: occupationalRate(tid, t), show_employer_cost: showEmployerCost(tid), can_set_slip: isBoss(getUser(req)) });
   }));
+  // 出勤異常檢查：還沒處理的未打卡／缺卡、或處理（含加班核定）之後還沒重新計算
+  { const cols = db.prepare('PRAGMA table_info(payroll_runs)').all().map(c => c.name); if (cols.length && !cols.includes('calc_at')) db.exec("ALTER TABLE payroll_runs ADD COLUMN calc_at TEXT DEFAULT ''"); }
+  function attendanceCheck(tid, month, run) {
+    const W = typeof d.getWorkHours === 'function' ? d.getWorkHours() : null; if (!W) return null;
+    let pend = { count: 0, people: [] }; try { pend = W.pendingFor(tid, month); } catch (e) { console.warn('attendance check failed', e.message); return null; }
+    let last = ''; try { last = db.prepare("SELECT MAX(x) m FROM (SELECT MAX(decided_at) x FROM attendance_resolutions WHERE tenant_id=? AND substr(work_date,1,7)=? UNION ALL SELECT MAX(decided_at) x FROM attendance_ot_reviews WHERE tenant_id=? AND substr(work_date,1,7)=?)").get(tid, month, tid, month)?.m || ''; } catch {}
+    const calc = run?.calc_at || run?.updated_at || '';
+    return { pending: pend.count, people: pend.people, stale: !!(run && last && calc && last > calc) };
+  }
   app.get(`${C}/payroll/runs/:month`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     if (!isMonth(req.params.month)) return bad(res, '月份格式不正確');
     const run = db.prepare('SELECT * FROM payroll_runs WHERE tenant_id=? AND month=?').get(tenantId(req), req.params.month);
-    res.set('Cache-Control', 'no-store'); res.json({ run: runOut(run) });
+    res.set('Cache-Control', 'no-store'); res.json({ run: runOut(run), attendance: run && run.status !== 'published' ? attendanceCheck(tenantId(req), req.params.month, run) : null });
   }));
   app.post(`${C}/payroll/runs/:month/generate`, requireCompanyAdmin, guard(canPayroll), wrap((req, res) => {
     if (!isMonth(req.params.month)) return bad(res, '月份格式不正確');
@@ -463,6 +473,9 @@ module.exports = function registerPayrollRoutes(app, d) {
     const tid = tenantId(req); const u = getUser(req);
     const run = db.prepare('SELECT * FROM payroll_runs WHERE tenant_id=? AND month=?').get(tid, req.params.month);
     if (!run) return bad(res, '請先產生這個月份的薪資'); if (run.status === 'published') return bad(res, '已經發布過了');
+    const A = attendanceCheck(tid, run.month, run);
+    if (A?.pending) return bad(res, `本月還有 ${A.pending} 筆出勤異常（排班日未打卡、缺卡）尚未處理：${A.people.slice(0, 8).join('、')}${A.people.length > 8 ? ' 等' : ''}。請到「出勤與巡邏 → 出勤工時與加班 → 出勤異常」處理（確認曠職或不扣薪），再按「重新計算」後發布。`, 409);
+    if (A?.stale) return bad(res, '出勤異常或加班核定在薪資計算之後有變更，請先按「重新計算」再發布，金額才會正確。', 409);
     const items = db.prepare('SELECT * FROM payroll_items WHERE run_id=?').all(run.id);
     if (!items.length) return bad(res, '沒有任何人員的薪資資料');
     tx(() => {
