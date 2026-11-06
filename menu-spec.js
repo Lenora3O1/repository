@@ -32,6 +32,15 @@ COMPANY.push({ parent: null, children: [{ id: 'company-interviews', label: '面�
 COMPANY.push({ parent: null, children: [{ id: 'company-work-journal', label: '工作日誌管理', action: 'work-journal', exact: ['工作日誌管理', '工作日誌', '日誌管理'], after: 'company-templates', icon: '📝' }] });
 // 保全勤務日誌：現場「勤務日誌」（每一班交接點收、紀錄、交班送出），公司「勤務日誌管理」（唯讀副本）
 COMPANY.push({ parent: null, children: [{ id: 'company-duty-logs', label: '勤務日誌管理', action: 'duty-logs', exact: ['勤務日誌管理'], after: 'company-work-journal', icon: '🛡️' }] });
+// 班表：「人員班表」看每個人在哪些社區上班、哪天休假；原「社區班表」其實是規則設定，改名「班表規則」放最後（裡面再分社區、人員）
+COMPANY.push({ parent: { id: 'company-schedule', label: '班表', labels: ['班表'], icon: '📅', action: 'schedule' }, children: [
+  { id: 'company-schedule-month', label: '月班表', action: 'schedule-month', exact: ['月班表'] },
+  { id: 'company-schedule-staff', label: '人員班表', action: 'schedule-staff', exact: ['人員班表'] },
+  { id: 'company-schedule-swap', label: '換班紀錄', action: 'schedule-swap', exact: ['換班紀錄'] },
+  { id: 'company-schedule-leave', label: '請假／代班', action: 'schedule-leave', exact: ['請假／代班'] },
+  { id: 'company-schedule-overtime', label: '加班', action: 'schedule-overtime', exact: ['加班'] },
+  { id: 'company-schedule-community', label: '班表規則', action: 'schedule-community', exact: ['社區班表', '班表規則'], rename: ['社區班表'] },
+] });
 // 出勤與巡邏：出勤（打卡點設定、紀錄、補打卡）與巡邏（巡邏點設定、紀錄）分開排列，名稱直接說明用途
 COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', labels: ['出勤與巡邏'], icon: '📍', action: 'attendance' }, children: [
   { id: 'company-attendance-locations', label: '出勤打卡點設定', action: 'attendance-locations', exact: ['出勤打卡'], rename: ['出勤打卡'] },
