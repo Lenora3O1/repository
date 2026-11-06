@@ -4,7 +4,7 @@
 // - 沒有的項目：新增到母目錄底下。
 'use strict';
 
-const VERSION = 16;
+const VERSION = 17;
 const COMPANY = [
   { parent: { id: 'company-general-affairs', label: '總務管理', labels: ['總務管理', '總務'], icon: '📦', action: 'company-resources' }, children: [
     { id: 'company-equip-inventory', label: '設備清冊', action: 'equip-inventory', match: ['設備清冊'] },
@@ -45,6 +45,7 @@ COMPANY.push({ parent: { id: 'company-schedule', label: '班表', labels: ['班�
 COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', labels: ['出勤與巡邏'], icon: '📍', action: 'attendance' }, children: [
   { id: 'company-attendance-locations', label: '出勤打卡點設定', action: 'attendance-locations', exact: ['出勤打卡'], rename: ['出勤打卡'] },
   { id: 'company-attendance-records', label: '出勤紀錄', action: 'attendance-records', exact: ['出勤紀錄'] },
+  { id: 'company-attendance-hours', label: '出勤工時與加班', action: 'attendance-hours', exact: ['出勤工時與加班', '出勤工時報表'] },
   { id: 'company-punch-fix', label: '補打卡審核', action: 'punch-fix', exact: ['補打卡審核'] },
   { id: 'company-patrol-management', label: '巡邏點設定', action: 'patrol-management', exact: ['巡邏管理'], rename: ['巡邏管理'] },
   { id: 'company-patrol-records', label: '巡邏紀錄', action: 'patrol-records', exact: ['巡邏紀錄'] },
@@ -52,6 +53,8 @@ COMPANY.push({ parent: { id: 'company-attendance', label: '出勤與巡邏', lab
 // 資安中心：被鎖住的帳號、兩步驟驗證、敏感資料查看紀錄（只給老闆、總經理、公司管理員）
 COMPANY.push({ parent: null, children: [{ id: 'company-security', label: '資安中心', action: 'security-center', exact: ['資安中心'], after: 'company-plan', icon: '🔐' }] });
 const STAFF = [
+  // 補休：可用時數、期限、加班紀錄、申請補休
+  { parent: { id: 'staff-schedule', label: '班表', labels: ['班表'], icon: '📅', action: 'staff-schedule' }, keepOrder: true, children: [{ id: 'staff-comp-time', label: '補休', action: 'staff-comp-time', exact: ['補休', '補休查詢'] }] },
   { parent: null, children: [{ id: 'staff-duty-log', label: '勤務日誌', action: 'duty-log', exact: ['勤務日誌'], after: 'work-journal', icon: '🛡️' }] },
   // 社區資訊：社區名稱、代表地址、棟別門牌（同時服務多個社區的人，看的是目前選擇的社區）
   { parent: null, children: [{ id: 'staff-community-info', label: '社區資訊', action: 'community-info', exact: ['社區資訊', '社區基本資料'], after: 'residents', icon: '🏢' }] },

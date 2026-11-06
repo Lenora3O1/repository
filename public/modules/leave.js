@@ -99,7 +99,9 @@
   async function renderApply(box){
     const m=S.meta;const T0=m.types[0];
     // 特休還沒有天數（人事未登記到職日、或已用完）時，預設改選下一個假別，避免一打開就看到錯誤
-    const defKey=(T0?.key!=='annual'||(m.balances?.annual?.days&&m.balances.annual.left>0))?T0?.key:(m.types.find(t=>t.key!=='annual')||T0)?.key;
+    // 從「補休」頁按「申請補休」過來：預先選好補休
+    let preset='';try{preset=sessionStorage.getItem('leave.preset')||'';sessionStorage.removeItem('leave.preset');}catch{}
+    const defKey=preset&&m.types.some(t=>t.key===preset)?preset:(T0?.key!=='annual'||(m.balances?.annual?.days&&m.balances.annual.left>0))?T0?.key:(m.types.find(t=>t.key!=='annual')||T0)?.key;
     box.innerHTML=`${balanceCards(m.balances,m.hours_per_day)}
       ${m.gender_missing?'<div class="lv-prev err" style="margin-bottom:10px">人事資料尚未登記您的性別，生理假、產假、產檢假暫時無法選擇；如需申請請洽人事。</div>':''}
       <form class="lv-form" id="lvForm">

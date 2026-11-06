@@ -497,9 +497,14 @@ async function handleWorkspaceMenu(e){
     try{if(!window.CoverModule)throw new Error('班表模組尚未載入，請重新整理頁面');if(action==='staff-schedule-rules')await window.CoverModule.renderMyRule($('staffHome'),{base:'/api/staff',label:L});else await window.CoverModule.renderOvertime($('staffHome'),{base:'/api/staff',side:'staff',label:L});}catch(err){showWorkspaceError(L,err);}
     return;
   }
+  if(action==='staff-comp-time'||(!action||action==='placeholder')&&String(label||'').trim()==='補休'){
+    showWorkspaceLoading(label||'補休');
+    try{if(!window.CompTimeStaff)throw new Error('補休模組尚未載入，請重新整理頁面');await window.CompTimeStaff.render($('staffHome'),{label:label||'補休'});}catch(err){showWorkspaceError(label||'補休',err);}
+    return;
+  }
   if(action==='staff-schedule-leave'||action==='staff-leave'||(!action||action==='placeholder')&&String(label||'').trim()==='請假'){
     showWorkspaceLoading(label||'請假');
-    try{if(!window.LeaveModule)throw new Error('請假模組尚未載入，請重新整理頁面');await window.LeaveModule.render($('staffHome'),{base:'/api/staff',side:'staff',label:label||'請假／代班',withCover:true});}catch(err){showWorkspaceError(label||'請假',err);}
+    try{if(!window.LeaveModule)throw new Error('請假模組尚未載入，請重新整理頁面');let pre='';try{pre=sessionStorage.getItem('leave.preset')||'';}catch{}await window.LeaveModule.render($('staffHome'),{base:'/api/staff',side:'staff',label:label||'請假／代班',withCover:true,...(pre?{tab:'apply'}:{})});}catch(err){showWorkspaceError(label||'請假',err);}
     return;
   }
   if(action==='todo'){

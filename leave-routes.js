@@ -79,7 +79,12 @@ module.exports = function registerLeaveRoutes(app, d) {
   }
   // 這筆加班要換補休還是給錢
   function otChoice(o, p) { const T = (p.overtime_types || []).find(x => x.id === o.ot_type); if (o.comp_choice === 'comp' || o.comp_choice === 'pay') return o.comp_choice; if (T) return T.comp === 'comp' ? 'comp' : 'pay'; return p.overtime_mode === 'comp' ? 'comp' : 'pay'; }
-  function compBalance(tid, sid, year, hpd, exclude = 0) {
+  // 換補休的加班（給補休期限計算用）、已請的補休
+  function compCredits(tid, sid) { const p = policyFor(tid); return otRows(tid, sid, '0000-01-01', '9999-12-31').filter(o => otChoice(o, p) === 'comp'); }
+  function compUses(tid, sid, exclude = 0) { return activeEntries(tid, sid, { exclude }).filter(e => e.type === 'comp'); }
+  function compBalance(tid, sid, year, hpd, exclude = 0, date = '') {
+    // 有工時模組時：依補休期限（先到期先用）計算請假當天可用的時數
+    if (hooks.compAvailableOn) { try { return hooks.compAvailableOn(tid, sid, date || todayTW(), exclude); } catch (e) { console.error('[補休]', e.message); } }
     const p = policyFor(tid);
     const ot = otRows(tid, sid, `${year}-01-01`, `${year}-12-31`).filter(o => otChoice(o, p) === 'comp').reduce((a, o) => a + (Number(o.hours) || 0), 0);
     const used = sumH(activeEntries(tid, sid, { exclude }).filter(e => e.type === 'comp' && e.d.startsWith(String(year))));
@@ -130,7 +135,7 @@ module.exports = function registerLeaveRoutes(app, d) {
       const used = sumH(inYear(others, y, [T.key])); const need = sumH(entries.filter(e => e.d.startsWith(y)));
       if (used + need > T.quota * hpd + 1e-9) throw err(`${T.name}一年最多 ${T.quota} 日，${y} 年已請 ${fmt(used, hpd)}`);
     }
-    if (T.key === 'comp') { const y = entries[0].d.slice(0, 4); const bal = compBalance(tid, user.id, y, hpd, exclude); if (sumH(entries) > bal + 1e-9) throw err(`補休時數不足：剩 ${bal} 小時`); }
+    if (T.key === 'comp') { const y = entries[0].d.slice(0, 4); const bal = compBalance(tid, user.id, y, hpd, exclude, entries.map(e => e.d).sort()[0]); if (sumH(entries) > bal + 1e-9) throw err(`補休時數不足：剩 ${bal} 小時`); }
     return warnings;
   }
 
@@ -580,5 +585,5 @@ module.exports = function registerLeaveRoutes(app, d) {
     return { used: r2(sumH(l.filter(e => e.status === 'approved')) / hpd), pending: r2(sumH(l.filter(e => e.status === 'pending')) / hpd) };
   }
   if (payroll?.setLeaveHooks) payroll.setLeaveHooks({ forMonth, annualUsed });
-  return { forMonth, annualUsed, policyFor, sweep, typesFor, setHooks: h => { hooks = { ...hooks, ...h }; } };
+  return { forMonth, annualUsed, policyFor, sweep, typesFor, otChoice, compCredits, compUses, setHooks: h => { hooks = { ...hooks, ...h }; } };
 };
