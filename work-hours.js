@@ -26,6 +26,10 @@ const DEFAULTS = {
   remind_min: 30,                  // 下班後超過幾分鐘列入「待核定」
   unit_min: 30,                    // 加班計算單位（分鐘），不足一單位不計
   comp_expiry: 'year_end',         // 補休期限：year_end 當年度底、6m 六個月、1y 一年
+  late_mode: 'none',               // 遲到早退：none 不扣薪也不影響全勤、attendance 只影響全勤獎金、prorate 依分鐘比例扣薪
+  late_grace_min: 0,               // 寬限分鐘（在寬限內不算遲到早退）
+  wage_basis_admin: 'month30',     // 行政職日薪：month30 月薪÷30、workdays 月薪÷當月應出勤日
+  wage_basis_guard: 'scheduled',   // 保全日薪：scheduled 月薪÷當月排班天數、month30 月薪÷30
 };
 const hm = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 const pad = n => String(n).padStart(2, '0');
@@ -38,6 +42,7 @@ module.exports = function registerWorkHours(app, d) {
   CREATE TABLE IF NOT EXISTS attendance_ot_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, staff_id INTEGER NOT NULL, work_date TEXT NOT NULL, kind TEXT NOT NULL,
     status TEXT NOT NULL, hours REAL NOT NULL DEFAULT 0, ot_type TEXT DEFAULT '', comp_choice TEXT DEFAULT '', reason TEXT DEFAULT '', overtime_id INTEGER, community_id INTEGER,
     decided_by TEXT DEFAULT '', decided_at TEXT NOT NULL, UNIQUE(tenant_id,staff_id,work_date,kind));
+  CREATE TABLE IF NOT EXISTS attendance_resolutions (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, staff_id INTEGER NOT NULL, work_date TEXT NOT NULL, issue TEXT NOT NULL, action TEXT NOT NULL, reason TEXT DEFAULT '', decided_by TEXT DEFAULT '', decided_at TEXT NOT NULL, UNIQUE(tenant_id,staff_id,work_date));
   CREATE TABLE IF NOT EXISTS comp_payouts (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, staff_id INTEGER NOT NULL, credit_id INTEGER, hours REAL NOT NULL, overtime_id INTEGER, note TEXT DEFAULT '', created_by TEXT DEFAULT '', created_at TEXT NOT NULL);
   `);
   { const cols = db.prepare('PRAGMA table_info(attendance_records)').all().map(c => c.name); if (cols.length && !cols.includes('chain_hash')) db.exec("ALTER TABLE attendance_records ADD COLUMN chain_hash TEXT DEFAULT ''"); }
@@ -81,6 +86,10 @@ module.exports = function registerWorkHours(app, d) {
       remind_min: Math.max(1, Math.min(240, Math.round(Number(b.remind_min ?? cur.remind_min) || 30))),
       unit_min: [1, 15, 30, 60].includes(Number(b.unit_min ?? cur.unit_min)) ? Number(b.unit_min ?? cur.unit_min) : 30,
       comp_expiry: ['year_end', '6m', '1y'].includes(b.comp_expiry ?? cur.comp_expiry) ? (b.comp_expiry ?? cur.comp_expiry) : 'year_end',
+      late_mode: ['none', 'attendance', 'prorate', 'both'].includes(b.late_mode ?? cur.late_mode) ? (b.late_mode ?? cur.late_mode) : 'none',
+      late_grace_min: Math.max(0, Math.min(60, Math.round(Number(b.late_grace_min ?? cur.late_grace_min) || 0))),
+      wage_basis_admin: ['month30', 'workdays'].includes(b.wage_basis_admin ?? cur.wage_basis_admin) ? (b.wage_basis_admin ?? cur.wage_basis_admin) : 'month30',
+      wage_basis_guard: ['scheduled', 'month30'].includes(b.wage_basis_guard ?? cur.wage_basis_guard) ? (b.wage_basis_guard ?? cur.wage_basis_guard) : 'scheduled',
     };
   }
 
@@ -148,6 +157,9 @@ module.exports = function registerWorkHours(app, d) {
     const reviews = new Map(db.prepare('SELECT * FROM attendance_ot_reviews WHERE tenant_id=? AND work_date BETWEEN ? AND ?').all(tid, days[0], days[days.length - 1]).map(r => [`${r.staff_id}|${r.work_date}|${r.kind}`, r]));
     const unit = cfg.unit_min, remind = cfg.remind_min, NORMAL = cfg.normal_hours * 60;
     const hires = new Map(db.prepare('SELECT staff_id,hire_date FROM hr_profiles WHERE tenant_id=?').all(tid).map(r => [r.staff_id, r.hire_date || '']));
+    // 只有「有在用打卡」的人才會產生出勤異常：近 3 個月打過卡，或駐點社區有設定出勤打卡點（沒在用打卡的公司不會被擋住發薪）
+    const recentPunch = new Set(db.prepare("SELECT DISTINCT staff_id FROM attendance_records WHERE tenant_id=? AND record_type IN ('checkin','checkout') AND recorded_at>=?").all(tid, new Date(twMs(days[0], 0) - 62 * 864e5).toISOString()).map(r => r.staff_id));
+    const punchSites = new Set(db.prepare("SELECT DISTINCT community_id FROM attendance_locations WHERE tenant_id=? AND location_type='attendance' AND is_active=1").all(tid).map(r => r.community_id));
     // 休假日的種類：週日＝例假日、週六＝休息日、平日的紅字＝國定假日（排班制的人以班表的休假為準，一律視為休息日，除非是國定假日）
     const dayKind = (date, isRed) => { const w = new Date(`${date}T00:00:00Z`).getUTCDay(); if (isRed && w !== 0 && w !== 6) return 'holiday'; if (w === 0) return 'regular'; if (w === 6) return 'rest'; return isRed ? 'holiday' : 'rest'; };
     const KIND_LABEL = { holiday: '國定假日', regular: '例假日', rest: '休息日' };
@@ -161,6 +173,7 @@ module.exports = function registerWorkHours(app, d) {
       if (scope && !sites.some(c => scope.has(c)) && !(recBy.get(u.id) || []).some(r => scope.has(r.community_id))) continue;
       const mine = recBy.get(u.id) || []; const used = new Set();
       const startDay = hires.get(u.id) || ''; const acctDay = String(u.created_at || '').slice(0, 10);
+      const usesPunch = recentPunch.has(u.id) || (m?.sites || []).some(c => punchSites.has(Number(c)));
       const rows = []; const T = { work_days: 0, normal_min: 0, sched_ot_min: 0, approved_ot_h: 0, pending_ot_min: 0, late_count: 0, late_min: 0, early_count: 0, early_min: 0, missing: 0, absent: 0, leave_h: 0, rest_work_days: 0, fix_count: 0 };
       for (const date of days) {
         const e = entBy.get(`${u.id}|${date}`); const lv = leaveBy.get(`${u.id}|${date}`);
@@ -209,10 +222,10 @@ module.exports = function registerWorkHours(app, d) {
             if (row.late_min > 0 && !lv) { row.status.push(`遲到 ${row.late_min} 分`); T.late_count++; T.late_min += row.late_min; }
             if (row.early_min > 0 && !lv) { row.status.push(`早退 ${row.early_min} 分`); T.early_count++; T.early_min += row.early_min; }
             if (row.over_min >= remind) row.ot = otState(reviews.get(`${u.id}|${date}|after`), 'after', floorUnit(row.over_min), co, sh);
-          } else if (ci || co) { row.status.push(ci ? '缺下班卡' : '缺上班卡'); T.missing++; }
+          } else if (ci || co) { row.status.push(ci ? '缺下班卡' : '缺上班卡'); T.missing++; if (date <= todayTW() && usesPunch) row.issue = 'missing'; }
           else if (fullLeave) row.status.push('請假');
           else if (acctDay && date < acctDay) row.status.push('帳號尚未建立');
-          else if (date <= todayTW()) { row.status.push(lv ? '部分請假・未打卡' : '未打卡'); if (!lv) T.absent++; }
+          else if (date <= todayTW()) { row.status.push(lv ? '部分請假・未打卡' : '未打卡'); if (!lv) T.absent++; if (usesPunch) row.issue = 'absent'; }
           if (unscheduled) row.status.push('未排班');
         } else {
           // 休假日（含國定假日）有打卡：列為休假日出勤，待主管核定
@@ -229,7 +242,7 @@ module.exports = function registerWorkHours(app, d) {
       }
       // 沒有被配對到的打卡（例如重複打卡）也列出，避免遺漏
       const extra = mine.filter(r => !used.has(r.id) && twLocal(r._ms).date.startsWith(month)).map(r => ({ date: twLocal(r._ms).date, ...punchOut(r, locs) }));
-      out.push({ staff_id: u.id, employee_id: u.employee_id, name: u.name, position: m?.position?.name || '', group: g, group_name: g === 'guard' ? '保全' : '行政',
+      out.push({ staff_id: u.id, employee_id: u.employee_id, name: u.name, position: m?.position?.name || '', group: g, scheduled: hasSched.has(u.id), group_name: g === 'guard' ? '保全' : '行政',
         communities: [...new Set((m?.sites || []).map(c => comms.get(Number(c))).filter(Boolean))], default_shift: shiftFor(cfg, u.id, m, '')?.name || '',
         totals: { ...T, normal_h: r2(T.normal_min / 60), sched_ot_h: r2(T.sched_ot_min / 60), approved_ot_h: r2(T.approved_ot_h), pending_ot_h: r2(T.pending_ot_min / 60), leave_h: r2(T.leave_h) }, days: rows, extra_punches: extra });
     }
@@ -393,5 +406,58 @@ module.exports = function registerWorkHours(app, d) {
     res.json({ success: true, hours: L.expired_unpaid });
   }));
 
-  return { compute, settings, compLedger, compAvailableOn, seal, verify };
+  // ---------- 出勤異常（未打卡、缺卡）：主管處理後才能發布薪資 ----------
+  // 處理方式：absent 確認曠職（扣當天日薪、取消全勤）、excused 不扣薪（有上班但忘了打卡、公出等，需填原因）
+  // 員工補打卡或補請假核准後，這一天就不再是異常，會自動從清單消失
+  // 薪資一次算全公司時會逐人呼叫：整個月的計算結果暫存 3 秒，避免重複讀取
+  const memo = new Map();
+  function computeAll(tid, month) { const k = `${tid}|${month}`; const m = memo.get(k); if (m && Date.now() - m.at < 3000) return m.r; const r = compute(tid, month); memo.set(k, { at: Date.now(), r }); if (memo.size > 50) memo.delete(memo.keys().next().value); return r; }
+  function exceptions(tid, month, opts = {}) {
+        const r = opts.useMemo ? computeAll(tid, month) : compute(tid, month, opts);
+    const res = new Map(db.prepare('SELECT * FROM attendance_resolutions WHERE tenant_id=? AND work_date BETWEEN ? AND ?').all(tid, `${month}-01`, `${month}-31`).map(x => [`${x.staff_id}|${x.work_date}`, x]));
+    const out = [];
+    for (const p of r.people) { if (opts.useMemo && opts.staffId && p.staff_id !== opts.staffId) continue; for (const x of p.days) if (x.issue) {
+      const rv = res.get(`${p.staff_id}|${x.date}`);
+      out.push({ staff_id: p.staff_id, employee_id: p.employee_id, name: p.name, position: p.position, group: p.group, date: x.date, weekday: x.weekday, issue: x.issue, issue_label: x.issue === 'missing' ? (x.in ? '缺下班卡' : '缺上班卡') : '排班日沒有打卡、也沒有請假', shift: x.shift?.name || '', in: x.in, out: x.out, leave: x.leave,
+        status: rv ? rv.action : 'pending', reason: rv?.reason || '', decided_by: rv?.decided_by || '', decided_at: rv?.decided_at || '', resolution_id: rv?.id || null });
+    } }
+    return { cfg: r.cfg, people: opts.useMemo && opts.staffId ? r.people.filter(p => p.staff_id === opts.staffId) : r.people, items: out };
+  }
+  const payrollPublished = (tid, month) => { try { return !!db.prepare("SELECT 1 FROM payroll_runs WHERE tenant_id=? AND month=? AND status='published'").get(tid, month); } catch { return false; } };
+  app.get(`${C}/exceptions`, requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canView(u)) throw err('沒有權限', 403); const tid = tenantId(req); const f = filters(req);
+    const e = exceptions(tid, f.month, f); res.set('Cache-Control', 'no-store');
+    res.json({ month: f.month, items: e.items, pending: e.items.filter(x => x.status === 'pending').length, published: payrollPublished(tid, f.month) });
+  }));
+  app.post(`${C}/exceptions`, requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canView(u)) throw err('沒有權限', 403); const tid = tenantId(req); const b = req.body || {};
+    const sid = Number(b.staff_id), date = str(b.date, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw err('日期不正確');
+    if (payrollPublished(tid, date.slice(0, 7))) throw err('這個月份的薪資已經發布，請先撤回發布再處理');
+    const e = exceptions(tid, date.slice(0, 7), { staffId: sid, scope: scopeOf(u) }).items.find(x => x.date === date); if (!e) throw err('這一天沒有出勤異常（可能已補打卡或補請假）');
+    const action = b.action === 'absent' ? 'absent' : b.action === 'excused' ? 'excused' : ''; if (!action) throw err('請選擇處理方式');
+    const reason = str(b.reason, 200); if (action === 'excused' && !reason) throw err('「不扣薪」請填寫原因（例如：有上班但忘了打卡、公出）');
+    db.prepare('INSERT INTO attendance_resolutions (tenant_id,staff_id,work_date,issue,action,reason,decided_by,decided_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,staff_id,work_date) DO UPDATE SET issue=excluded.issue,action=excluded.action,reason=excluded.reason,decided_by=excluded.decided_by,decided_at=excluded.decided_at').run(tid, sid, date, e.issue, action, reason, by(u), now()); memo.clear();
+    res.json({ success: true });
+  }));
+  app.post(`${C}/exceptions/:id/undo`, requireCompanyAdmin, wrap((req, res) => {
+    const u = getUser(req); if (!canView(u)) throw err('沒有權限', 403); const tid = tenantId(req);
+    const r = db.prepare('SELECT * FROM attendance_resolutions WHERE id=? AND tenant_id=?').get(Number(req.params.id), tid); if (!r) throw err('找不到紀錄', 404);
+    if (payrollPublished(tid, r.work_date.slice(0, 7))) throw err('這個月份的薪資已經發布，請先撤回發布');
+    db.prepare('DELETE FROM attendance_resolutions WHERE id=?').run(r.id); memo.clear(); res.json({ success: true });
+  }));
+  // 給薪資計算用：某人某月的曠職、遲到早退、日薪基準
+  function payrollIssues(tid, u, month) {
+    const e = exceptions(tid, month, { staffId: u.id, useMemo: true }); const p = e.people[0]; if (!p) return null; const cfg = e.cfg;
+    const workDays = p.days.filter(x => x.plan === 'work' && x.shift).length;
+    // 保全用「當月排班天數」需要有排班表；沒有排班的人改用月薪÷30
+    const basis = p.group === 'guard' ? (cfg.wage_basis_guard === 'scheduled' && p.scheduled && workDays ? 'scheduled' : 'month30') : cfg.wage_basis_admin;
+    const g = cfg.late_grace_min; let lateCount = 0, lateMin = 0; const lateDates = [];
+    for (const x of p.days) { const m = (x.late_min > g ? x.late_min : 0) + (x.early_min > g ? x.early_min : 0); if (m > 0 && !x.leave) { lateCount++; lateMin += m; lateDates.push(x.date.slice(5)); } }
+    const shiftMin = (() => { const x = p.days.find(d => d.shift); if (!x) return cfg.normal_hours * 60; const s = x.shift; const [a, b] = [s.start, s.end].map(t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3))); return ((b - a + 1440) % 1440) - s.break_min; })();
+    return { group: p.group, basis, scheduled_days: workDays, absent: e.items.filter(x => x.staff_id === u.id && x.status === 'absent').map(x => x.date), pending: e.items.filter(x => x.staff_id === u.id && x.status === 'pending').map(x => x.date), late_mode: cfg.late_mode, late_count: lateCount, late_min: lateMin, late_dates: lateDates, day_minutes: shiftMin };
+  }
+  // 給薪資發布前檢查：這個月還沒處理的出勤異常
+  function pendingFor(tid, month) { const e = exceptions(tid, month); const items = e.items.filter(x => x.status === 'pending'); return { count: items.length, people: [...new Set(items.map(x => x.name))] }; }
+
+  return { compute, settings, compLedger, compAvailableOn, seal, verify, payrollIssues, pendingFor };
 };

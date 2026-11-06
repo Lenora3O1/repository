@@ -2856,7 +2856,7 @@ app.post('/api/staff/schedule/self-select',requireStaffFiller,(req,res)=>{try{
 
 // ===== 工作日誌（每日／每週）：路由在 journal-routes.js =====
 // ===== 人事管理、借資、人員薪資統計表、人員薪資單、投保級距表 =====
-const payroll=require('./payroll-routes')(app,{org:orgApi,LI,db,fs,path,DATA_DIR,XLSX,getUser,tenantId,now,effectivePermissions,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments});
+const payroll=require('./payroll-routes')(app,{getWorkHours:()=>workHoursApi,org:orgApi,LI,db,fs,path,DATA_DIR,XLSX,getUser,tenantId,now,effectivePermissions,requireStaff,requireCompanyAdmin,requireSuperAdmin,getSiteAssignments});
 // ===== 組織架構（職位、區域、上下級）與帳號密碼 =====
 orgApi=require('./org-routes')(app,{db,LI,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,requireSuperAdmin,getSiteAssignments,syncWorkAssignments,guardSensitivePermissions,parsePermissions,PERMISSION_LABELS:STAFF_PERMISSION_LABELS,COMPANY_KEYS:COMPANY_PERMISSION_KEYS,SITE_KEYS:SITE_PERMISSION_KEYS});
 require('./account-routes')(app,accountDeps);
@@ -2871,7 +2871,7 @@ require('./duty-routes')(app,{companyCommunityScope:u=>companyCommunityScope(u),
 // ===== 代班／調假／加班（依組織架構調度，連動班表與薪資）=====
 // 出勤工時：每日工時計算、出勤工時報表、核定加班、補休期限
 const workHoursApi=require('./work-hours')(app,{db,getUser,tenantId,now,requireCompanyAdmin,requireCompanyPermission,requireStaff,getOrg:()=>orgApi,getLeave:()=>leaveApi,redDates:y=>SCHEDULE_HOLIDAY_CACHE.get(Number(y))||scheduleFallbackRedDates(y),scopeOf:companyCommunityScope,hasPermission:(u,k)=>effectivePermissions(u).includes(k)});
-leaveApi.setHooks({compAvailableOn:workHoursApi.compAvailableOn});
+leaveApi.setHooks({compAvailableOn:workHoursApi.compAvailableOn,attendanceIssues:workHoursApi.payrollIssues});
 {const y=new Date().getFullYear();for(const yy of [y-1,y,y+1])scheduleTaiwanHolidayDates(yy).catch(()=>{});}
 coverApi=require('./cover-routes')(app,{db,getUser,tenantId,now,requireStaff,requireCompanyAdmin,getSiteAssignments,org:orgApi,leave:leaveApi,sched:{redDates:y=>{const c=SCHEDULE_HOLIDAY_CACHE.get(Number(y));return c||scheduleFallbackRedDates(y);},platformRules:schedulePlatformRules,effectiveRule:scheduleEffectiveRule,getProfile:scheduleGetProfile,defaultRole:scheduleDefaultRole}});
 // ===== 智慧月班表 =====

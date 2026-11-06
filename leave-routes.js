@@ -519,7 +519,10 @@ module.exports = function registerLeaveRoutes(app, d) {
     const allowSum = (allowances || []).reduce((a, x) => a + (Number(x.amount) || 0), 0);
     const W = Number(base) + (p.wage_includes_allowances ? allowSum : 0);
     const workdays = workDates(tid, u.id, first, last, false).length;
-    const denom = p.daily_wage_mode === 'workdays' && workdays ? workdays : 30;
+    let denom = p.daily_wage_mode === 'workdays' && workdays ? workdays : 30;
+    // 出勤工時模組：日薪基準依職務（行政：月薪÷30 或 ÷應出勤日；保全：月薪÷當月排班天數），並帶入曠職、遲到早退
+    let A = null; try { A = hooks.attendanceIssues ? hooks.attendanceIssues(tid, u, month) : null; } catch (e) { console.warn('attendance issues failed', e.message); }
+    if (A) denom = A.basis === 'scheduled' && A.scheduled_days ? A.scheduled_days : A.basis === 'workdays' && workdays ? workdays : 30;
     const daily = W / denom, hourly = daily / hpd;
     const types = typesFor({ ...p, overtime_mode: 'comp' });
     const reqs = db.prepare("SELECT * FROM leave_requests WHERE tenant_id=? AND staff_id=? AND status='approved' AND start_date<=? AND end_date>=?").all(tid, u.id, `${month.slice(0, 4)}-12-31`, `${month.slice(0, 4)}-01-01`);
@@ -549,6 +552,14 @@ module.exports = function registerLeaveRoutes(app, d) {
         if (att === 'all') attAll = true; else if (att === 'prorate') attHours += Number(e.h) || 0;
       }
     }
+    // 曠職：主管在「出勤異常」確認的日子，每天扣一日工資（不得另外罰款），並取消全勤獎金
+    const extraLines = [];
+    if (A && A.absent.length) { const amt = daily * A.absent.length; leave += amt; attAll = true; extraLines.push({ label: `曠職（${A.absent.map(d => d.slice(5)).join('、')}）`, type: 'absent', hours: A.absent.length * hpd, days: A.absent.length, amount: amt }); }
+    // 遲到早退：依公司設定，按分鐘比例扣薪，或只影響全勤獎金
+    if (A && A.late_count) {
+      if (A.late_mode === 'prorate' || A.late_mode === 'both') { const amt = daily * A.late_min / Math.max(60, A.day_minutes || hpd * 60); leave += amt; extraLines.push({ label: `遲到早退 ${A.late_count} 次（共 ${A.late_min} 分鐘）`, type: 'late', hours: Math.round(A.late_min / 60 * 100) / 100, amount: amt }); }
+      if (A.late_mode === 'attendance' || A.late_mode === 'both') attAll = true;
+    }
     let attendance = 0;
     if (p.attendance.enabled) { const A = (allowances || []).find(a => String(a.name || '').includes(p.attendance.name)); const amt = Number(A?.amount) || 0; if (amt) attendance = attAll ? amt : Math.min(amt, Math.round(amt * attHours / (denom * hpd))); }
     let overtime = 0, otHours = 0, otComp = 0; const otLines = new Map();
@@ -573,8 +584,8 @@ module.exports = function registerLeaveRoutes(app, d) {
     const sickH = sumH(yearSick.filter(e => e.type === 'sick')) + menstrualMerged(yearSick.filter(e => e.type === 'menstrual'), hpd);
     return {
       leave_deduct: Math.round(leave), attendance_deduct: attendance,
-      lines: [...lines.values()].map(l => ({ label: l.label, type: l.type, hours: r2(l.hours), length: fmt(l.hours, hpd), amount: Math.round(l.amount) })),
-      wage: { monthly: Math.round(W), daily: r2(daily), hourly: r2(hourly), denom, workdays, mode: p.daily_wage_mode, hours_per_day: hpd },
+      lines: [...[...lines.values()].map(l => ({ label: l.label, type: l.type, hours: r2(l.hours), length: fmt(l.hours, hpd), amount: Math.round(l.amount) })), ...extraLines.map(l => ({ label: l.label, type: l.type, hours: r2(l.hours), length: l.days ? `${l.days} 日` : `${A.late_min} 分鐘`, amount: Math.round(l.amount) }))],
+      wage: { monthly: Math.round(W), daily: r2(daily), hourly: r2(hourly), denom, workdays, mode: A ? A.basis : p.daily_wage_mode, hours_per_day: hpd },
       overtime_mode: p.overtime_mode, overtime_auto: p.overtime_auto, overtime: Math.round(overtime), overtime_lines: [...otLines.values()].map(l => ({ label: l.label, hours: r2(l.hours), amount: Math.round(l.amount) })), overtime_comp_hours: r2(otComp), overtime_label: p.overtime_mode === 'allowance' ? (p.overtime_allowance?.name || '支援費') : '加班費', overtime_hours: r2(otHours),
       sick_days_year: r2(sickH / hpd), attendance_enabled: p.attendance.enabled, attendance_name: p.attendance.name,
     };
